@@ -1,0 +1,49 @@
+{
+  "name": "server-hub",
+  "version": "1.0.0",
+  "description": "Local desktop manager for real dedicated game-server processes",
+  "private": true,
+  "main": "electron/main.cjs",
+  "author": "Server Hub contributors",
+  "license": "MIT",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "build:server": "next build && node scripts/prepare-standalone.mjs",
+    "desktop:dev": "npm run build:server && electron .",
+    "dist": "npm run build:server && electron-builder --config electron-builder.yml",
+    "dist:win": "npm run build:server && electron-builder --config electron-builder.yml --win nsis --x64",
+    "dist:win:portable": "npm run build:server && node scripts/build-windows-portable.mjs",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "adm-zip": "^0.6.1",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "0.45.2",
+    "framer-motion": "^13.4.4",
+    "lucide-react": "^1.48.0",
+    "next": "^16.3.6",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "tar": "^7.5.22"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.1.17",
+    "@types/adm-zip": "^0.5.8",
+    "@types/archiver": "^8.0.0",
+    "@types/node": "22.19.15",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "archiver": "^8.0.0",
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
+    "eslint": "9.39.4",
+    "eslint-config-next": "^16.3.6",
+    "postcss": "^8.5.28",
+    "postject": "^1.0.0-alpha.6",
+    "tailwindcss": "4.1.17",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,25 @@
+# dependencies and framework output
+node_modules/
+.next/
+build/
+dist/
+out/
+
+# local runtime state (never ship worlds, credentials, or databases)
+data/
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# downloaded game/runtime artifacts
+.serverhub/
+
+# editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# TypeScript
+*.tsbuildinfo

@@ -1,0 +1,261 @@
+import { DatabaseSync } from "node:sqlite";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import * as schema from "./schema";
+
+/**
+ * Server Hub database — embedded SQLite via Node's built-in `node:sqlite`.
+ * No external database server and no native modules to compile, so the panel
+ * ships as a single portable executable on every platform.
+ *
+ * Drizzle's `better-sqlite3` entrypoint statically imports the native package,
+ * so Next aliases it to `better-sqlite3-stub.ts` (see next.config.ts). We pass
+ * our own adapted client, so the stub is never instantiated.
+ */
+
+export function resolveDbPath(): string {
+  const override = process.env.SERVERHUB_DB;
+  if (override) return override;
+
+  if (process.versions.electron) {
+    const appData = process.env.SERVERHUB_APPDATA ?? path.join(os.homedir(), ".serverhub");
+    return path.join(appData, "serverhub.db");
+  }
+  return path.join(process.cwd(), "data", "serverhub.db");
+}
+
+export const dbPath = resolveDbPath();
+
+/** DDL that bootstraps the database — no separate migration step required. */
+const DDL = [
+  `CREATE TABLE IF NOT EXISTS servers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    game_id TEXT NOT NULL,
+    version TEXT NOT NULL,
+    loader TEXT NOT NULL DEFAULT 'vanilla',
+    status TEXT NOT NULL DEFAULT 'installing',
+    port INTEGER NOT NULL,
+    memory_mb INTEGER NOT NULL DEFAULT 4096,
+    max_players INTEGER NOT NULL DEFAULT 20,
+    motd TEXT NOT NULL DEFAULT '',
+    world_name TEXT NOT NULL DEFAULT 'world',
+    seed TEXT NOT NULL DEFAULT '',
+    difficulty TEXT NOT NULL DEFAULT 'normal',
+    pvp INTEGER NOT NULL DEFAULT 1,
+    launch_command TEXT NOT NULL DEFAULT '',
+    launch_args TEXT NOT NULL DEFAULT '',
+    working_directory TEXT NOT NULL DEFAULT '',
+    managed_directory INTEGER NOT NULL DEFAULT 1,
+    server_password TEXT NOT NULL DEFAULT '',
+    eula_accepted INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    last_started_at INTEGER
+  )`,
+  `CREATE TABLE IF NOT EXISTS console_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER NOT NULL,
+    ts INTEGER NOT NULL,
+    level TEXT NOT NULL DEFAULT 'info',
+    source TEXT NOT NULL DEFAULT 'Server',
+    message TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS logs_server_idx ON console_logs (server_id, id)`,
+  `CREATE TABLE IF NOT EXISTS players (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    is_online INTEGER NOT NULL DEFAULT 0,
+    is_op INTEGER NOT NULL DEFAULT 0,
+    is_banned INTEGER NOT NULL DEFAULT 0,
+    play_minutes INTEGER NOT NULL DEFAULT 0,
+    ping INTEGER NOT NULL DEFAULT 0,
+    first_seen INTEGER NOT NULL,
+    last_seen INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS players_server_idx ON players (server_id)`,
+  `CREATE TABLE IF NOT EXISTS backups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    size_mb INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'complete',
+    note TEXT NOT NULL DEFAULT '',
+    archive_path TEXT NOT NULL DEFAULT '',
+    checksum TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS backups_server_idx ON backups (server_id)`,
+  `CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    payload TEXT NOT NULL DEFAULT '',
+    interval_min INTEGER NOT NULL DEFAULT 360,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_run_at INTEGER,
+    next_run_at INTEGER,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS tasks_server_idx ON tasks (server_id)`,
+  `CREATE TABLE IF NOT EXISTS addons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL DEFAULT '1.0.0',
+    author TEXT NOT NULL DEFAULT 'unknown',
+    source TEXT NOT NULL DEFAULT 'Modrinth',
+    summary TEXT NOT NULL DEFAULT '',
+    downloads INTEGER NOT NULL DEFAULT 0,
+    project_id TEXT NOT NULL DEFAULT '',
+    file_path TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    installed_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS addons_server_idx ON addons (server_id)`,
+  `CREATE TABLE IF NOT EXISTS files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER NOT NULL,
+    path TEXT NOT NULL,
+    content TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS files_server_idx ON files (server_id)`,
+  `CREATE TABLE IF NOT EXISTS activity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER,
+    kind TEXT NOT NULL DEFAULT 'server',
+    message TEXT NOT NULL,
+    ts INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS activity_ts_idx ON activity (id)`,
+];
+
+/** A DatabaseSync exposing the small surface Drizzle's SQLite session expects. */
+export type SqliteClient = DatabaseSync & Record<string, unknown>;
+
+let raw: DatabaseSync | null = null;
+let wrapped: SqliteClient | null = null;
+
+const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
+  servers: {
+    launch_command: "TEXT NOT NULL DEFAULT ''",
+    launch_args: "TEXT NOT NULL DEFAULT ''",
+    working_directory: "TEXT NOT NULL DEFAULT ''",
+    managed_directory: "INTEGER NOT NULL DEFAULT 1",
+    server_password: "TEXT NOT NULL DEFAULT ''",
+    eula_accepted: "INTEGER NOT NULL DEFAULT 0",
+  },
+  backups: {
+    archive_path: "TEXT NOT NULL DEFAULT ''",
+    checksum: "TEXT NOT NULL DEFAULT ''",
+  },
+  addons: {
+    project_id: "TEXT NOT NULL DEFAULT ''",
+    file_path: "TEXT NOT NULL DEFAULT ''",
+  },
+};
+
+function migrate(db: DatabaseSync) {
+  for (const [table, columns] of Object.entries(ADDITIVE_MIGRATIONS)) {
+    const existing = new Set(
+      (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[]).map((column) => column.name)
+    );
+    for (const [name, declaration] of Object.entries(columns)) {
+      if (!existing.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${declaration}`);
+    }
+  }
+}
+
+function boot(db: DatabaseSync): DatabaseSync {
+  // Wait rather than failing when another process briefly holds the write lock.
+  db.exec("PRAGMA busy_timeout = 5000");
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA foreign_keys = ON");
+  for (const stmt of DDL) db.exec(stmt);
+  migrate(db);
+  return db;
+}
+
+function open(): DatabaseSync {
+  if (raw) return raw;
+  try {
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    raw = boot(new DatabaseSync(dbPath));
+  } catch (err) {
+    console.warn(`[serverhub] could not open ${dbPath} (${String(err)}), using an in-memory database`);
+    raw = boot(new DatabaseSync(":memory:"));
+  }
+  return raw;
+}
+
+export function sqliteClient(): SqliteClient {
+  if (wrapped) return wrapped;
+  const db = open() as SqliteClient;
+  const nativePrepare = db.prepare.bind(db) as unknown as (sql: string) => {
+    run: (...p: unknown[]) => unknown;
+    all: (...p: unknown[]) => unknown;
+    get: (...p: unknown[]) => unknown;
+    setReturnArrays: (v: boolean) => void;
+  };
+
+  db.prepare = ((sql: string) => {
+    const stmt = nativePrepare(sql);
+    return {
+      run: (...p: unknown[]) => stmt.run(...(p as never[])),
+      all: (...p: unknown[]) => stmt.all(...(p as never[])),
+      get: (...p: unknown[]) => stmt.get(...(p as never[])),
+      // Drizzle calls .raw() when it maps the result columns itself.
+      raw: () => ({
+        all: (...p: unknown[]) => {
+          stmt.setReturnArrays(true);
+          const rows = stmt.all(...(p as never[]));
+          stmt.setReturnArrays(false);
+          return rows;
+        },
+        get: (...p: unknown[]) => {
+          stmt.setReturnArrays(true);
+          const row = stmt.get(...(p as never[]));
+          stmt.setReturnArrays(false);
+          return row;
+        },
+      }),
+    };
+  }) as never;
+
+  // Not used by the app, but provided so Drizzle's transaction API resolves.
+  db.transaction = ((fn: (tx: unknown) => unknown) => {
+    const runner = (tx: unknown) => {
+      db.exec("BEGIN");
+      try {
+        const out = fn(tx);
+        db.exec("COMMIT");
+        return out;
+      } catch (e) {
+        db.exec("ROLLBACK");
+        throw e;
+      }
+    };
+    for (const b of ["deferred", "immediate", "exclusive", "readonly"] as const)
+      (runner as unknown as Record<string, unknown>)[b] = runner;
+    return runner;
+  }) as never;
+
+  wrapped = db;
+  return db;
+}
+
+export type Db = ReturnType<typeof drizzle<typeof schema>>;
+
+const g = globalThis as typeof globalThis & { __serverhubDb?: Db };
+
+export const db: Db = g.__serverhubDb ?? (drizzle(sqliteClient() as never, { schema }) as unknown as Db);
+
+if (process.env.NODE_ENV !== "production") g.__serverhubDb = db;
+
+export const sqlite = sqliteClient;

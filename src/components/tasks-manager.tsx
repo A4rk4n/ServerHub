@@ -1,0 +1,227 @@
+"use client";
+
+import { CalendarClock, DatabaseBackup, Megaphone, Play, Plus, RotateCw, Terminal, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import type { Task } from "@/db/schema";
+import { cn, hexA, timeAgo } from "@/lib/format";
+import { Btn, Empty, Field, Modal, Spin, Toggle, inputCls } from "./ui";
+
+const TYPE_META: Record<string, { label: string; icon: React.ComponentType<{ size?: number | string; className?: string }>; color: string; hint: string }> = {
+  restart: { label: "Restart", icon: RotateCw, color: "#f5b84c", hint: "Gracefully restarts the server" },
+  backup: { label: "Backup", icon: DatabaseBackup, color: "#38bdf8", hint: "Creates a world snapshot" },
+  command: { label: "Command", icon: Terminal, color: "#c084fc", hint: "Runs a console command" },
+  broadcast: { label: "Broadcast", icon: Megaphone, color: "#4ade80", hint: "Sends a message to chat" },
+};
+
+const INTERVALS = [
+  { label: "15 min", min: 15 },
+  { label: "30 min", min: 30 },
+  { label: "1 hour", min: 60 },
+  { label: "2 hours", min: 120 },
+  { label: "6 hours", min: 360 },
+  { label: "12 hours", min: 720 },
+  { label: "daily", min: 1440 },
+  { label: "weekly", min: 10080 },
+];
+
+function inTime(d: string | Date | null): string {
+  if (!d) return "—";
+  const ms = new Date(d).getTime() - Date.now();
+  if (ms <= 0) return "due now";
+  const min = Math.round(ms / 60000);
+  if (min < 60) return `in ${min}m`;
+  const h = Math.floor(min / 60);
+  if (h < 48) return `in ${h}h ${min % 60}m`;
+  return `in ${Math.round(h / 24)}d`;
+}
+
+function fmtInterval(min: number) {
+  return INTERVALS.find((i) => i.min === min)?.label ?? `${min}m`;
+}
+
+export function TasksManager({ serverId, accent }: { serverId: number; accent: string }) {
+  const [tasks, setTasks] = useState<Task[] | null>(null);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [form, setForm] = useState({ name: "", type: "backup", payload: "", intervalMin: 360 });
+
+  async function load() {
+    try {
+      const r = await fetch(`/api/servers/${serverId}/tasks`, { cache: "no-store" });
+      const j = await r.json();
+      if (j.tasks) setTasks(j.tasks);
+    } catch {}
+  }
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 8000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverId]);
+
+  async function create() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await fetch(`/api/servers/${serverId}/tasks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const j = await r.json();
+      if (!r.ok) return setErr(j.error ?? "Failed");
+      setOpen(false);
+      setForm({ name: "", type: "backup", payload: "", intervalMin: 360 });
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggle(t: Task) {
+    await fetch(`/api/servers/${serverId}/tasks/${t.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: !t.enabled }),
+    });
+    await load();
+  }
+
+  async function runNow(t: Task) {
+    await fetch(`/api/servers/${serverId}/tasks/${t.id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "run" }),
+    });
+    await load();
+  }
+
+  async function remove(t: Task) {
+    await fetch(`/api/servers/${serverId}/tasks/${t.id}`, { method: "DELETE" });
+    await load();
+  }
+
+  if (!tasks) return <Spin label="Loading schedules…" />;
+
+  const needsPayload = form.type === "command" || form.type === "broadcast";
+
+  return (
+    <div className="space-y-5">
+      <div className="panel flex items-center gap-3 p-4 sm:p-5">
+        <span className="flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: hexA(accent, 0.1), color: accent }}>
+          <CalendarClock size={18} />
+        </span>
+        <div className="mr-auto">
+          <p className="font-display text-[15px] font-semibold text-plum-900">Scheduler</p>
+          <p className="text-[12px] text-plum-500">{tasks.filter((t) => t.enabled).length} active · runs even while you sleep</p>
+        </div>
+        <Btn variant="primary" accent={accent} onClick={() => setOpen(true)}>
+          <Plus size={15} /> New task
+        </Btn>
+      </div>
+
+      {tasks.length === 0 ? (
+        <Empty icon={<CalendarClock size={22} />} title="Nothing scheduled" hint="Automate restarts, backups and announcements on a repeating interval." />
+      ) : (
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {tasks.map((t) => {
+            const meta = TYPE_META[t.type] ?? TYPE_META.command;
+            const Icon = meta.icon;
+            return (
+              <div key={t.id} className={cn("panel p-4 transition", !t.enabled && "opacity-60")}>
+                <div className="flex items-start gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style={{ background: hexA(meta.color, 0.1), color: meta.color }}>
+                    <Icon size={15} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-[14px] font-semibold text-plum-900">{t.name}</p>
+                      <span className="rounded px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wider" style={{ background: hexA(meta.color, 0.12), color: meta.color }}>
+                        {meta.label}
+                      </span>
+                    </div>
+                    {t.payload && <p className="mt-0.5 truncate font-mono text-[11px] text-plum-500">“{t.payload}”</p>}
+                    <p className="mt-1.5 text-[11.5px] text-plum-500">
+                      every {fmtInterval(t.intervalMin)} · next <span className="font-medium text-plum-700">{t.enabled ? inTime(t.nextRunAt) : "paused"}</span>
+                      {t.lastRunAt ? ` · last ${timeAgo(t.lastRunAt)}` : " · never run"}
+                    </p>
+                  </div>
+                  <Toggle checked={t.enabled} onChange={() => toggle(t)} accent={accent} />
+                </div>
+                <div className="mt-3 flex justify-end gap-1.5 border-t border-candy-200/60 pt-2.5">
+                  <button
+                    onClick={() => runNow(t)}
+                    className="flex items-center gap-1.5 rounded-lg border border-candy-200 bg-candy-50 px-2.5 py-1.5 text-[11px] font-semibold text-plum-700 transition hover:bg-candy-100"
+                  >
+                    <Play size={11} /> Run now
+                  </button>
+                  <button
+                    onClick={() => remove(t)}
+                    className="flex items-center gap-1.5 rounded-lg border border-candy-200 bg-candy-50 px-2.5 py-1.5 text-[11px] font-semibold text-plum-500 transition hover:border-red-300 hover:text-red-500"
+                  >
+                    <Trash2 size={11} /> Delete
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <Modal open={open} onClose={() => setOpen(false)} title="New scheduled task">
+        <div className="space-y-4">
+          <Field label="Task name">
+            <input className={inputCls} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Nightly backup" maxLength={48} />
+          </Field>
+          <Field label="Action">
+            <div className="grid grid-cols-2 gap-2">
+              {Object.entries(TYPE_META).map(([k, m]) => (
+                <button
+                  key={k}
+                  onClick={() => setForm({ ...form, type: k })}
+                  className={cn(
+                    "flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition",
+                    form.type === k ? "border-transparent text-plum-900" : "border-candy-200 text-plum-500 hover:border-candy-300"
+                  )}
+                  style={form.type === k ? { background: hexA(m.color, 0.1), borderColor: hexA(m.color, 0.5) } : undefined}
+                >
+                  <m.icon size={15} className={form.type === k ? "" : "text-plum-500" } />
+                  <span>
+                    <span className="block text-[12.5px] font-semibold">{m.label}</span>
+                    <span className="block text-[10px] text-plum-500">{m.hint}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </Field>
+          {needsPayload && (
+            <Field label={form.type === "command" ? "Console command" : "Broadcast message"}>
+              <input
+                className={cn(inputCls, "font-mono")}
+                value={form.payload}
+                onChange={(e) => setForm({ ...form, payload: e.target.value })}
+                placeholder={form.type === "command" ? "say Server restarting soon!" : "Build contest this weekend!"}
+                maxLength={120}
+              />
+            </Field>
+          )}
+          <Field label="Repeat every">
+            <select className={inputCls} value={form.intervalMin} onChange={(e) => setForm({ ...form, intervalMin: Number(e.target.value) })}>
+              {INTERVALS.map((i) => (
+                <option key={i.min} value={i.min} className="bg-white">{i.label}</option>
+              ))}
+            </select>
+          </Field>
+          {err && <p className="text-[12px] text-red-500">{err}</p>}
+          <div className="flex justify-end gap-2 pt-1">
+            <Btn variant="ghost" onClick={() => setOpen(false)}>Cancel</Btn>
+            <Btn variant="primary" accent={accent} onClick={create} loading={busy} disabled={!form.name.trim()}>
+              <Plus size={14} /> Create task
+            </Btn>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
