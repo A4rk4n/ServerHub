@@ -110,7 +110,7 @@ export async function POST(req: Request) {
       loader,
       status: "installing",
       port,
-      bindAddress: (body.bindAddress ?? "185.83.148.20").trim(),
+      bindAddress: (body.bindAddress ?? "192.168.1.210").trim(),
       readinessTimeoutSec: Math.min(300, Math.max(10, Math.round(body.readinessTimeoutSec ?? 60))),
       memoryMb,
       maxPlayers,

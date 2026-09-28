@@ -38,7 +38,7 @@ const DDL = [
     loader TEXT NOT NULL DEFAULT 'vanilla',
     status TEXT NOT NULL DEFAULT 'installing',
     port INTEGER NOT NULL,
-    bind_address TEXT NOT NULL DEFAULT '185.83.148.20',
+    bind_address TEXT NOT NULL DEFAULT '192.168.1.210',
     readiness_timeout_sec INTEGER NOT NULL DEFAULT 60,
     memory_mb INTEGER NOT NULL DEFAULT 4096,
     max_players INTEGER NOT NULL DEFAULT 20,
@@ -187,7 +187,7 @@ let wrapped: SqliteClient | null = null;
 
 const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
   servers: {
-    bind_address: "TEXT NOT NULL DEFAULT '185.83.148.20'",
+    bind_address: "TEXT NOT NULL DEFAULT '192.168.1.210'",
     readiness_timeout_sec: "INTEGER NOT NULL DEFAULT 60",
     launch_command: "TEXT NOT NULL DEFAULT ''",
     launch_args: "TEXT NOT NULL DEFAULT ''",
@@ -213,7 +213,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
   },
 };
 
-export const SCHEMA_VERSION = 2000;
+export const SCHEMA_VERSION = 2100;
 
 function migrate(db: DatabaseSync) {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -233,8 +233,12 @@ function migrate(db: DatabaseSync) {
         if (!existing.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${declaration}`);
       }
     }
+    // v2.1.1 corrects the deployment model: bind to the server PC's LAN
+    // interface while NAT exposes the separate fixed public address.
+    db.prepare("UPDATE servers SET bind_address = ? WHERE bind_address = ?")
+      .run("192.168.1.210", "185.83.148.20");
     db.prepare("INSERT INTO schema_migrations (version, applied_at, description) VALUES (?, ?, ?)")
-      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Server Hub v2.0.0 operations schema");
+      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Use the server PC LAN address for game binding");
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
