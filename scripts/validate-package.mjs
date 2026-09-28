@@ -31,7 +31,12 @@ export async function validateServerBundle(serverRoot) {
   const entries = await walk(serverRoot);
   for (const { absolute, relative, item } of entries) {
     const parts = relative.toLowerCase().split("/");
-    if (parts.some((part) => forbiddenSegments.has(part))) throw new Error(`Forbidden package path: ${relative}`);
+    // Dependencies and compiled Next output legitimately contain directories
+    // named src/build/fixtures. Reject build-time material at the bundle root,
+    // while still detecting the historical recursive portable-package shape.
+    if (forbiddenSegments.has(parts[0]) || relative.toLowerCase().includes("build/windows-portable/serverhub/resources/server")) {
+      throw new Error(`Forbidden package path: ${relative}`);
+    }
     if (forbiddenNames.some((pattern) => pattern.test(path.basename(relative)))) throw new Error(`Sensitive/runtime file rejected: ${relative}`);
     if (item.isSymbolicLink()) throw new Error(`Symbolic links are not allowed: ${relative}`);
     if (item.isFile() && path.basename(relative).toLowerCase() === "serverhub.exe") throw new Error(`Recursive executable rejected: ${relative}`);
