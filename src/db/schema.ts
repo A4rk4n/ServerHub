@@ -35,6 +35,8 @@ export const servers = sqliteTable("servers", {
   autoRestart: integer("auto_restart", { mode: "boolean" }).notNull().default(false),
   maxCrashRestarts: integer("max_crash_restarts").notNull().default(3),
   restartWindowSec: integer("restart_window_sec").notNull().default(300),
+  autoBackupBeforeUpdate: integer("auto_backup_before_update", { mode: "boolean" }).notNull().default(true),
+  updateBackupRetention: integer("update_backup_retention").notNull().default(5),
   managedDirectory: integer("managed_directory", { mode: "boolean" }).notNull().default(true),
   serverPassword: text("server_password").notNull().default(""),
   adminPassword: text("admin_password").notNull().default(""),

@@ -35,6 +35,8 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
     autoRestart: initial.autoRestart,
     maxCrashRestarts: initial.maxCrashRestarts,
     restartWindowSec: initial.restartWindowSec,
+    autoBackupBeforeUpdate: initial.autoBackupBeforeUpdate,
+    updateBackupRetention: initial.updateBackupRetention,
     serverPassword: initial.serverPassword,
     launchCommand: initial.launchCommand,
     launchArgs: initial.launchArgs,
@@ -63,6 +65,8 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
     form.autoRestart !== initial.autoRestart ||
     form.maxCrashRestarts !== initial.maxCrashRestarts ||
     form.restartWindowSec !== initial.restartWindowSec ||
+    form.autoBackupBeforeUpdate !== initial.autoBackupBeforeUpdate ||
+    form.updateBackupRetention !== initial.updateBackupRetention ||
     form.serverPassword !== initial.serverPassword ||
     form.launchCommand !== initial.launchCommand ||
     form.launchArgs !== initial.launchArgs ||
@@ -248,6 +252,11 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
                 <p className="mt-1 text-plum-500">Installed: {updateInfo.currentVersion}{updateInfo.provider ? ` · ${updateInfo.provider}` : ""}</p>
               </div>
             )}
+            <div className="mt-4 flex items-center justify-between rounded-xl border border-candy-200 bg-candy-50 px-4 py-3">
+              <div><p className="text-[13px] font-medium text-plum-800">Safety backup before updates</p><p className="text-[11px] text-plum-500">An update will not start unless the backup completes.</p></div>
+              <Toggle checked={form.autoBackupBeforeUpdate} onChange={(value)=>setForm({...form,autoBackupBeforeUpdate:value})} accent={accent}/>
+            </div>
+            {form.autoBackupBeforeUpdate && <div className="mt-3"><Field label="Automatic update backups to keep" hint="1–20"><input className={cn(inputCls,"font-mono")} type="number" min={1} max={20} value={form.updateBackupRetention} onChange={(event)=>setForm({...form,updateBackupRetention:Number(event.target.value)})}/></Field></div>}
             <div className="mt-4 flex gap-2">
               <Btn variant="subtle" loading={checkingUpdate} onClick={checkUpdate}><RefreshCw size={14}/> Check</Btn>
               {updateInfo?.updateAvailable && (

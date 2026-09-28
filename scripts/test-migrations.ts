@@ -23,12 +23,12 @@ async function main() {
   await import("../src/db/index");
   const migrated=new DatabaseSync(file);
   const columns=new Set((migrated.prepare("PRAGMA table_info(servers)").all() as {name:string}[]).map(x=>x.name));
-  for(const name of ["auto_restart","max_crash_restarts","restart_window_sec"]) assert.ok(columns.has(name),name);
+  for(const name of ["auto_restart","max_crash_restarts","restart_window_sec","auto_backup_before_update","update_backup_retention"]) assert.ok(columns.has(name),name);
   assert.equal((migrated.prepare("SELECT COUNT(*) AS n FROM servers").get() as {n:number}).n,1);
-  assert.equal((migrated.prepare("SELECT COUNT(*) AS n FROM schema_migrations WHERE version=1401").get() as {n:number}).n,1);
+  assert.equal((migrated.prepare("SELECT COUNT(*) AS n FROM schema_migrations WHERE version=1700").get() as {n:number}).n,1);
   migrated.close();
   assert.equal((await fsp.readdir(root)).some(name=>name.includes("pre-migration")&&name.endsWith(".bak")),true);
   await fsp.rm(root,{recursive:true,force:true});
-  console.log("V13_TO_V141_MIGRATION_OK");
+  console.log("V13_TO_V170_MIGRATION_OK");
 }
 void main().catch((error) => { console.error(error); process.exit(1); });

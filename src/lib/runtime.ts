@@ -1744,6 +1744,20 @@ export async function createBackup(id: number, label?: string, by = "you") {
   return row;
 }
 
+export async function createBackupAndWait(id: number, label?: string, by = "you", timeoutMs = 30 * 60_000) {
+  const created = await createBackup(id, label, by);
+  if (!created) throw new Error("Server not found");
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const [current] = await db.select().from(backups).where(eq(backups.id, created.id));
+    if (!current) throw new Error("Backup record disappeared");
+    if (current.status === "complete") return current;
+    if (current.status === "failed") throw new Error(current.note || "Backup failed");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error("Safety backup timed out");
+}
+
 export function backupArchivePath(backup: Backup): string {
   return backup.archivePath || path.join(backupsDir(backup.serverId), `${String(backup.id).padStart(6, "0")}-${safeFileName(backup.name)}.tar.gz`);
 }

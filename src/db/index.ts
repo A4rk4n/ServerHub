@@ -51,6 +51,8 @@ const DDL = [
     auto_restart INTEGER NOT NULL DEFAULT 0,
     max_crash_restarts INTEGER NOT NULL DEFAULT 3,
     restart_window_sec INTEGER NOT NULL DEFAULT 300,
+    auto_backup_before_update INTEGER NOT NULL DEFAULT 1,
+    update_backup_retention INTEGER NOT NULL DEFAULT 5,
     managed_directory INTEGER NOT NULL DEFAULT 1,
     server_password TEXT NOT NULL DEFAULT '',
     admin_password TEXT NOT NULL DEFAULT '',
@@ -189,6 +191,8 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
     auto_restart: "INTEGER NOT NULL DEFAULT 0",
     max_crash_restarts: "INTEGER NOT NULL DEFAULT 3",
     restart_window_sec: "INTEGER NOT NULL DEFAULT 300",
+    auto_backup_before_update: "INTEGER NOT NULL DEFAULT 1",
+    update_backup_retention: "INTEGER NOT NULL DEFAULT 5",
     managed_directory: "INTEGER NOT NULL DEFAULT 1",
     server_password: "TEXT NOT NULL DEFAULT ''",
     admin_password: "TEXT NOT NULL DEFAULT ''",
@@ -205,7 +209,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
   },
 };
 
-export const SCHEMA_VERSION = 1401;
+export const SCHEMA_VERSION = 1700;
 
 function migrate(db: DatabaseSync) {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -226,7 +230,7 @@ function migrate(db: DatabaseSync) {
       }
     }
     db.prepare("INSERT INTO schema_migrations (version, applied_at, description) VALUES (?, ?, ?)")
-      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Server Hub v1.4.1 additive schema");
+      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Server Hub v1.7.0 safe-update schema");
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
