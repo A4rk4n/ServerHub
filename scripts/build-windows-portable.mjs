@@ -138,21 +138,41 @@ await fsp.writeFile(path.join(stage, "README.txt"), [
 
 console.log(`[portable] compressing ${path.basename(output)}`);
 await fsp.rm(output, { force: true });
-await new Promise((resolve, reject) => {
+await new Promise(async (resolve, reject) => {
   const destination = fs.createWriteStream(output);
   const zip = new ZipArchive({ zlib: { level: 9 } });
   destination.on("close", resolve);
   destination.on("error", reject);
   zip.on("error", reject);
   zip.pipe(destination);
-  zip.directory(stage, "ServerHub", { date: new Date(sourceEpoch * 1000) });
+  const archiveDate = new Date(sourceEpoch * 1000);
+  async function appendSorted(directory, prefix) {
+    const entries = await fsp.readdir(directory, { withFileTypes: true });
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      const absolute = path.join(directory, entry.name);
+      const archiveName = `${prefix}/${entry.name}`.replaceAll("\\", "/");
+      if (entry.isDirectory()) {
+        zip.append(Buffer.alloc(0), { name: `${archiveName}/`, date: archiveDate, mode: 0o755 });
+        await appendSorted(absolute, archiveName);
+      } else if (entry.isFile()) {
+        const mode = entry.name.toLowerCase().endsWith(".exe") ? 0o755 : 0o644;
+        zip.file(absolute, { name: archiveName, date: archiveDate, mode });
+      } else throw new Error(`Unsupported package entry: ${absolute}`);
+    }
+  }
+  zip.append(Buffer.alloc(0), { name: "ServerHub/", date: archiveDate, mode: 0o755 });
+  await appendSorted(stage, "ServerHub");
   void zip.finalize();
 });
 
 const hash = crypto.createHash("sha256").update(await fsp.readFile(output)).digest("hex");
 const buildInfoChecksum = crypto.createHash("sha256").update(await fsp.readFile(path.join(packagedServer, "build-info.json"))).digest("hex");
+const sbomPath = path.join(release, `serverhub-${version}-sbom.cdx.json`);
+execFileSync(process.execPath, [path.join(root, "scripts", "generate-sbom.mjs"), sbomPath], { cwd: root, stdio: "inherit" });
+const sbomChecksum = crypto.createHash("sha256").update(await fsp.readFile(sbomPath)).digest("hex");
 const size = (await fsp.stat(output)).size;
-const manifest = { artifact: path.basename(output), size, sha256: hash, sourceCommit, buildInfoChecksum, testResults: process.env.SERVERHUB_TEST_RESULTS || "validated by release test summary" };
+const manifest = { artifact: path.basename(output), size, sha256: hash, sourceCommit, buildInfoChecksum, sbom: { name: path.basename(sbomPath), sha256: sbomChecksum }, testResults: process.env.SERVERHUB_TEST_RESULTS || "validated by release test summary" };
 await fsp.writeFile(path.join(release, "release-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 await fsp.writeFile(path.join(release, "SHA256SUMS"), `${hash}  ${path.basename(output)}\n`, "utf8");
 console.log(`[portable] ready: ${output} (${(size / 1024 / 1024).toFixed(1)} MB)`);

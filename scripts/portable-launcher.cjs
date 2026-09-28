@@ -5,6 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { createRequire } = require("node:module");
+const { randomBytes } = require("node:crypto");
 
 const host = "127.0.0.1";
 const requestedPort = Number(process.env.SERVERHUB_PORT || 4321);
@@ -16,6 +17,7 @@ const shellEntry = path.join(shellDir, "entry.cjs");
 const appDataBase = process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming");
 const appData = process.env.SERVERHUB_APPDATA || path.join(appDataBase, "ServerHub");
 const logFile = path.join(appData, "launcher.log");
+const sessionToken = randomBytes(32).toString("base64url");
 let nativeApp = null;
 let mainWindow = null;
 let mainWebview = null;
@@ -77,7 +79,7 @@ async function waitForHealth(url, timeoutMs = 60_000) {
   let lastError = "No response";
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`${url}/api/health`, { cache: "no-store" });
+      const response = await fetch(`${url}/api/health`, { cache: "no-store", headers: { "x-serverhub-session": sessionToken } });
       if (response.ok) return;
       lastError = `HTTP ${response.status}`;
     } catch (error) {
@@ -130,6 +132,7 @@ function shutdown() {
   process.env.HOSTNAME = host;
   process.env.NODE_ENV = "production";
   process.env.SERVERHUB_APPDATA = appData;
+  process.env.SERVERHUB_SESSION_TOKEN = sessionToken;
   process.env.SERVERHUB_DB = process.env.SERVERHUB_DB || path.join(appData, "serverhub.db");
   process.chdir(serverDir);
   process.argv[1] = serverEntry;
@@ -139,5 +142,5 @@ function shutdown() {
   externalRequire(serverEntry);
   await waitForHealth(url);
   log("Bundled local service is healthy");
-  await openNativeWindow(url);
+  await openNativeWindow(`${url}/?serverhub_token=${encodeURIComponent(sessionToken)}`);
 })().catch((error) => showError(error?.stack || String(error)));

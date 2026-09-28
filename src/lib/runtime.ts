@@ -678,7 +678,7 @@ async function installBedrock(server: Server, root: string, context: InstallCont
   if (process.platform !== "win32") await fsp.chmod(path.join(root, "bedrock_server"), 0o755).catch(() => {});
 }
 
-async function extractZipSafe(archive: string, destination: string, signal?: AbortSignal) {
+export async function extractZipSafe(archive: string, destination: string, signal?: AbortSignal, limits: { maxEntries?: number; maxExpandedBytes?: number } = {}) {
   const zip = await new Promise<yauzl.ZipFile>((resolve, reject) => {
     yauzl.open(archive, { lazyEntries: true, decodeStrings: true, validateEntrySizes: true }, (error, opened) => {
       if (error || !opened) reject(error ?? new Error("Could not open ZIP archive"));
@@ -692,8 +692,8 @@ async function extractZipSafe(archive: string, destination: string, signal?: Abo
     let settled = false;
     let entryCount = 0;
     let expandedBytes = 0;
-    const maxEntries = 100_000;
-    const maxExpandedBytes = 20 * 1024 * 1024 * 1024;
+    const maxEntries = limits.maxEntries ?? 100_000;
+    const maxExpandedBytes = limits.maxExpandedBytes ?? 20 * 1024 * 1024 * 1024;
     const fail = (error: unknown) => {
       if (settled) return;
       settled = true;

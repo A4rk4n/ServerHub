@@ -205,14 +205,32 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
   },
 };
 
+export const SCHEMA_VERSION = 1401;
+
 function migrate(db: DatabaseSync) {
-  for (const [table, columns] of Object.entries(ADDITIVE_MIGRATIONS)) {
-    const existing = new Set(
-      (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[]).map((column) => column.name)
-    );
-    for (const [name, declaration] of Object.entries(columns)) {
-      if (!existing.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${declaration}`);
+  db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    applied_at INTEGER NOT NULL,
+    description TEXT NOT NULL
+  )`);
+  const applied = db.prepare("SELECT 1 FROM schema_migrations WHERE version = ?").get(SCHEMA_VERSION);
+  if (applied) return;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    for (const [table, columns] of Object.entries(ADDITIVE_MIGRATIONS)) {
+      const existing = new Set(
+        (db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[]).map((column) => column.name)
+      );
+      for (const [name, declaration] of Object.entries(columns)) {
+        if (!existing.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${declaration}`);
+      }
     }
+    db.prepare("INSERT INTO schema_migrations (version, applied_at, description) VALUES (?, ?, ?)")
+      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Server Hub v1.4.1 additive schema");
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
   }
 }
 
@@ -230,7 +248,14 @@ function open(): DatabaseSync {
   if (raw) return raw;
   try {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-    raw = boot(new DatabaseSync(dbPath));
+    const existed = fs.existsSync(/* turbopackIgnore: true */ dbPath) && fs.statSync(/* turbopackIgnore: true */ dbPath).size > 0;
+    const client = new DatabaseSync(dbPath);
+    const hasLedger = existed && client.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'").get();
+    if (existed && !hasLedger) {
+      const backup = `${dbPath}.pre-migration-${new Date().toISOString().replace(/[:.]/g, "-")}.bak`;
+      fs.copyFileSync(dbPath, backup);
+    }
+    raw = boot(client);
   } catch (err) {
     console.warn(`[serverhub] could not open ${dbPath} (${String(err)}), using an in-memory database`);
     raw = boot(new DatabaseSync(":memory:"));
