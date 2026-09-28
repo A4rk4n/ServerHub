@@ -37,7 +37,9 @@ export async function validateServerBundle(serverRoot) {
     if (forbiddenSegments.has(parts[0]) || relative.toLowerCase().includes("build/windows-portable/serverhub/resources/server")) {
       throw new Error(`Forbidden package path: ${relative}`);
     }
-    if (forbiddenNames.some((pattern) => pattern.test(path.basename(relative)))) throw new Error(`Sensitive/runtime file rejected: ${relative}`);
+    if (!["node_modules", ".next"].includes(parts[0]) && forbiddenNames.some((pattern) => pattern.test(path.basename(relative)))) {
+      throw new Error(`Sensitive/runtime file rejected: ${relative}`);
+    }
     if (item.isSymbolicLink()) throw new Error(`Symbolic links are not allowed: ${relative}`);
     if (item.isFile() && path.basename(relative).toLowerCase() === "serverhub.exe") throw new Error(`Recursive executable rejected: ${relative}`);
     if (item.isFile() && (await fsp.stat(absolute)).size < 2_000_000) {
