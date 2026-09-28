@@ -1,12 +1,13 @@
 "use client";
 
-import { CalendarClock, DatabaseBackup, Megaphone, Play, Plus, RotateCw, Terminal, Trash2 } from "lucide-react";
+import { CalendarClock, DatabaseBackup, Megaphone, Play, Plus, RotateCw, Terminal, Trash2, Wrench } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Task } from "@/db/schema";
 import { cn, hexA, timeAgo } from "@/lib/format";
 import { Btn, Empty, Field, Modal, Spin, Toggle, inputCls } from "./ui";
 
 const TYPE_META: Record<string, { label: string; icon: React.ComponentType<{ size?: number | string; className?: string }>; color: string; hint: string }> = {
+  maintenance: { label: "Maintenance", icon: Wrench, color: "#fb7185", hint: "Backup, stop and update safely" },
   restart: { label: "Restart", icon: RotateCw, color: "#f5b84c", hint: "Gracefully restarts the server" },
   backup: { label: "Backup", icon: DatabaseBackup, color: "#38bdf8", hint: "Creates a world snapshot" },
   command: { label: "Command", icon: Terminal, color: "#c084fc", hint: "Runs a console command" },

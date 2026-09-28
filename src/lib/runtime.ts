@@ -1428,6 +1428,19 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
 // Real process lifecycle and metrics
 // ---------------------------------------------------------------------------
 
+async function waitUntilReady(entry: RuntimeEntry) {
+  const server = entry.server;
+  const game = getGame(server.gameId);
+  const deadline = Date.now() + Math.max(10, Math.min(300, server.readinessTimeoutSec)) * 1000;
+  if (game.protocol === "UDP") { await new Promise((resolve) => setTimeout(resolve, 1200)); return state.processes.has(server.id); }
+  while (Date.now() < deadline && state.processes.has(server.id)) {
+    const ready = await new Promise<boolean>((resolve) => { const socket = net.createConnection({ host: server.bindAddress, port: server.port }); const done=(value:boolean)=>{socket.destroy();resolve(value)}; socket.setTimeout(750); socket.once("connect",()=>done(true)); socket.once("timeout",()=>done(false)); socket.once("error",()=>done(false)); });
+    if (ready) return true;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return false;
+}
+
 export async function startFlow(id: number, automatic = false): Promise<{ ok: boolean; reason?: string }> {
   await ensureRuntimeInitialized();
   const pendingRestart = state.restartTimers.get(id);
@@ -1459,7 +1472,7 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
       detached: process.platform !== "win32",
       stdio: ["pipe", "pipe", "pipe"],
     });
-    const entry = {
+    const entry: RuntimeEntry = {
       child,
       server,
       metrics: [],
@@ -1480,8 +1493,13 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
     entry.monitor = setInterval(() => void sampleEntry(entry).catch(() => {}), 2_000);
     entry.monitor.unref?.();
 
-    await new Promise((resolve) => setTimeout(resolve, 700));
+    const ready = await waitUntilReady(entry);
     if (!state.processes.has(id)) return { ok: false, reason: "The server process exited during startup. Check Console for details." };
+    if (!ready) {
+      entry.stopping = true;
+      killProcessTree(child.pid, true);
+      throw new Error(`Readiness probe timed out after ${server.readinessTimeoutSec} seconds on ${server.bindAddress}:${server.port}.`);
+    }
     await db.update(servers).set({ status: "online", lastStartedAt: new Date(), updatedAt: new Date() }).where(eq(servers.id, id));
     await logLine(id, "success", "Runtime", `Process started with PID ${child.pid}.`);
     await act(id, "power", `${server.name} started (PID ${child.pid})`);
@@ -1816,6 +1834,23 @@ export async function sweepTasks(serverId?: number) {
       const [server] = await db.select().from(servers).where(eq(servers.id, task.serverId));
       if (!server) continue;
       if (task.type === "backup") await createBackup(server.id, `auto-${safeFileName(task.name)}`, "scheduler");
+      else if (task.type === "maintenance") {
+        await logLine(server.id, "system", "Maintenance", `Scheduled maintenance "${task.name}" started.`);
+        if (state.processes.has(server.id)) { await runCommand(server, "say Scheduled maintenance is starting", "Scheduler"); await stopFlow(server.id, "Maintenance"); await new Promise((resolve) => setTimeout(resolve, 2000)); }
+        const safety = await createBackupAndWait(server.id, `maintenance-${safeFileName(task.name)}`, "scheduler");
+        const installed = await installFlow(server.id);
+        if (!installed.ok || !installed.jobId) await logLine(server.id, "error", "Maintenance", `Update queue failed: ${installed.reason}`);
+        else {
+          const deadline = Date.now() + 2 * 60 * 60_000;
+          let outcome = "running";
+          while (Date.now() < deadline && ["queued","running","cancelling"].includes(outcome)) { await new Promise((resolve)=>setTimeout(resolve,1000)); const [job]=await db.select().from(installationJobs).where(eq(installationJobs.id,installed.jobId!)); outcome=job?.status ?? "failed"; }
+          if (outcome === "succeeded") {
+            const started = await startFlow(server.id);
+            if (!started.ok) { await logLine(server.id,"error","Maintenance",`Readiness failed; restoring safety backup: ${started.reason}`); await restoreBackup(server.id,safety.id); await startFlow(server.id); }
+            else await logLine(server.id,"success","Maintenance",`Scheduled maintenance "${task.name}" completed and readiness passed.`);
+          } else await logLine(server.id,"error","Maintenance",`Update ended with status ${outcome}.`);
+        }
+      }
       else if (task.type === "restart") {
         if (state.processes.has(server.id)) await restartFlow(server.id);
         else await logLine(server.id, "warn", "Scheduler", `Skipped "${task.name}": server is offline.`);

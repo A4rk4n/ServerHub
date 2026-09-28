@@ -3,7 +3,7 @@
 import { Activity, AlertTriangle, CalendarClock, DatabaseBackup, FolderTree, Play, Puzzle, RotateCw, Settings, Square, Terminal, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Server } from "@/db/schema";
 import { cn, hexA } from "@/lib/format";
 import { InstallationProgress } from "./installation-progress";
@@ -16,6 +16,7 @@ export function ServerFrame({ initial, game, children }: { initial: Server; game
   const [server, setServer] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [confirmKill, setConfirmKill] = useState(false);
+  const previousStatus = useRef(initial.status);
 
   useEffect(() => {
     let dead = false;
@@ -24,7 +25,15 @@ export function ServerFrame({ initial, game, children }: { initial: Server; game
         const r = await fetch(`/api/servers/${initial.id}`, { cache: "no-store" });
         if (!r.ok) return;
         const j = await r.json();
-        if (!dead && j.server) setServer((prev) => ({ ...prev, ...j.server }));
+        if (!dead && j.server) {
+          const nextStatus = String(j.server.status);
+          if (nextStatus !== previousStatus.current && typeof Notification !== "undefined") {
+            if (Notification.permission === "default") void Notification.requestPermission();
+            if (Notification.permission === "granted" && ["online","crashed","error","restarting"].includes(nextStatus)) new Notification(`${initial.name}: ${nextStatus}`, { body: nextStatus === "online" ? "The game server is ready for players." : "Open Server Hub for details." });
+          }
+          previousStatus.current = nextStatus;
+          setServer((prev) => ({ ...prev, ...j.server }));
+        }
       } catch {}
     };
     const t = setInterval(poll, 3500);
