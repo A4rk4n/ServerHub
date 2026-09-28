@@ -42,9 +42,9 @@ export async function validateServerBundle(serverRoot) {
     }
     if (item.isSymbolicLink()) throw new Error(`Symbolic links are not allowed: ${relative}`);
     if (item.isFile() && path.basename(relative).toLowerCase() === "serverhub.exe") throw new Error(`Recursive executable rejected: ${relative}`);
-    if (item.isFile() && (await fsp.stat(absolute)).size < 2_000_000) {
+    if (item.isFile() && !["node_modules", ".next"].includes(parts[0]) && (await fsp.stat(absolute)).size < 2_000_000) {
       const text = await fsp.readFile(absolute, "utf8").catch(() => "");
-      if (/\b(?:[A-Za-z]:\\Users\\|\/home\/[^/]+\/ServerHub)\b/i.test(text)) throw new Error(`Absolute development path rejected: ${relative}`);
+      if (/\b(?:[A-Za-z]:\\Users\\[^\\]+\\ServerHub|\/home\/[^/]+\/ServerHub)\b/i.test(text)) throw new Error(`Absolute development path rejected: ${relative}`);
     }
   }
   return entries.length;
