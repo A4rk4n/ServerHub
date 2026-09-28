@@ -50,6 +50,8 @@ const DDL = [
     working_directory TEXT NOT NULL DEFAULT '',
     managed_directory INTEGER NOT NULL DEFAULT 1,
     server_password TEXT NOT NULL DEFAULT '',
+    admin_password TEXT NOT NULL DEFAULT '',
+    owner_id TEXT NOT NULL DEFAULT '',
     eula_accepted INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
@@ -134,6 +136,40 @@ const DDL = [
     ts INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS activity_ts_idx ON activity (id)`,
+  `CREATE TABLE IF NOT EXISTS installation_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'install',
+    status TEXT NOT NULL DEFAULT 'queued',
+    phase TEXT NOT NULL DEFAULT 'queued',
+    progress INTEGER NOT NULL DEFAULT 0,
+    bytes_done INTEGER NOT NULL DEFAULT 0,
+    bytes_total INTEGER NOT NULL DEFAULT 0,
+    message TEXT NOT NULL DEFAULT 'Waiting to install',
+    error TEXT NOT NULL DEFAULT '',
+    attempt INTEGER NOT NULL DEFAULT 1,
+    cancel_requested INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    started_at INTEGER,
+    completed_at INTEGER
+  )`,
+  `CREATE INDEX IF NOT EXISTS installation_jobs_server_idx ON installation_jobs (server_id, id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS installation_jobs_one_active_idx
+    ON installation_jobs (server_id)
+    WHERE status IN ('queued', 'running', 'cancelling')`,
+  `CREATE TABLE IF NOT EXISTS installation_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id INTEGER NOT NULL,
+    server_id INTEGER NOT NULL,
+    level TEXT NOT NULL DEFAULT 'info',
+    phase TEXT NOT NULL DEFAULT 'queued',
+    progress INTEGER NOT NULL DEFAULT 0,
+    message TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS installation_events_job_idx ON installation_events (job_id, id)`,
+  `CREATE INDEX IF NOT EXISTS installation_events_server_idx ON installation_events (server_id, id)`,
 ];
 
 /** A DatabaseSync exposing the small surface Drizzle's SQLite session expects. */
@@ -149,6 +185,8 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
     working_directory: "TEXT NOT NULL DEFAULT ''",
     managed_directory: "INTEGER NOT NULL DEFAULT 1",
     server_password: "TEXT NOT NULL DEFAULT ''",
+    admin_password: "TEXT NOT NULL DEFAULT ''",
+    owner_id: "TEXT NOT NULL DEFAULT ''",
     eula_accepted: "INTEGER NOT NULL DEFAULT 0",
   },
   backups: {

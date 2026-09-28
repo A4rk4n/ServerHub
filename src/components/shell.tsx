@@ -137,7 +137,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               </div>
             </div>
             <p className="mt-3 flex items-center justify-center gap-1.5 text-[10px] font-medium text-plum-400">
-              Server Hub v1.0.0 <Heart size={9} fill="currentColor" className="text-candy-400" /> MIT
+              Server Hub v1.0.2 <Heart size={9} fill="currentColor" className="text-candy-400" /> MIT
             </p>
           </div>
         </div>

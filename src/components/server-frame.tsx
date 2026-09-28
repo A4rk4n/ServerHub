@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { Server } from "@/db/schema";
 import { cn, hexA } from "@/lib/format";
+import { InstallationProgress } from "./installation-progress";
 import { Btn, Modal, StatusPill } from "./ui";
 
 export type FrameGame = { id: string; name: string; short: string; accent: string; art: string; protocol: string; modSource: string | null; supportsMods: boolean };
@@ -109,6 +110,11 @@ export function ServerFrame({ initial, game, children }: { initial: Server; game
               </Btn>
             </>
           ) : null}
+          {st === "restarting" ? (
+            <Btn variant="danger" onClick={() => power("stop")} loading={busy}>
+              <Square size={13} /> Cancel restart
+            </Btn>
+          ) : null}
           {["starting", "stopping", "installing"].includes(st) && (
             <Btn variant="subtle" disabled>
               <RotateCw size={14} className="animate-spin" /> {st === "installing" ? "Installing" : st === "starting" ? "Starting" : "Stopping"}…
@@ -121,6 +127,8 @@ export function ServerFrame({ initial, game, children }: { initial: Server; game
           )}
         </div>
       </div>
+
+      <InstallationProgress serverId={server.id} accent={accent} />
 
       {/* tabs */}
       <div className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-0.5">

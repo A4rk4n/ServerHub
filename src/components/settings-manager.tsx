@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Check, Cpu, Globe, KeyRound, Save, Swords, Terminal, Trash2, User } from "lucide-react";
+import { AlertTriangle, Check, Cpu, Globe, KeyRound, RotateCw, Save, Swords, Terminal, Trash2, User } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Server } from "@/db/schema";

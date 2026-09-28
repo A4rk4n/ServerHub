@@ -4,6 +4,7 @@ node_modules/
 build/
 dist/
 out/
+release/
 
 # local runtime state (never ship worlds, credentials, or databases)
 data/

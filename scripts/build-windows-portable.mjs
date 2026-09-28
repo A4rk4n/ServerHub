@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ZipArchive } from "archiver";
 import { inject } from "postject";
+import * as ResEdit from "resedit";
 import * as tar from "tar";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -18,6 +19,28 @@ const launcher = path.join(root, "scripts", "portable-launcher.cjs");
 const standalone = path.join(root, "build", "server");
 const version = JSON.parse(await fsp.readFile(path.join(root, "package.json"), "utf8")).version;
 const output = path.join(release, `ServerHub-${version}-Windows-x64-Portable.zip`);
+
+async function applyWindowsIcon(executable) {
+  const source = await fsp.readFile(executable);
+  const image = ResEdit.NtExecutable.from(source, { ignoreCert: true });
+  const resources = ResEdit.NtExecutableResource.from(image);
+  const icon = ResEdit.Data.IconFile.from(await fsp.readFile(path.join(root, "build-resources", "icon.ico")));
+  ResEdit.Resource.IconGroupEntry.replaceIconsForResource(resources.entries, 1, 1033, icon.icons.map((item) => item.data));
+  resources.outputResource(image);
+  await fsp.writeFile(executable, Buffer.from(image.generate()));
+}
+
+async function markAsWindowsGui(executable) {
+  const data = await fsp.readFile(executable);
+  const peOffset = data.readUInt32LE(0x3c);
+  if (data.toString("ascii", peOffset, peOffset + 4) !== "PE\0\0") throw new Error("Windows executable has an invalid PE header");
+  const optionalHeader = peOffset + 24;
+  const magic = data.readUInt16LE(optionalHeader);
+  if (magic !== 0x20b && magic !== 0x10b) throw new Error("Windows executable has an unsupported optional header");
+  // IMAGE_SUBSYSTEM_WINDOWS_GUI (2) prevents a Command Prompt window from being created.
+  data.writeUInt16LE(2, optionalHeader + 68);
+  await fsp.writeFile(executable, data);
+}
 
 if (!fs.existsSync(path.join(standalone, "server.js"))) {
   throw new Error("build/server/server.js is missing; run npm run build:server first");
@@ -57,9 +80,11 @@ execFileSync(process.execPath, ["--experimental-sea-config", seaConfig], { cwd: 
 
 const executable = path.join(stage, "ServerHub.exe");
 await fsp.copyFile(nodeExe, executable);
+await applyWindowsIcon(executable);
 await inject(executable, "NODE_SEA_BLOB", await fsp.readFile(blob), {
   sentinelFuse: "NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2",
 });
+await markAsWindowsGui(executable);
 
 console.log("[portable] copying standalone application");
 await fsp.mkdir(path.join(stage, "resources"), { recursive: true });
@@ -69,14 +94,14 @@ await fsp.writeFile(path.join(stage, "README.txt"), [
   "",
   "1. Extract the complete ServerHub folder from the ZIP.",
   "2. Double-click ServerHub.exe.",
-  "3. Keep the console window open while using your servers.",
-  "4. The management UI opens in your default browser.",
+  "3. Wait a few seconds for the Server Hub application window to appear.",
+  "4. Closing that window shuts down Server Hub and its managed processes.",
   "",
   "Data is stored under %APPDATA%\\ServerHub and survives application updates.",
   "The app is unsigned, so Windows SmartScreen may ask you to confirm the first run.",
   "Do not expose the management port to the internet; it is intended for localhost only.",
   "",
-], "utf8");
+].join("\r\n"), "utf8");
 
 console.log(`[portable] compressing ${path.basename(output)}`);
 await fsp.rm(output, { force: true });

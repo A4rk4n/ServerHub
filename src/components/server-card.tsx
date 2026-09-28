@@ -110,6 +110,11 @@ export function ServerCard({ server, index = 0 }: { server: CardServer; index?: 
             <RotateCw size={12} /> Retry install
           </PowerBtn>
         )}
+        {server.status === "restarting" && (
+          <PowerBtn onClick={(e) => power(e, "stop")} disabled={busy !== null} accent="#e2445c" loading={busy === "stop"}>
+            <Square size={12} /> Cancel restart
+          </PowerBtn>
+        )}
         {isOnline && (
           <>
             <IconPower onClick={(e) => power(e, "restart")} disabled={transitioning} title="Restart">

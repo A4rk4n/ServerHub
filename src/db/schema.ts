@@ -34,6 +34,8 @@ export const servers = sqliteTable("servers", {
   workingDirectory: text("working_directory").notNull().default(""),
   managedDirectory: integer("managed_directory", { mode: "boolean" }).notNull().default(true),
   serverPassword: text("server_password").notNull().default(""),
+  adminPassword: text("admin_password").notNull().default(""),
+  ownerId: text("owner_id").notNull().default(""),
   eulaAccepted: integer("eula_accepted", { mode: "boolean" }).notNull().default(false),
   createdAt: tsNow("created_at"),
   updatedAt: tsNow("updated_at"),
@@ -147,6 +149,52 @@ export const activity = sqliteTable(
   (t) => [index("activity_ts_idx").on(t.id)]
 );
 
+/**
+ * Durable installer state. A job survives an application restart and can be
+ * re-queued without losing a partially downloaded artifact in its staging
+ * directory.
+ */
+export const installationJobs = sqliteTable(
+  "installation_jobs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    serverId: integer("server_id").notNull(),
+    kind: text("kind").notNull().default("install"),
+    status: text("status").notNull().default("queued"),
+    phase: text("phase").notNull().default("queued"),
+    progress: integer("progress").notNull().default(0),
+    bytesDone: integer("bytes_done").notNull().default(0),
+    bytesTotal: integer("bytes_total").notNull().default(0),
+    message: text("message").notNull().default("Waiting to install"),
+    error: text("error").notNull().default(""),
+    attempt: integer("attempt").notNull().default(1),
+    cancelRequested: integer("cancel_requested", { mode: "boolean" }).notNull().default(false),
+    createdAt: tsNow("created_at"),
+    updatedAt: tsNow("updated_at"),
+    startedAt: ts("started_at"),
+    completedAt: ts("completed_at"),
+  },
+  (t) => [index("installation_jobs_server_idx").on(t.serverId, t.id)]
+);
+
+export const installationEvents = sqliteTable(
+  "installation_events",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    jobId: integer("job_id").notNull(),
+    serverId: integer("server_id").notNull(),
+    level: text("level").notNull().default("info"),
+    phase: text("phase").notNull().default("queued"),
+    progress: integer("progress").notNull().default(0),
+    message: text("message").notNull(),
+    createdAt: tsNow("created_at"),
+  },
+  (t) => [
+    index("installation_events_job_idx").on(t.jobId, t.id),
+    index("installation_events_server_idx").on(t.serverId, t.id),
+  ]
+);
+
 export type Server = typeof servers.$inferSelect;
 export type ConsoleLog = typeof consoleLogs.$inferSelect;
 export type Player = typeof players.$inferSelect;
@@ -155,5 +203,7 @@ export type Task = typeof tasks.$inferSelect;
 export type Addon = typeof addons.$inferSelect;
 export type FileRow = typeof files.$inferSelect;
 export type Activity = typeof activity.$inferSelect;
+export type InstallationJob = typeof installationJobs.$inferSelect;
+export type InstallationEvent = typeof installationEvents.$inferSelect;
 
 export { sql };
