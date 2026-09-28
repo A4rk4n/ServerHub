@@ -101,7 +101,8 @@ async function openNativeWindow(url) {
   mainWindow = nativeApp.createBrowserWindow({ title: "Server Hub", width: 1480, height: 940, logical: true, visible: false, resizable: true, maximizable: true, minimizable: true, focused: true, decorations: true });
   mainWindow.setMinSize(900, 640, true);
   mainWindow.center();
-  mainWebview = mainWindow.createWebview({ url, enableDevtools: false, navigationHandler: (target) => { try { return new URL(target).origin === url; } catch { return false; } }, newWindowHandler: () => false });
+  const trustedOrigin = new URL(url).origin;
+  mainWebview = mainWindow.createWebview({ url, enableDevtools: false, navigationHandler: (target) => { try { return new URL(target).origin === trustedOrigin; } catch { return false; } }, newWindowHandler: () => false });
   mainWebview.once("page-load-finished", () => { log("Native application window is ready"); mainWindow.show(); mainWindow.focus(); });
   const reveal = setTimeout(() => mainWindow?.show(), 4_000);
   reveal.unref?.();
