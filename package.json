@@ -1,6 +1,6 @@
 {
   "name": "server-hub",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Local desktop manager for real dedicated game-server processes",
   "private": true,
   "main": "electron/main.cjs",
@@ -18,7 +18,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test:installation-jobs": "node scripts/test-installation-jobs.mjs",
-    "test:package-integrity": "node scripts/test-package-integrity.mjs"
+    "test:package-integrity": "node scripts/test-package-integrity.mjs",
+    "test:recovery-invariants": "node scripts/test-recovery-invariants.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

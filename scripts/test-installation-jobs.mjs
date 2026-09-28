@@ -151,6 +151,72 @@ async function main() {
     throw new Error("Staged update did not preserve files from the active installation.");
   }
 
+  const crashCounter = path.join(data, "watchdog-counter.txt");
+  const crashScript = path.join(data, "crash-fixture.mjs");
+  await fs.writeFile(crashScript, `import fs from "node:fs";\nconst file=${JSON.stringify(crashCounter)};\nconst count=Number(fs.existsSync(file)?fs.readFileSync(file,"utf8"):0)+1;\nfs.writeFileSync(file,String(count));\nprocess.exit(17);\n`, "utf8");
+  const crashPort = (await udpPort()).port;
+  const crashId = await createCustom(base, crashPort, "Watchdog smoke test", { command: process.execPath, args: crashScript });
+  await waitForJob(base, crashId, "succeeded");
+  await json(base, `/api/servers/${crashId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ autoRestart: true, maxCrashRestarts: 2, restartWindowSec: 30 }),
+  });
+  await json(base, `/api/servers/${crashId}/power`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "start" }),
+  });
+  const watchdogDeadline = Date.now() + 12_000;
+  let crashCount = 0;
+  while (Date.now() < watchdogDeadline) {
+    crashCount = Number(await fs.readFile(crashCounter, "utf8").catch(() => "0"));
+    if (crashCount >= 3) break;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  if (crashCount !== 3) throw new Error(`Watchdog expected three process launches, observed ${crashCount}.`);
+  await new Promise((resolve) => setTimeout(resolve, 2_500));
+  const afterLimit = Number(await fs.readFile(crashCounter, "utf8"));
+  const crashServer = await json(base, `/api/servers/${crashId}`);
+  const crashConsole = await json(base, `/api/servers/${crashId}/console?after=0`);
+  if (afterLimit !== 3 || crashServer.server.status !== "crashed" || !crashConsole.logs.some((line) => line.message.includes("restart limit reached"))) {
+    throw new Error(`Watchdog did not stop the crash loop: count=${afterLimit}, status=${crashServer.server.status}`);
+  }
+
+  await fs.writeFile(crashCounter, "0", "utf8");
+  const cancelPort = (await udpPort()).port;
+  const cancelId = await createCustom(base, cancelPort, "Watchdog cancellation test", { command: process.execPath, args: crashScript });
+  await waitForJob(base, cancelId, "succeeded");
+  await json(base, `/api/servers/${cancelId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ autoRestart: true, maxCrashRestarts: 5, restartWindowSec: 30 }),
+  });
+  await json(base, `/api/servers/${cancelId}/power`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "start" }),
+  });
+  const restartQueuedDeadline = Date.now() + 3_000;
+  let queuedStatus = "";
+  while (Date.now() < restartQueuedDeadline) {
+    queuedStatus = (await json(base, `/api/servers/${cancelId}`)).server.status;
+    if (queuedStatus === "restarting") break;
+    await new Promise((resolve) => setTimeout(resolve, 75));
+  }
+  if (queuedStatus !== "restarting") throw new Error(`Expected a queued watchdog restart, got ${queuedStatus}.`);
+  await json(base, `/api/servers/${cancelId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ autoRestart: false }),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 2_500));
+  const cancelledLaunches = Number(await fs.readFile(crashCounter, "utf8"));
+  const cancelledServer = await json(base, `/api/servers/${cancelId}`);
+  if (cancelledLaunches !== 1 || cancelledServer.server.status !== "offline") {
+    throw new Error(`Disabling watchdog did not cancel the queued restart: count=${cancelledLaunches}, status=${cancelledServer.server.status}`);
+  }
+
   const blocker = await udpPort(true);
   const retryId = await createCustom(base, blocker.port, "Retry installation smoke test");
   const failed = await waitForJob(base, retryId, "failed");
@@ -199,6 +265,8 @@ async function main() {
   if (!recovered.events.some((event) => event.message.includes("restarted"))) throw new Error("Recovery event was not retained in job history.");
 
   console.log("INSTALLATION_JOB_INTEGRATION_OK", {
+    watchdogLaunches: crashCount,
+    cancelledWatchdogLaunches: cancelledLaunches,
     completedJob: completed.job.id,
     retryJob: retried.job.id,
     recoveredJob: recovered.job.id,

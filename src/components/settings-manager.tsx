@@ -32,6 +32,9 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
     seed: initial.seed,
     difficulty: initial.difficulty,
     pvp: initial.pvp,
+    autoRestart: initial.autoRestart,
+    maxCrashRestarts: initial.maxCrashRestarts,
+    restartWindowSec: initial.restartWindowSec,
     serverPassword: initial.serverPassword,
     launchCommand: initial.launchCommand,
     launchArgs: initial.launchArgs,
@@ -54,6 +57,9 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
     form.seed !== initial.seed ||
     form.difficulty !== initial.difficulty ||
     form.pvp !== initial.pvp ||
+    form.autoRestart !== initial.autoRestart ||
+    form.maxCrashRestarts !== initial.maxCrashRestarts ||
+    form.restartWindowSec !== initial.restartWindowSec ||
     form.serverPassword !== initial.serverPassword ||
     form.launchCommand !== initial.launchCommand ||
     form.launchArgs !== initial.launchArgs ||
@@ -208,6 +214,47 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
             </div>
           </section>
         )}
+
+        {/* watchdog */}
+        <section className="panel p-5">
+          <h3 className="font-display mb-4 flex items-center gap-2 text-[14px] font-semibold text-plum-900">
+            <RotateCw size={14} style={{ color: accent }} /> Crash recovery
+          </h3>
+          <div className="flex items-center justify-between rounded-xl border border-candy-200 bg-candy-50 px-4 py-3">
+            <div>
+              <p className="text-[13.5px] font-medium text-plum-800">Automatic restart</p>
+              <p className="text-[11.5px] text-plum-500">Restart after an unexpected process exit</p>
+            </div>
+            <Toggle checked={form.autoRestart} onChange={(value) => setForm({ ...form, autoRestart: value })} accent={accent} />
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-4">
+            <Field label="Restart limit" hint="0–20 attempts">
+              <input
+                className={cn(inputCls, "font-mono")}
+                type="number"
+                min={0}
+                max={20}
+                disabled={!form.autoRestart}
+                value={form.maxCrashRestarts}
+                onChange={(event) => setForm({ ...form, maxCrashRestarts: Number(event.target.value) })}
+              />
+            </Field>
+            <Field label="Time window" hint="seconds">
+              <input
+                className={cn(inputCls, "font-mono")}
+                type="number"
+                min={30}
+                max={3600}
+                disabled={!form.autoRestart}
+                value={form.restartWindowSec}
+                onChange={(event) => setForm({ ...form, restartWindowSec: Number(event.target.value) })}
+              />
+            </Field>
+          </div>
+          <p className="mt-3 text-[11.5px] leading-relaxed text-plum-500">
+            Restarts use exponential backoff and stop at the configured limit to prevent crash loops. A manual start resets the counter.
+          </p>
+        </section>
 
         {/* resources */}
         <section className="panel p-5">

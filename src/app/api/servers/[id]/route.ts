@@ -6,7 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { addons, backups, consoleLogs, files, installationEvents, installationJobs, players, servers, tasks } from "@/db/schema";
 import { getGame } from "@/lib/games";
-import { act, cancelInstallation, ensureRuntimeInitialized, killFlow, logLine, metricsFor, writeServerConfig } from "@/lib/runtime";
+import { act, cancelInstallation, ensureRuntimeInitialized, cancelPendingRestart, killFlow, logLine, metricsFor, writeServerConfig } from "@/lib/runtime";
 import { backupsDir, serverDir } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
@@ -78,6 +78,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
     patch.pvp = body.pvp;
     changes.push("pvp");
   }
+  if (typeof body.autoRestart === "boolean") { patch.autoRestart = body.autoRestart; changes.push("crash recovery"); }
+  if (typeof body.maxCrashRestarts === "number" && Number.isFinite(body.maxCrashRestarts)) { patch.maxCrashRestarts = Math.min(20, Math.max(0, Math.round(body.maxCrashRestarts))); changes.push("restart limit"); }
+  if (typeof body.restartWindowSec === "number" && Number.isFinite(body.restartWindowSec)) { patch.restartWindowSec = Math.min(3600, Math.max(30, Math.round(body.restartWindowSec))); changes.push("restart window"); }
   if (typeof body.port === "number" && Number.isInteger(body.port) && body.port >= 1024 && body.port <= 65535) {
     const clash = await db.select({ id: servers.id }).from(servers).where(and(eq(servers.port, body.port)));
     if (clash.some((c) => c.id !== s.id)) return NextResponse.json({ error: `Port ${body.port} is already in use` }, { status: 409 });
@@ -128,6 +131,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     }
   }
   const [updated] = await db.update(servers).set(patch).where(eq(servers.id, s.id)).returning();
+  if (body.autoRestart === false && await cancelPendingRestart(s.id, "Settings")) updated.status = "offline";
   if (changes.length) {
     await writeServerConfig(updated).catch(async (error) => logLine(s.id, "warn", "Config", `Could not write managed config: ${String(error)}`));
     await logLine(s.id, "system", "Panel", `Configuration updated (${changes.join(", ")})${s.status === "online" ? " — restart required to apply" : ""}`);

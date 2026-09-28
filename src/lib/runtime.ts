@@ -29,6 +29,7 @@ type RuntimeEntry = {
   stopping: boolean;
   restarting: boolean;
   lineCount: number;
+  startedAtMs: number;
 };
 
 type ActiveInstallation = {
@@ -40,6 +41,8 @@ type ActiveInstallation = {
 type RuntimeState = {
   processes: Map<number, RuntimeEntry>;
   installs: Map<number, ActiveInstallation>;
+  restartTimers: Map<number, NodeJS.Timeout>;
+  crashHistory: Map<number, number[]>;
   initialized?: Promise<void>;
   scheduler?: NodeJS.Timeout;
   installPumpScheduled: boolean;
@@ -54,6 +57,8 @@ const state: RuntimeState =
   ({
     processes: new Map(),
     installs: new Map(),
+    restartTimers: new Map(),
+    crashHistory: new Map(),
     installPumpScheduled: false,
     installPumpRunning: false,
     sweeping: false,
@@ -61,6 +66,8 @@ const state: RuntimeState =
   } satisfies RuntimeState);
 // Hot reload can retain state created by an older runtime module.
 if (!(state.installs instanceof Map)) state.installs = new Map();
+if (!(state.restartTimers instanceof Map)) state.restartTimers = new Map();
+if (!(state.crashHistory instanceof Map)) state.crashHistory = new Map();
 state.installPumpScheduled ??= false;
 state.installPumpRunning ??= false;
 globalRuntime.__serverHubRuntime = state;
@@ -117,6 +124,8 @@ async function initializeRuntime() {
   const shutdown = () => {
     if (state.closing) return;
     state.closing = true;
+    for (const timer of state.restartTimers.values()) clearTimeout(timer);
+    state.restartTimers.clear();
     for (const install of state.installs.values()) install.controller.abort("Server Hub is shutting down");
     for (const entry of state.processes.values()) {
       entry.stopping = true;
@@ -398,7 +407,7 @@ export async function installFlow(id: number): Promise<{ ok: boolean; reason?: s
   await ensureRuntimeInitialized();
   const [server] = await db.select().from(servers).where(eq(servers.id, id));
   if (!server) return { ok: false, reason: "Server not found" };
-  if (state.processes.has(id)) return { ok: false, reason: "Stop the server before installing or updating it" };
+  if (state.processes.has(id) || state.restartTimers.has(id)) return { ok: false, reason: "Stop the server and cancel any pending restart before installing or updating it" };
 
   const [active] = await db
     .select()
@@ -681,6 +690,10 @@ async function extractZipSafe(archive: string, destination: string, signal?: Abo
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
+    let entryCount = 0;
+    let expandedBytes = 0;
+    const maxEntries = 100_000;
+    const maxExpandedBytes = 20 * 1024 * 1024 * 1024;
     const fail = (error: unknown) => {
       if (settled) return;
       settled = true;
@@ -699,6 +712,10 @@ async function extractZipSafe(archive: string, destination: string, signal?: Abo
     zip.on("entry", (entry) => {
       void (async () => {
         throwIfCancelled(signal ?? new AbortController().signal);
+        entryCount += 1;
+        expandedBytes += entry.uncompressedSize;
+        if (entryCount > maxEntries) throw new Error(`ZIP entry limit exceeded (${maxEntries})`);
+        if (!Number.isSafeInteger(expandedBytes) || expandedBytes > maxExpandedBytes) throw new Error(`ZIP expanded-size limit exceeded (${maxExpandedBytes} bytes)`);
         const normalized = entry.fileName.replaceAll("\\", "/");
         const target = path.resolve(root, normalized);
         const unixMode = (entry.externalFileAttributes >>> 16) & 0xffff;
@@ -1409,8 +1426,14 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
 // Real process lifecycle and metrics
 // ---------------------------------------------------------------------------
 
-export async function startFlow(id: number): Promise<{ ok: boolean; reason?: string }> {
+export async function startFlow(id: number, automatic = false): Promise<{ ok: boolean; reason?: string }> {
   await ensureRuntimeInitialized();
+  const pendingRestart = state.restartTimers.get(id);
+  if (pendingRestart) {
+    clearTimeout(pendingRestart);
+    state.restartTimers.delete(id);
+  }
+  if (!automatic) state.crashHistory.delete(id);
   const [server] = await db.select().from(servers).where(eq(servers.id, id));
   if (!server) return { ok: false, reason: "Server not found" };
   if (state.processes.has(id)) return { ok: false, reason: "Server process is already running" };
@@ -1418,6 +1441,10 @@ export async function startFlow(id: number): Promise<{ ok: boolean; reason?: str
   if (server.status === "error") return { ok: false, reason: "Installation failed. Retry installation first." };
 
   try {
+    const game = getGame(server.gameId);
+    if (!(await portAvailable(server.port, game.protocol))) {
+      throw new Error(`Port ${server.port}/${game.protocol} is currently in use. Stop the conflicting process or choose another port.`);
+    }
     await writeServerConfig(server);
     await setStatus(id, "starting");
     await logLine(id, "system", "Runtime", `Starting ${server.name} from ${serverDir(server)}`);
@@ -1438,6 +1465,7 @@ export async function startFlow(id: number): Promise<{ ok: boolean; reason?: str
       stopping: false,
       restarting: false,
       lineCount: 0,
+      startedAtMs: Date.now(),
     } satisfies RuntimeEntry;
     state.processes.set(id, entry);
     pipeLines(entry, child.stdout, false);
@@ -1473,7 +1501,53 @@ async function handleExit(entry: RuntimeEntry, code: number | null, signal: Node
   await setStatus(id, expected ? "offline" : "crashed").catch(() => {});
   await logLine(id, expected ? "system" : "error", "Runtime", `Process exited (code ${code ?? "none"}, signal ${signal ?? "none"}).`).catch(() => {});
   await act(id, "power", `${entry.server.name} ${expected ? "stopped" : "crashed"}`).catch(() => {});
-  if (entry.restarting && !state.closing) setTimeout(() => void startFlow(id), 900);
+  if (entry.restarting && !state.closing) {
+    setTimeout(() => void startFlow(id), 900);
+  } else if (!expected && !state.closing) {
+    await scheduleCrashRestart(entry);
+  }
+}
+
+async function scheduleCrashRestart(entry: RuntimeEntry) {
+  // Read the latest settings so disabling the watchdog (or changing its limit)
+  // while a server is running takes effect on that process's next exit.
+  const [server] = await db.select().from(servers).where(eq(servers.id, entry.server.id));
+  if (!server?.autoRestart) return;
+  const id = server.id;
+  const now = Date.now();
+  const windowMs = Math.max(30, Math.min(3600, server.restartWindowSec)) * 1000;
+  let history = (state.crashHistory.get(id) ?? []).filter((timestamp) => now - timestamp <= windowMs);
+  if (now - entry.startedAtMs >= windowMs) history = [];
+  history.push(now);
+  state.crashHistory.set(id, history);
+  const limit = Math.max(0, Math.min(20, server.maxCrashRestarts));
+  if (history.length > limit) {
+    await setStatus(id, "crashed");
+    await logLine(id, "error", "Watchdog", `Automatic restart limit reached (${limit} within ${Math.round(windowMs / 1000)} seconds). Manual intervention is required.`);
+    await act(id, "power", `${server.name} restart limit reached`);
+    return;
+  }
+
+  const delaySeconds = Math.min(30, 2 ** (history.length - 1) * 2);
+  await setStatus(id, "restarting");
+  await logLine(id, "warn", "Watchdog", `Unexpected exit detected. Automatic restart ${history.length} of ${limit} begins in ${delaySeconds} seconds.`);
+  await act(id, "power", `${server.name} scheduled for automatic restart`);
+  const timer = setTimeout(() => {
+    if (state.restartTimers.get(id) !== timer) return;
+    state.restartTimers.delete(id);
+    void (async () => {
+      const [latest] = await db.select().from(servers).where(eq(servers.id, id));
+      if (!latest?.autoRestart) {
+        state.crashHistory.delete(id);
+        if (latest) await setStatus(id, "offline");
+        return;
+      }
+      const result = await startFlow(id, true);
+      if (!result.ok) await logLine(id, "error", "Watchdog", `Automatic restart failed: ${result.reason ?? "unknown error"}`);
+    })();
+  }, delaySeconds * 1000);
+  timer.unref?.();
+  state.restartTimers.set(id, timer);
 }
 
 function stopCommand(server: Server): string {
@@ -1485,8 +1559,21 @@ function stopCommand(server: Server): string {
   return "stop";
 }
 
+export async function cancelPendingRestart(id: number, reason = "Panel") {
+  await ensureRuntimeInitialized();
+  const pendingRestart = state.restartTimers.get(id);
+  if (!pendingRestart) return false;
+  clearTimeout(pendingRestart);
+  state.restartTimers.delete(id);
+  state.crashHistory.delete(id);
+  await setStatus(id, "offline");
+  await logLine(id, "system", "Watchdog", `Pending automatic restart cancelled by ${reason}.`);
+  return true;
+}
+
 export async function stopFlow(id: number, reason = "Panel"): Promise<{ ok: boolean; reason?: string }> {
   await ensureRuntimeInitialized();
+  if (await cancelPendingRestart(id, reason)) return { ok: true };
   const entry = state.processes.get(id);
   if (!entry) {
     await setStatus(id, "offline");
@@ -1517,6 +1604,12 @@ export async function restartFlow(id: number): Promise<{ ok: boolean; reason?: s
 
 export async function killFlow(id: number) {
   await ensureRuntimeInitialized();
+  const pendingRestart = state.restartTimers.get(id);
+  if (pendingRestart) {
+    clearTimeout(pendingRestart);
+    state.restartTimers.delete(id);
+    state.crashHistory.delete(id);
+  }
   const entry = state.processes.get(id);
   if (!entry) {
     await setStatus(id, "offline");
