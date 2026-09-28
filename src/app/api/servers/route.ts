@@ -5,6 +5,7 @@ import { asc } from "drizzle-orm";
 import { db } from "@/db";
 import { servers } from "@/db/schema";
 import { getGame, hasGame } from "@/lib/games";
+import { validCatalogVersion } from "@/lib/catalog";
 import { ensureRuntimeInitialized, installFlow, metricsFor } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
@@ -95,7 +96,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Working directory must be an existing absolute folder" }, { status: 400 });
     }
 
-    const version = body.version && game.versions.includes(body.version) ? body.version : game.versions[0];
+    const requestedVersion = (body.version ?? "").trim();
+    const version = requestedVersion && validCatalogVersion(game.id, requestedVersion) ? requestedVersion : game.versions[0];
     const loader = body.loader && game.loaders?.some((item) => item.id === body.loader) ? body.loader : "vanilla";
     const memoryMb = Math.min(game.maxMemory, Math.max(game.minMemory, Math.round(Number(body.memoryMb ?? game.defaultMemory))));
     const maxPlayers = Math.min(game.maxPlayersCap, Math.max(1, Math.round(Number(body.maxPlayers ?? game.defaultMaxPlayers))));

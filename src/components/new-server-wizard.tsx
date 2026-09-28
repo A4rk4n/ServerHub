@@ -1,14 +1,16 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, ArrowRight, Boxes, Check, Cpu, Globe, HardDrive, KeyRound, Loader2, MemoryStick, ShieldCheck, Sparkles, Terminal, Users } from "lucide-react";
+import { ArrowLeft, ArrowRight, Boxes, Check, CloudDownload, Cpu, Globe, HardDrive, KeyRound, Loader2, MemoryStick, ShieldCheck, Sparkles, Terminal, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { GAMES, type GameDef } from "@/lib/games";
 import { cn, hexA } from "@/lib/format";
 import { Btn, Field, Toggle, inputCls } from "./ui";
 
 const ease = [0.22, 1, 0.36, 1] as const;
+type RemoteVersion = { id: string; channel: "stable" | "preview" | "legacy"; releasedAt?: string };
+type CatalogDetails = { automatic: boolean; sourceName: string; sourceUrl: string; authentication: "none" | "oauth" | "user-files" };
 
 const SUGGESTIONS: Record<string, string> = {
   minecraft: "Skyfall SMP",
@@ -43,8 +45,39 @@ export function NewServerWizard() {
   const [launchCommand, setLaunchCommand] = useState("");
   const [launchArgs, setLaunchArgs] = useState("");
   const [workingDirectory, setWorkingDirectory] = useState("");
+  const [availableVersions, setAvailableVersions] = useState<RemoteVersion[]>([]);
+  const [catalogDetails, setCatalogDetails] = useState<CatalogDetails | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogWarning, setCatalogWarning] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!game) return;
+    const controller = new AbortController();
+    setCatalogLoading(true);
+    setCatalogWarning(null);
+    void Promise.all([
+      fetch("/api/catalog", { signal: controller.signal }).then((response) => response.json()),
+      fetch(`/api/catalog/${encodeURIComponent(game.id)}/versions`, { signal: controller.signal }).then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error ?? "Version catalog is unavailable");
+        return body;
+      }),
+    ]).then(([catalog, versionResult]) => {
+      const details = catalog.games?.find((item: { id: string }) => item.id === game.id) ?? null;
+      setCatalogDetails(details);
+      const versions = versionResult.versions as RemoteVersion[];
+      setAvailableVersions(versions);
+      if (versions.length) setVersion(versions[0].id);
+    }).catch((reason) => {
+      if (!controller.signal.aborted) {
+        setAvailableVersions(game.versions.map((id) => ({ id, channel: id === "latest" ? "stable" : "legacy" })));
+        setCatalogWarning(`Using bundled version information: ${reason instanceof Error ? reason.message : String(reason)}`);
+      }
+    }).finally(() => { if (!controller.signal.aborted) setCatalogLoading(false); });
+    return () => controller.abort();
+  }, [game]);
 
   function chooseGame(g: GameDef) {
     setGame(g);
@@ -212,8 +245,8 @@ export function NewServerWizard() {
               <div className="grid grid-cols-2 gap-4">
                 <Field label={game.loaders ? "Game version" : "Version"}>
                   <select className={inputCls} value={version} onChange={(e) => setVersion(e.target.value)}>
-                    {game.versions.map((v) => (
-                      <option key={v} value={v} className="bg-white">{v}</option>
+                    {(availableVersions.length ? availableVersions : game.versions.map((id) => ({ id, channel: "legacy" as const }))).map((item) => (
+                      <option key={item.id} value={item.id} className="bg-white">{item.id}{item.channel === "preview" ? " — preview" : item.channel === "legacy" ? " — legacy" : ""}</option>
                     ))}
                   </select>
                 </Field>
@@ -234,6 +267,24 @@ export function NewServerWizard() {
                     </select>
                   </Field>
                 )}
+              </div>
+
+              <div className="rounded-xl border border-candy-200 bg-candy-50/70 p-4">
+                <div className="flex items-start gap-3">
+                  <CloudDownload size={18} className="mt-0.5 shrink-0" style={{ color: accent }} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-semibold text-plum-800">
+                      {catalogLoading ? "Checking official downloads…" : catalogDetails?.automatic ? "Downloaded and installed by Server Hub" : "Use files already on this computer"}
+                    </p>
+                    <p className="mt-1 text-[11.5px] leading-relaxed text-plum-500">
+                      {catalogDetails?.automatic
+                        ? `Official source: ${catalogDetails.sourceName}. Server Hub downloads, verifies, stages, and activates the selected server version without opening an external website.${catalogDetails.authentication === "oauth" ? " Authorization is completed in the installation console." : ""}`
+                        : "This custom provider does not publish an automatic server package. Point Server Hub at an existing local installation below."}
+                    </p>
+                    {catalogWarning && <p className="mt-2 text-[11px] text-amber-700">{catalogWarning}</p>}
+                  </div>
+                  {catalogDetails?.automatic && <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-semibold text-emerald-700">Official</span>}
+                </div>
               </div>
 
               <Field label={`Memory allocation — ${ramGb.toFixed(ramGb >= 10 ? 0 : 1)} GB`} hint={`${game.minMemory / 1024}G min · ${game.maxMemory / 1024}G max`}>

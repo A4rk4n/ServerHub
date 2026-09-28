@@ -1,6 +1,6 @@
 {
   "name": "server-hub",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "Local desktop manager for real dedicated game-server processes",
   "private": true,
   "main": "electron/main.cjs",
@@ -21,7 +21,8 @@
     "test:extraction": "tsx --require ./scripts/register-better-sqlite3-stub.cjs scripts/test-extraction.ts",
     "test:migrations": "tsx --require ./scripts/register-better-sqlite3-stub.cjs scripts/test-migrations.ts",
     "test": "npm run typecheck && npm run lint && npm run test:security && npm run test:extraction && npm run test:migrations && npm run test:installation-jobs && npm run test:package-integrity",
-    "sbom": "node scripts/generate-sbom.mjs"
+    "sbom": "node scripts/generate-sbom.mjs",
+    "test:catalog": "tsx scripts/test-catalog.ts"
   },
   "dependencies": {
     "clsx": "2.1.1",

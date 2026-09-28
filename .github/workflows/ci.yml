@@ -37,12 +37,10 @@ jobs:
       - run: npm ci
       - run: npm run build:server
       - run: npm run dist:win:portable
-        env:
-          SERVERHUB_RELEASE_VERSION: 1.4.1
       - name: Validate Windows GUI subsystem and package
         shell: pwsh
         run: |
-          $zip = Get-ChildItem release/ServerHub-1.4.1-Windows-x64-Portable.zip
+          $zip = Get-ChildItem release/ServerHub-*-Windows-x64-Portable.zip | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           Expand-Archive $zip.FullName smoke
           node scripts/validate-package.mjs smoke/ServerHub/resources/server
           $bytes = [IO.File]::ReadAllBytes("smoke/ServerHub/ServerHub.exe")
@@ -55,6 +53,6 @@ jobs:
         with:
           name: ServerHub-Windows-x64
           path: |
-            release/ServerHub-1.4.1-Windows-x64-Portable.zip
+            release/ServerHub-*-Windows-x64-Portable.zip
             release/SHA256SUMS
             release/release-manifest.json

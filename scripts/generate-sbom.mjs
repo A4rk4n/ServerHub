@@ -11,7 +11,7 @@ const components = Object.entries(lock.packages ?? {}).filter(([key, value]) => 
 }).sort((a,b) => `${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`));
 const serial = `urn:uuid:${crypto.createHash("sha256").update(`${pkg.name}@${pkg.version}:${lock.lockfileVersion}`).digest("hex").replace(/^(.{8})(.{4})(.{4})(.{4})(.{12}).*/, "$1-$2-$3-$4-$5")}`;
 const sbom = { bomFormat: "CycloneDX", specVersion: "1.5", serialNumber: serial, version: 1, metadata: { component: { type: "application", name: pkg.name, version: pkg.version } }, components };
-const output = path.resolve(process.argv[2] || "release/serverhub-1.4.1-sbom.cdx.json");
+const output = path.resolve(process.argv[2] || `release/serverhub-${pkg.version}-sbom.cdx.json`);
 await fsp.mkdir(path.dirname(output), { recursive: true });
 await fsp.writeFile(output, `${JSON.stringify(sbom, null, 2)}\n`);
 console.log(`SBOM_OK ${components.length} components -> ${output}`);
