@@ -96,6 +96,7 @@ async function createCustom(base, port, name, launch = {}) {
       name,
       version: "manual",
       port,
+      bindAddress: "127.0.0.1",
       memoryMb: 1024,
       maxPlayers: 4,
       worldName: "integration",

@@ -939,13 +939,13 @@ const INSTALLATION_PROVIDERS = {
   },
 } satisfies Record<InstallerKind, InstallationProvider>;
 
-async function portAvailable(port: number, protocol: "TCP" | "UDP") {
+export async function portAvailable(port: number, protocol: "TCP" | "UDP", address = "0.0.0.0") {
   if (protocol === "TCP") {
     return new Promise<boolean>((resolve) => {
       const probe = net.createServer();
       probe.unref();
       probe.once("error", () => resolve(false));
-      probe.listen(port, "0.0.0.0", () => probe.close(() => resolve(true)));
+      probe.listen(port, address, () => probe.close(() => resolve(true)));
     });
   }
   return new Promise<boolean>((resolve) => {
@@ -955,7 +955,7 @@ async function portAvailable(port: number, protocol: "TCP" | "UDP") {
       try { probe.close(); } catch { /* socket never bound */ }
       resolve(false);
     });
-    probe.bind(port, "0.0.0.0", () => probe.close(() => resolve(true)));
+    probe.bind(port, address, () => probe.close(() => resolve(true)));
   });
 }
 
@@ -985,7 +985,7 @@ async function preflightInstallation(server: Server, root: string, context: Inst
     );
   }
 
-  if (!(await portAvailable(server.port, game.protocol))) {
+  if (!(await portAvailable(server.port, game.protocol, server.bindAddress))) {
     throw new Error(`Port ${server.port}/${game.protocol} is currently in use. Free the port or choose another one before retrying.`);
   }
   await context.report("preflight", 8, `Preflight checks passed for ${game.name}`);
@@ -1180,6 +1180,7 @@ export async function writeServerConfig(server: Server, rootOverride?: string, a
     await mergeProperties(path.join(root, "server.properties"), {
       motd: server.motd,
       "server-port": server.port,
+      "server-ip": server.bindAddress,
       "max-players": server.maxPlayers,
       difficulty: server.difficulty,
       pvp: server.pvp,
@@ -1193,6 +1194,7 @@ export async function writeServerConfig(server: Server, rootOverride?: string, a
     await mergeProperties(path.join(root, "server.properties"), {
       "server-name": server.name,
       "server-port": server.port,
+      "server-ip": server.bindAddress,
       "server-portv6": server.port + 1,
       "max-players": server.maxPlayers,
       "level-name": server.worldName,
@@ -1359,7 +1361,7 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
     if (!server.serverPassword || server.serverPassword.length < 5) throw new Error("Valheim requires a server password of at least five characters.");
     return {
       executable,
-      args: ["-nographics", "-batchmode", "-name", server.name, "-port", String(server.port), "-world", server.worldName, "-password", server.serverPassword, "-public", "1"],
+      args: ["-nographics", "-batchmode", "-name", server.name, "-port", String(server.port), "-world", server.worldName, "-password", server.serverPassword, "-public", "1", "-ip", server.bindAddress],
       env: process.platform === "linux" ? { LD_LIBRARY_PATH: `${path.dirname(executable)}/linux64:${process.env.LD_LIBRARY_PATH || ""}` } : undefined,
     };
   }
@@ -1369,7 +1371,7 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
       : ["ShooterGame/Binaries/Linux/ShooterGameServer", "ShooterGameServer"]);
     if (!executable) throw new Error("ARK server executable was not found after SteamCMD installation.");
     const map = server.worldName || "TheIsland";
-    return { executable, args: [`${map}?SessionName=${server.name}?Port=${server.port}?QueryPort=${getGame(server.gameId).queryPort ?? 27015}?MaxPlayers=${server.maxPlayers}`, "-server", "-log"] };
+    return { executable, args: [`${map}?SessionName=${server.name}?Port=${server.port}?QueryPort=${getGame(server.gameId).queryPort ?? 27015}?MaxPlayers=${server.maxPlayers}?MultiHome=${server.bindAddress}`, "-server", "-log"] };
   }
   if (server.gameId === "terraria") {
     const executable = await findExecutable(root, process.platform === "win32"
@@ -1383,7 +1385,7 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
     if (!executable) throw new Error("RustDedicated executable was not found after SteamCMD installation.");
     return { executable, args: [
       "-batchmode", "+server.identity", safeFileName(server.worldName, "serverhub"),
-      "+server.hostname", server.name, "+server.port", String(server.port),
+      "+server.hostname", server.name, "+server.ip", server.bindAddress, "+server.port", String(server.port),
       "+server.queryport", String(getGame(server.gameId).queryPort ?? server.port + 1),
       "+server.maxplayers", String(server.maxPlayers), "+server.seed", server.seed || "0",
       "+server.description", server.motd,
@@ -1397,7 +1399,7 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
     if (!server.ownerId.trim()) throw new Error("Dragonwilds requires the owner's in-game Player ID.");
     if (server.adminPassword.length < 5) throw new Error("Dragonwilds requires an admin password of at least five characters.");
     if (process.platform !== "win32") await fsp.chmod(executable, 0o755).catch(() => {});
-    return { executable, args: ["-log", "-NewConsole", `-Port=${server.port}`] };
+    return { executable, args: ["-log", "-NewConsole", `-Port=${server.port}`, `-MULTIHOME=${server.bindAddress}`] };
   }
   if (server.gameId === "hytale") {
     const serverRoot = path.join(root, "Server");
@@ -1415,7 +1417,7 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
         ...aot,
         "-jar", "HytaleServer.jar",
         "--assets", "../Assets.zip",
-        "--bind", String(server.port),
+        "--bind", `${server.bindAddress}:${server.port}`,
       ],
     };
   }
@@ -1442,7 +1444,7 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
 
   try {
     const game = getGame(server.gameId);
-    if (!(await portAvailable(server.port, game.protocol))) {
+    if (!(await portAvailable(server.port, game.protocol, server.bindAddress))) {
       throw new Error(`Port ${server.port}/${game.protocol} is currently in use. Stop the conflicting process or choose another port.`);
     }
     await writeServerConfig(server);

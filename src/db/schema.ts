@@ -22,6 +22,8 @@ export const servers = sqliteTable("servers", {
   loader: text("loader").notNull().default("vanilla"),
   status: text("status").notNull().default("installing"),
   port: integer("port").notNull(),
+  bindAddress: text("bind_address").notNull().default("185.83.148.20"),
+  readinessTimeoutSec: integer("readiness_timeout_sec").notNull().default(60),
   memoryMb: integer("memory_mb").notNull().default(4096),
   maxPlayers: integer("max_players").notNull().default(20),
   motd: text("motd").notNull().default(""),

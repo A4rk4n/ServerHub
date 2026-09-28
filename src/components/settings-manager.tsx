@@ -26,6 +26,8 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
     name: initial.name,
     motd: initial.motd,
     port: initial.port,
+    bindAddress: initial.bindAddress,
+    readinessTimeoutSec: initial.readinessTimeoutSec,
     memoryMb: initial.memoryMb,
     maxPlayers: initial.maxPlayers,
     worldName: initial.worldName,
@@ -56,6 +58,8 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
     form.name !== initial.name ||
     form.motd !== initial.motd ||
     form.port !== initial.port ||
+    form.bindAddress !== initial.bindAddress ||
+    form.readinessTimeoutSec !== initial.readinessTimeoutSec ||
     form.memoryMb !== initial.memoryMb ||
     form.maxPlayers !== initial.maxPlayers ||
     form.worldName !== initial.worldName ||
@@ -147,8 +151,9 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
               <input className={cn(inputCls, "font-mono opacity-60")} readOnly value={game.protocol === "UDP" ? form.port + 1 : form.port} />
             </Field>
           </div>
+          <div className="mt-4 grid grid-cols-2 gap-4"><Field label="Bind IP" hint="must belong to this machine"><input className={cn(inputCls,"font-mono")} value={form.bindAddress} onChange={(e)=>setForm({...form,bindAddress:e.target.value})}/></Field><Field label="Readiness timeout" hint="seconds"><input className={cn(inputCls,"font-mono")} type="number" min={10} max={300} value={form.readinessTimeoutSec} onChange={(e)=>setForm({...form,readinessTimeoutSec:Number(e.target.value)})}/></Field></div>
           <p className="mt-3 rounded-lg bg-candy-50 px-3 py-2 font-mono text-[11px] text-plum-500">
-            players connect via <span className="text-plum-800">127.0.0.1:{form.port}</span>
+            players connect via <span className="text-plum-800">{form.bindAddress}:{form.port}</span>
           </p>
         </section>
 

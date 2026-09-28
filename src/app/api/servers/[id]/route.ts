@@ -83,6 +83,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
   if (typeof body.restartWindowSec === "number" && Number.isFinite(body.restartWindowSec)) { patch.restartWindowSec = Math.min(3600, Math.max(30, Math.round(body.restartWindowSec))); changes.push("restart window"); }
   if (typeof body.autoBackupBeforeUpdate === "boolean") { patch.autoBackupBeforeUpdate = body.autoBackupBeforeUpdate; changes.push("update backup policy"); }
   if (typeof body.updateBackupRetention === "number" && Number.isFinite(body.updateBackupRetention)) { patch.updateBackupRetention = Math.min(20, Math.max(1, Math.round(body.updateBackupRetention))); changes.push("update backup retention"); }
+  if (typeof body.bindAddress === "string" && /^(?:\d{1,3}\.){3}\d{1,3}$/.test(body.bindAddress.trim())) { patch.bindAddress = body.bindAddress.trim(); changes.push("bind address"); }
+  if (typeof body.readinessTimeoutSec === "number" && Number.isFinite(body.readinessTimeoutSec)) { patch.readinessTimeoutSec = Math.min(300, Math.max(10, Math.round(body.readinessTimeoutSec))); changes.push("readiness timeout"); }
   if (typeof body.port === "number" && Number.isInteger(body.port) && body.port >= 1024 && body.port <= 65535) {
     const clash = await db.select({ id: servers.id }).from(servers).where(and(eq(servers.port, body.port)));
     if (clash.some((c) => c.id !== s.id)) return NextResponse.json({ error: `Port ${body.port} is already in use` }, { status: 409 });

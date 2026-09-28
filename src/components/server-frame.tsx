@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CalendarClock, DatabaseBackup, FolderTree, Play, Puzzle, RotateCw, Settings, Square, Terminal, Users } from "lucide-react";
+import { Activity, AlertTriangle, CalendarClock, DatabaseBackup, FolderTree, Play, Puzzle, RotateCw, Settings, Square, Terminal, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -58,6 +58,7 @@ export function ServerFrame({ initial, game, children }: { initial: Server; game
     { href: `${base}/tasks`, label: "Scheduler", icon: CalendarClock },
     ...(game.supportsMods ? [{ href: `${base}/mods`, label: modsLabel, icon: Puzzle }] : []),
     { href: `${base}/files`, label: "Files", icon: FolderTree },
+    { href: `${base}/diagnostics`, label: "Diagnostics", icon: Activity },
     { href: `${base}/settings`, label: "Settings", icon: Settings },
   ];
 
@@ -86,7 +87,7 @@ export function ServerFrame({ initial, game, children }: { initial: Server; game
             {" · "}v{server.version}
             {server.loader !== "vanilla" ? ` · ${server.loader}` : ""}
             {" · "}
-            <span className="font-mono text-[11.5px]">127.0.0.1:{server.port}</span>
+            <span className="font-mono text-[11.5px]">{server.bindAddress}:{server.port}</span>
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">

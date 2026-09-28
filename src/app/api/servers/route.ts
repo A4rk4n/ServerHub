@@ -43,6 +43,8 @@ type CreateBody = Partial<{
   version: string;
   loader: string;
   port: number;
+  bindAddress: string;
+  readinessTimeoutSec: number;
   memoryMb: number;
   maxPlayers: number;
   motd: string;
@@ -108,6 +110,8 @@ export async function POST(req: Request) {
       loader,
       status: "installing",
       port,
+      bindAddress: (body.bindAddress ?? "185.83.148.20").trim(),
+      readinessTimeoutSec: Math.min(300, Math.max(10, Math.round(body.readinessTimeoutSec ?? 60))),
       memoryMb,
       maxPlayers,
       motd: (body.motd ?? "A Server Hub server").slice(0, 140),

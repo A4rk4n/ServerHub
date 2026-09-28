@@ -38,6 +38,8 @@ const DDL = [
     loader TEXT NOT NULL DEFAULT 'vanilla',
     status TEXT NOT NULL DEFAULT 'installing',
     port INTEGER NOT NULL,
+    bind_address TEXT NOT NULL DEFAULT '185.83.148.20',
+    readiness_timeout_sec INTEGER NOT NULL DEFAULT 60,
     memory_mb INTEGER NOT NULL DEFAULT 4096,
     max_players INTEGER NOT NULL DEFAULT 20,
     motd TEXT NOT NULL DEFAULT '',
@@ -185,6 +187,8 @@ let wrapped: SqliteClient | null = null;
 
 const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
   servers: {
+    bind_address: "TEXT NOT NULL DEFAULT '185.83.148.20'",
+    readiness_timeout_sec: "INTEGER NOT NULL DEFAULT 60",
     launch_command: "TEXT NOT NULL DEFAULT ''",
     launch_args: "TEXT NOT NULL DEFAULT ''",
     working_directory: "TEXT NOT NULL DEFAULT ''",
@@ -209,7 +213,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
   },
 };
 
-export const SCHEMA_VERSION = 1700;
+export const SCHEMA_VERSION = 2000;
 
 function migrate(db: DatabaseSync) {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -230,7 +234,7 @@ function migrate(db: DatabaseSync) {
       }
     }
     db.prepare("INSERT INTO schema_migrations (version, applied_at, description) VALUES (?, ?, ?)")
-      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Server Hub v1.7.0 safe-update schema");
+      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Server Hub v2.0.0 operations schema");
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
