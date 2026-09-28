@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Check, Cpu, Globe, KeyRound, RotateCw, Save, Swords, Terminal, Trash2, User } from "lucide-react";
+import { AlertTriangle, Check, CloudDownload, Cpu, Globe, KeyRound, RefreshCw, RotateCw, Save, Swords, Terminal, Trash2, User } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Server } from "@/db/schema";
@@ -46,6 +46,9 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
   const [confirmDel, setConfirmDel] = useState(false);
   const [delName, setDelName] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<{supported:boolean; currentVersion:string; latestVersion?:string; updateAvailable?:boolean; rolling?:boolean; provider?:string; reason?:string} | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updating, setUpdating] = useState(false);
 
   const dirty =
     form.name !== initial.name ||
@@ -83,6 +86,20 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
     } finally {
       setSaving(false);
     }
+  }
+
+  async function checkUpdate() {
+    setCheckingUpdate(true); setErr(null);
+    try { const response=await fetch(`/api/servers/${initial.id}/updates`,{cache:"no-store"}); const body=await response.json(); if(!response.ok) throw new Error(body.error??"Update check failed"); setUpdateInfo(body); }
+    catch(error) { setErr(error instanceof Error?error.message:String(error)); }
+    finally { setCheckingUpdate(false); }
+  }
+
+  async function applyUpdate() {
+    setUpdating(true); setErr(null);
+    try { const response=await fetch(`/api/servers/${initial.id}/updates`,{method:"POST"}); const body=await response.json(); if(!response.ok) throw new Error(body.error??body.reason??"Update failed"); router.refresh(); }
+    catch(error) { setErr(error instanceof Error?error.message:String(error)); }
+    finally { setUpdating(false); }
   }
 
   async function destroy() {
@@ -212,6 +229,34 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
                 <input className={cn(inputCls, "font-mono")} value={form.workingDirectory} onChange={(e) => setForm({ ...form, workingDirectory: e.target.value })} />
               </Field>
             </div>
+          </section>
+        )}
+
+        {game.installer !== "manual" && (
+          <section className="panel p-5">
+            <h3 className="font-display mb-3 flex items-center gap-2 text-[14px] font-semibold text-plum-900">
+              <CloudDownload size={14} style={{ color: accent }} /> Updates
+            </h3>
+            <p className="text-[12px] leading-relaxed text-plum-500">
+              Check the official provider and install updates through Server Hub’s staged, rollback-safe installation system.
+            </p>
+            {updateInfo && (
+              <div className="mt-3 rounded-xl border border-candy-200 bg-candy-50 px-4 py-3 text-[12px]">
+                <p className="font-medium text-plum-800">
+                  {updateInfo.rolling ? "Latest provider build can be refreshed" : updateInfo.updateAvailable ? `${updateInfo.latestVersion} is available` : "Already up to date"}
+                </p>
+                <p className="mt-1 text-plum-500">Installed: {updateInfo.currentVersion}{updateInfo.provider ? ` · ${updateInfo.provider}` : ""}</p>
+              </div>
+            )}
+            <div className="mt-4 flex gap-2">
+              <Btn variant="subtle" loading={checkingUpdate} onClick={checkUpdate}><RefreshCw size={14}/> Check</Btn>
+              {updateInfo?.updateAvailable && (
+                <Btn variant="primary" accent={accent} loading={updating} disabled={!['offline','crashed','error'].includes(initial.status)} onClick={applyUpdate}>
+                  <CloudDownload size={14}/> {updateInfo.rolling ? "Refresh build" : "Install update"}
+                </Btn>
+              )}
+            </div>
+            {updateInfo?.updateAvailable && !['offline','crashed','error'].includes(initial.status) && <p className="mt-2 text-[11px] text-amber-700">Stop the server before updating.</p>}
           </section>
         )}
 
