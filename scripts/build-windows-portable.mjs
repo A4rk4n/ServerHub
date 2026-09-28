@@ -145,7 +145,7 @@ await new Promise((resolve, reject) => {
   destination.on("error", reject);
   zip.on("error", reject);
   zip.pipe(destination);
-  zip.directory(stage, "ServerHub", { date: new Date(sourceEpoch * 1000), mode: 0o644 });
+  zip.directory(stage, "ServerHub", { date: new Date(sourceEpoch * 1000) });
   void zip.finalize();
 });
 
