@@ -17,7 +17,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test:installation-jobs": "node scripts/test-installation-jobs.mjs"
+    "test:installation-jobs": "node scripts/test-installation-jobs.mjs",
+    "test:package-integrity": "node scripts/test-package-integrity.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

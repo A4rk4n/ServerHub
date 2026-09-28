@@ -9,6 +9,7 @@ import { ZipArchive } from "archiver";
 import { inject } from "postject";
 import * as ResEdit from "resedit";
 import * as tar from "tar";
+import { validateServerBundle } from "./validate-package.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const build = path.join(root, "build", "windows-portable");
@@ -19,6 +20,13 @@ const launcher = path.join(root, "scripts", "portable-launcher.cjs");
 const standalone = path.join(root, "build", "server");
 const version = JSON.parse(await fsp.readFile(path.join(root, "package.json"), "utf8")).version;
 const output = path.join(release, `ServerHub-${version}-Windows-x64-Portable.zip`);
+const expectedVersion = process.env.SERVERHUB_RELEASE_VERSION || version;
+if (version !== expectedVersion) throw new Error(`Version mismatch: package=${version}, requested=${expectedVersion}`);
+const sourceCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+const sourceState = execFileSync("git", ["status", "--porcelain", "--untracked-files=normal"], { cwd: root, encoding: "utf8" }).trim();
+if (sourceState) throw new Error("Release builds require a clean source tree");
+const sourceEpoch = Number(execFileSync("git", ["show", "-s", "--format=%ct", "HEAD"], { cwd: root, encoding: "utf8" }).trim());
+const lockfileSha256 = crypto.createHash("sha256").update(await fsp.readFile(path.join(root, "package-lock.json"))).digest("hex");
 
 async function applyWindowsIcon(executable) {
   const source = await fsp.readFile(executable);
@@ -86,9 +94,34 @@ await inject(executable, "NODE_SEA_BLOB", await fsp.readFile(blob), {
 });
 await markAsWindowsGui(executable);
 
+console.log("[portable] acquiring pinned WebViewJS 0.4.7 native shell");
+const nativeShell = path.join(stage, "resources", "native-shell");
+await fsp.mkdir(nativeShell, { recursive: true });
+await fsp.writeFile(path.join(nativeShell, "entry.cjs"), "// Module-resolution anchor for the packaged native shell.\n");
+for (const packageName of ["@webviewjs/webview@0.4.7", "@webviewjs/webview-win32-x64-msvc@0.4.7"]) {
+  const packed = execFileSync("npm", ["pack", packageName, "--pack-destination", cache, "--silent"], { cwd: root, encoding: "utf8" }).trim().split(/\r?\n/).at(-1);
+  const scopeDir = path.join(nativeShell, "node_modules", "@webviewjs");
+  const packageDir = path.join(build, `webview-${packed.replace(/[^a-z0-9.-]/gi, "-")}`);
+  await fsp.mkdir(packageDir, { recursive: true });
+  await tar.x({ file: path.join(cache, packed), cwd: packageDir, gzip: true, strict: true });
+  await fsp.mkdir(scopeDir, { recursive: true });
+  const targetName = packageName.slice("@webviewjs/".length).split("@")[0];
+  await fsp.cp(path.join(packageDir, "package"), path.join(scopeDir, targetName), { recursive: true });
+}
+
 console.log("[portable] copying standalone application");
 await fsp.mkdir(path.join(stage, "resources"), { recursive: true });
-await fsp.cp(standalone, path.join(stage, "resources", "server"), { recursive: true });
+const packagedServer = path.join(stage, "resources", "server");
+for (const name of ["server.js", "package.json", ".next", "node_modules", "public", "start.mjs"]) {
+  await fsp.cp(path.join(standalone, name), path.join(packagedServer, name), { recursive: true });
+}
+const buildInfo = {
+  version, sourceCommit, sourceState: "clean", sourceEpoch, buildEpoch: Number(process.env.SOURCE_DATE_EPOCH || sourceEpoch),
+  node: process.version, npm: execFileSync("npm", ["--version"], { encoding: "utf8" }).trim(),
+  target: { platform: "win32", architecture: "x64" }, lockfileSha256,
+};
+await fsp.writeFile(path.join(packagedServer, "build-info.json"), `${JSON.stringify(buildInfo, null, 2)}\n`);
+await validateServerBundle(packagedServer);
 await fsp.writeFile(path.join(stage, "README.txt"), [
   "SERVER HUB — WINDOWS PORTABLE",
   "",
@@ -112,12 +145,15 @@ await new Promise((resolve, reject) => {
   destination.on("error", reject);
   zip.on("error", reject);
   zip.pipe(destination);
-  zip.directory(stage, "ServerHub");
+  zip.directory(stage, "ServerHub", { date: new Date(sourceEpoch * 1000), mode: 0o644 });
   void zip.finalize();
 });
 
 const hash = crypto.createHash("sha256").update(await fsp.readFile(output)).digest("hex");
-await fsp.writeFile(`${output}.sha256`, `${hash}  ${path.basename(output)}\n`, "utf8");
+const buildInfoChecksum = crypto.createHash("sha256").update(await fsp.readFile(path.join(packagedServer, "build-info.json"))).digest("hex");
 const size = (await fsp.stat(output)).size;
+const manifest = { artifact: path.basename(output), size, sha256: hash, sourceCommit, buildInfoChecksum, testResults: process.env.SERVERHUB_TEST_RESULTS || "validated by release test summary" };
+await fsp.writeFile(path.join(release, "release-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+await fsp.writeFile(path.join(release, "SHA256SUMS"), `${hash}  ${path.basename(output)}\n`, "utf8");
 console.log(`[portable] ready: ${output} (${(size / 1024 / 1024).toFixed(1)} MB)`);
 console.log(`[portable] SHA-256: ${hash}`);
