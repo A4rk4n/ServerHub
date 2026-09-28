@@ -157,7 +157,7 @@ await new Promise(async (resolve, reject) => {
         await appendSorted(absolute, archiveName);
       } else if (entry.isFile()) {
         const mode = entry.name.toLowerCase().endsWith(".exe") ? 0o755 : 0o644;
-        zip.file(absolute, { name: archiveName, date: archiveDate, mode });
+        zip.append(fs.createReadStream(absolute), { name: archiveName, date: archiveDate, mode });
       } else throw new Error(`Unsupported package entry: ${absolute}`);
     }
   }
