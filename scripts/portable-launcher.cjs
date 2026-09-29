@@ -103,7 +103,7 @@ async function openNativeWindow(url) {
   mainWindow.center();
   const trustedOrigin = new URL(url).origin;
   mainWebview = mainWindow.createWebview({ url, enableDevtools: false, navigationHandler: (target) => { try { return new URL(target).origin === trustedOrigin; } catch { return false; } }, newWindowHandler: () => false });
-  mainWebview.once("page-load-finished", () => { log("Native application window is ready"); mainWindow.show(); mainWindow.focus(); });
+  mainWebview.once("page-load-finished", () => { log("Native application window is ready"); mainWindow.show(); mainWindow.focus(); void fetch(`${trustedOrigin}/api/tools`, { method: "POST", headers: { "content-type": "application/json", "x-serverhub-session": sessionToken, "x-serverhub-native-shell": "webview2" }, body: JSON.stringify({ action: "record-native-use", toolId: "webview2" }) }).catch((error) => log(`Could not record WebView2 use: ${error?.message || error}`)); });
   const reveal = setTimeout(() => mainWindow?.show(), 4_000);
   reveal.unref?.();
 }

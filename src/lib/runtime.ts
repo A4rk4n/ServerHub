@@ -12,7 +12,7 @@ import yauzl from "yauzl";
 import * as tar from "tar";
 import { and, asc, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db, dbPath, sqliteClient } from "@/db";
-import { activity, backups, consoleLogs, incidents, installationEvents, installationJobs, moderationActions, playerSessions, players, servers, taskRuns, tasks, toolInventory, toolOperations } from "@/db/schema";
+import { activity, backups, consoleLogs, incidents, installationEvents, installationJobs, moderationActions, playerSessions, players, servers, taskRuns, tasks } from "@/db/schema";
 import type { Backup, InstallationJob, Server } from "@/db/schema";
 import { getGame, type InstallerKind } from "./games";
 import { observationKey, reconcileObservationKeys } from "./player-observations";
@@ -21,6 +21,7 @@ import { scheduledCommand } from "./scheduled-actions";
 import { queryA2sInfo, queryA2sPlayers, queryMinecraftStatus } from "./query-protocols";
 import { isProtectedSecret, protectAndVerify, revealSecret } from "./credential-vault";
 import { appDataDir, backupsDir, ensureDataDirs, safeFileName, serverDir, toolsDir } from "./storage";
+import { recordSuccessfulToolUse } from "./tool-usage";
 
 export type Metric = { t: number; cpu: number; ram: number; players: number; tps: number | null };
 
@@ -906,8 +907,6 @@ async function runLogged(context: InstallContext, executable: string, args: stri
   });
 }
 
-async function markToolUsed(toolId:string,summary:string){const now=new Date();await db.update(toolInventory).set({lastUsedAt:now,updatedAt:now}).where(eq(toolInventory.id,toolId));await db.insert(toolOperations).values({toolId,operation:"use",status:"succeeded",summary,completedAt:now});}
-
 async function installSteam(server: Server, root: string, context: InstallContext) {
   const game = getGame(server.gameId);
   if (!game.steamAppId) throw new Error(`${game.name} has no verified SteamCMD application ID.`);
@@ -932,7 +931,8 @@ async function installSteam(server: Server, root: string, context: InstallContex
   } else {
     await runLogged(context, steamcmd, steamArgs, path.dirname(steamcmd));
   }
-  await markToolUsed("steamcmd",`Installed or validated Steam app ${game.steamAppId}`);
+  await recordSuccessfulToolUse("steamcmd",`Installed or validated Steam app ${game.steamAppId}`);
+  if(process.platform === "win32") await recordSuccessfulToolUse("powershell","Launched SteamCMD for a successful managed installation");
 }
 
 async function ensureHytaleDownloader(context: InstallContext) {
@@ -984,7 +984,7 @@ async function installHytale(server: Server, root: string, context: InstallConte
       "Authorize the official Hytale Downloader using the URL and device code shown in Console"
     );
     await runLogged(context, downloader, ["-download-path", archive], path.dirname(downloader));
-    await markToolUsed("hytale-downloader","Downloaded Hytale server archive");
+    await recordSuccessfulToolUse("hytale-downloader","Downloaded Hytale server archive");
   } else {
     await context.report("downloading", 68, "Reusing the Hytale server archive downloaded by the previous attempt");
   }
@@ -1591,6 +1591,7 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
     }
     await db.update(servers).set({ status: "online", lastStartedAt: new Date(), updatedAt: new Date() }).where(eq(servers.id, id));
     await setHealth(id,"ready","Provider readiness probe passed",probe,true);
+    if(server.gameId === "minecraft" || server.gameId === "minecraft-modded") await recordSuccessfulToolUse("java","Started a Minecraft server and passed its readiness probe");
     await logLine(id, "success", "Runtime", `Process started with PID ${child.pid}.`);
     await act(id, "power", `${server.name} started (PID ${child.pid})`);
     return { ok: true };
