@@ -240,6 +240,7 @@ jobs:
       - name: Create the release and attach assets without overwriting
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           flags=()

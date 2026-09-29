@@ -87,8 +87,11 @@ jobs:
       - name: Attach missing assets without overwriting existing ones
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          exec 2> >(tee /tmp/attach-step-stderr.log >&2)
+          trap 'echo "::error::Attach step failed: $(tail -c 500 /tmp/attach-step-stderr.log | tr "\n" " ")"; exit 1' ERR
           release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}")
           if [ "$(printf '%s' "$release_json" | jq -r .draft)" = "true" ]; then
             echo "::error::Release ${TAG} is a draft; refusing to attach"; exit 1
