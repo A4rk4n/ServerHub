@@ -1,4 +1,5 @@
 import { hostPlatform } from "./host-platform";
+import { diagnoseInstallationFailure, installationFailureMessage } from "./installation-diagnostics";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -308,9 +309,9 @@ function throwIfCancelled(signal: AbortSignal) {
 
 function cleanInstallMessage(message: string, limit = 2_000) {
   const clean = message.replace(/\0/g, "").replace(/[\r\n]+/g, " ").trim();
-  const friendly = /spawn\s+EFTYPE/i.test(clean)
-    ? "Windows could not launch an installation tool. Its executable may be damaged or incompatible; choose Repair and retry."
-    : /\bENOENT\b/i.test(clean)
+  const diagnosed = installationFailureMessage(clean);
+  if (diagnosed !== clean) return diagnosed.slice(0, limit);
+  const friendly = /\bENOENT\b/i.test(clean)
       ? "A required installation tool or file is missing; choose Repair and retry."
       : /\bEACCES\b|access is denied/i.test(clean)
         ? "Windows denied access to an installation file. Check antivirus, folder permissions, and run Repair and retry."
@@ -914,10 +915,13 @@ async function runSteamCmdLogged(context: InstallContext, executable: string, ar
     catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const bootstrapRestart = /exited with code 7/i.test(message) && /(?:Downloading update|Installing update|Update complete, launching Steamcmd)/i.test(message);
-      if (!bootstrapRestart || attempt === 3) throw error;
-      await context.report("installing", 25, `SteamCMD updated its bootstrap files; waiting for restart (${attempt}/3)`);
+      const diagnosis = diagnoseInstallationFailure(message);
+      const transientProviderFailure = diagnosis?.transient === true;
+      if ((!bootstrapRestart && !transientProviderFailure) || attempt === 3) throw error;
+      const reason = bootstrapRestart ? "updated its bootstrap files" : `reported ${diagnosis?.code ?? "a temporary failure"}`;
+      await context.report("installing", 25, `SteamCMD ${reason}; retrying safely (${attempt}/3)`);
       await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(resolve, 8_000);
+        const timer = setTimeout(resolve, bootstrapRestart ? 8_000 : attempt * 5_000);
         const cancel = () => { clearTimeout(timer); reject(new InstallationCancelledError(cancellationMessage(context.signal))); };
         context.signal.addEventListener("abort", cancel, { once: true });
         timer.unref?.();
