@@ -11,7 +11,7 @@ import { finished, pipeline } from "node:stream/promises";
 import yauzl from "yauzl";
 import * as tar from "tar";
 import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
-import { db } from "@/db";
+import { db, dbPath, sqliteClient } from "@/db";
 import { activity, backups, consoleLogs, installationEvents, installationJobs, players, servers, tasks } from "@/db/schema";
 import type { Backup, InstallationJob, Server } from "@/db/schema";
 import { getGame, type InstallerKind } from "./games";
@@ -99,9 +99,24 @@ async function migrateCredentialVault() {
   if (process.platform !== "win32") return;
   const rows = await db.select().from(servers);
   const pending = rows.filter(row => [row.serverPassword,row.adminPassword,row.ownerId].some(value => value && !isProtectedSecret(value)));
-  if (!pending.length) return;
-  const encrypted = await Promise.all(pending.map(async row => ({ id: row.id, serverPassword: await protectAndVerify(row.serverPassword), adminPassword: await protectAndVerify(row.adminPassword), ownerId: await protectAndVerify(row.ownerId) })));
-  await db.transaction(async tx => { for (const row of encrypted) await tx.update(servers).set({serverPassword:row.serverPassword,adminPassword:row.adminPassword,ownerId:row.ownerId,updatedAt:new Date()}).where(eq(servers.id,row.id)); });
+  const marker = path.join(appDataDir(), "credential-migration.json");
+  if (!pending.length) { await fsp.rm(marker,{force:true}).catch(()=>{}); return; }
+  const prior = await fsp.readFile(marker,"utf8").then(value=>JSON.parse(value) as {backup:string}).catch(()=>null);
+  const backup = prior?.backup ?? `${dbPath}.pre-dpapi-${new Date().toISOString().replace(/[:.]/g,"-")}.bak`;
+  if (!prior) {
+    sqliteClient().exec("PRAGMA wal_checkpoint(FULL)");
+    await fsp.copyFile(dbPath,backup);
+    await fsp.writeFile(marker,JSON.stringify({version:1,phase:"prepared",backup,serverIds:pending.map(row=>row.id),createdAt:new Date().toISOString()},null,2));
+  }
+  try {
+    const encrypted = await Promise.all(pending.map(async row => ({ id: row.id, serverPassword: await protectAndVerify(row.serverPassword), adminPassword: await protectAndVerify(row.adminPassword), ownerId: await protectAndVerify(row.ownerId) })));
+    await fsp.writeFile(marker,JSON.stringify({version:1,phase:"applying",backup,serverIds:pending.map(row=>row.id),createdAt:new Date().toISOString()},null,2));
+    await db.transaction(async tx => { for (const row of encrypted) await tx.update(servers).set({serverPassword:row.serverPassword,adminPassword:row.adminPassword,ownerId:row.ownerId,updatedAt:new Date()}).where(eq(servers.id,row.id)); });
+    await fsp.rm(marker,{force:true});
+  } catch (error) {
+    await fsp.writeFile(marker,JSON.stringify({version:1,phase:"failed",backup,error:error instanceof Error?error.message:String(error),failedAt:new Date().toISOString()},null,2)).catch(()=>{});
+    throw new Error(`Credential migration failed without changing plaintext credentials. Recovery backup: ${backup}`);
+  }
 }
 
 async function initializeRuntime() {

@@ -46,6 +46,11 @@ export async function PATCH(req: Request, ctx: Ctx) {
   if (!s) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const body = (await req.json()) as Record<string, unknown>;
   const g = getGame(s.gameId);
+  if (body.resetCredentials === true) {
+    await db.update(servers).set({serverPassword:"",adminPassword:"",ownerId:"",updatedAt:new Date()}).where(eq(servers.id,s.id));
+    await act(s.id,"security",`Stored credentials reset for ${s.name}`);
+    return NextResponse.json({ok:true,credentialsReset:true});
+  }
   const patch: Record<string, unknown> = { updatedAt: new Date() };
   const changes: string[] = [];
   const nameLimit = s.gameId === "dragonwilds" ? 16 : 60;
