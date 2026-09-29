@@ -1,0 +1,136 @@
+name: Attach verified v2.11.0 release assets
+
+# One-off repair workflow (temporary; removed from the branch after use).
+# The v2.11.0 GitHub release was published without assets because direct
+# uploads to uploads.github.com kept failing with EOF errors from the release
+# environment. This workflow runs on a GitHub runner, downloads the verified
+# Google Drive mirror of the exact Windows-tested artifact, re-verifies every
+# property of the verified artifact, and only then attaches it to the existing
+# v2.11.0 release. It never rebuilds, never overwrites, and fails closed on
+# any mismatch. Re-runs are idempotent: already-attached assets with identical
+# digests are skipped.
+on:
+  push:
+    branches: [arena/01a0ef65-serverhub]
+    paths: [".github/workflows/attach-verified-v2110-assets.yml"]
+permissions:
+  contents: write
+env:
+  TAG: v2.11.0
+  ARTIFACT: ServerHub-2.11.0-Windows-x64-Portable.zip
+  EXPECTED_SIZE: "63904994"
+  EXPECTED_SHA256: 013f3c1e1fc8d044a5ba56e06a370030f799931e69fd39790bbe7c04becab1d9
+jobs:
+  attach:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the verified artifact mirror
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re, shutil, sys, urllib.parse, urllib.request
+
+          file_id = "1OGeMuO9r2_6WbOPwiebfh7OTLlFJdqZW"
+          out = "ServerHub-2.11.0-Windows-x64-Portable.zip"
+          url = "https://drive.usercontent.google.com/download?id=" + file_id + "&export=download&confirm=t"
+          payload = None
+          for attempt in range(5):
+              request = urllib.request.Request(url, data=payload, headers={"User-Agent": "Mozilla/5.0 ServerHubReleaseAttach/1.0"})
+              with urllib.request.urlopen(request, timeout=600) as response:
+                  content_type = response.headers.get("Content-Type", "")
+                  if content_type.startswith("text/html"):
+                      # Google serves a confirmation form for large files.
+                      body = response.read().decode("utf-8", "replace")
+                      action = re.search(r'action="([^"]+)"', body)
+                      fields = dict(re.findall(r'name="([^"]+)" value="([^"]*)"', body))
+                      if not action or not fields:
+                          sys.exit("Unexpected HTML interstitial from Google Drive; refusing to continue")
+                      url = action.group(1)
+                      payload = urllib.parse.urlencode(fields).encode()
+                      continue
+                  with open(out, "wb") as target:
+                      shutil.copyfileobj(response, target)
+                  break
+          else:
+              sys.exit("Could not download the artifact mirror")
+          print("downloaded", out)
+          PY
+          test "$(stat -c%s "$ARTIFACT")" = "$EXPECTED_SIZE"
+          # Fail immediately if we received anything but a ZIP archive.
+          head -c 4 "$ARTIFACT" | od -An -tx1 | grep -qi "50 4b 03 04"
+
+      - name: Verify the exact Windows-tested bytes and embedded provenance
+        run: |
+          set -euo pipefail
+          echo "${EXPECTED_SHA256}  ${ARTIFACT}" | sha256sum -c -
+          python3 - <<'PY'
+          import json, sys, zipfile
+
+          expected = {
+              "version": "2.11.0",
+              "sourceCommit": "4bbe138ba05153647a8d047541c7b03d867c5555",
+              "sourceState": "clean",
+              "target": {"platform": "win32", "architecture": "x64"},
+          }
+          with zipfile.ZipFile("ServerHub-2.11.0-Windows-x64-Portable.zip") as archive:
+              entry = "ServerHub/resources/server/build-info.json"
+              info = archive.getinfo(entry)
+              if info.file_size > 65536:
+                  sys.exit("embedded build-info.json is unexpectedly large")
+              build_info = json.loads(archive.read(entry))
+          for key, value in expected.items():
+              if build_info.get(key) != value:
+                  sys.exit(f"provenance mismatch for {key}: {build_info.get(key)!r} != {value!r}")
+          print("PROVENANCE_OK", build_info["version"], build_info["sourceCommit"])
+          PY
+
+      - name: Attach missing assets without overwriting existing ones
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_json=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}")
+          if [ "$(printf '%s' "$release_json" | jq -r .draft)" = "true" ]; then
+            echo "::error::Release ${TAG} is a draft; refusing to attach"; exit 1
+          fi
+          printf '%s  %s\n' "$EXPECTED_SHA256" "$ARTIFACT" > SHA256SUMS
+          upload=()
+          for name in "$ARTIFACT" SHA256SUMS; do
+            if [ "$name" = "$ARTIFACT" ]; then
+              expected_digest="sha256:${EXPECTED_SHA256}"
+            else
+              expected_digest="sha256:$(sha256sum SHA256SUMS | cut -d' ' -f1)"
+            fi
+            remote_digest=$(printf '%s' "$release_json" | jq -r --arg name "$name" '.assets[] | select(.name == $name) | .digest // empty')
+            if [ -n "$remote_digest" ]; then
+              if [ "$remote_digest" = "$expected_digest" ]; then
+                echo "Asset ${name} is already attached with the verified digest; skipping."
+              else
+                echo "::error::Asset ${name} already exists with digest ${remote_digest} (expected ${expected_digest}); refusing to overwrite"; exit 1
+              fi
+            else
+              upload+=("$name")
+            fi
+          done
+          if [ ${#upload[@]} -eq 0 ]; then
+            echo "Release ${TAG} already carries the verified assets; nothing to do."
+          else
+            gh release upload "$TAG" "${upload[@]}"
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq '.assets[] | {name, size, digest}'
+          fi
+
+      - name: Record the attachment in the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes=$(gh release view "$TAG" --json body --jq .body)
+          if printf '%s' "$notes" | grep -q "Direct download"; then
+            echo "Release notes already record the direct download; leaving them unchanged."
+            exit 0
+          fi
+          printf '%s\n\n%s\n' "$notes" "### Direct download
+
+          The Windows-tested artifact and \`SHA256SUMS\` are attached to this release. The bytes are identical to the read-only Drive mirror above (SHA-256 \`${EXPECTED_SHA256}\`); the attachment was performed by a verification-gated workflow that re-verified the size, SHA-256, and embedded provenance before uploading." > release-notes.md
+          gh release edit "$TAG" --notes-file release-notes.md
+          echo "Release notes updated."
