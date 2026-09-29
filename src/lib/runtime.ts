@@ -1575,6 +1575,25 @@ async function waitUntilReady(entry: RuntimeEntry) {
  while(Date.now()<deadline&&state.processes.has(entry.server.id)){if((await probeEntry(entry)).ok)return true;await new Promise(resolve=>setTimeout(resolve,500));} return false;
 }
 
+async function attemptAutomaticUpdateRollback(serverId: number) {
+  const [candidate] = await db.select().from(servers).where(eq(servers.id, serverId));
+  if (!candidate || candidate.updateValidationStatus !== "readiness-failed" || candidate.updateRollbackAttempted || !candidate.managedDirectory || !candidate.updateSafetyBackupId) return { attempted: false, ok: false };
+  const claimed = await db.update(servers).set({ updateRollbackAttempted: true, updateValidationStatus: "rollback-running", updatedAt: new Date() }).where(and(eq(servers.id, serverId), eq(servers.updateRollbackAttempted, false), eq(servers.updateValidationStatus, "readiness-failed"))).returning({ id: servers.id });
+  if (!claimed.length) return { attempted: false, ok: false };
+  await logLine(serverId, "warn", "Updater", `Updated server failed readiness; restoring verified safety backup ${candidate.updateSafetyBackupId}.`);
+  const deadline = Date.now() + 20_000;
+  while (state.processes.has(serverId) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 250));
+  if (state.processes.has(serverId)) { await db.update(servers).set({ updateValidationStatus: "rollback-failed", updatedAt: new Date() }).where(eq(servers.id, serverId)); await logLine(serverId, "error", "Updater", "Automatic rollback could not begin because the failed process did not exit."); return { attempted: true, ok: false }; }
+  await setStatus(serverId, "crashed");
+  const restored = await restoreBackup(serverId, candidate.updateSafetyBackupId);
+  if (!restored.ok) { await db.update(servers).set({ updateValidationStatus: "rollback-failed", updatedAt: new Date() }).where(eq(servers.id, serverId)); await logLine(serverId, "error", "Updater", `Automatic rollback failed: ${restored.reason ?? "restore failed"}`); return { attempted: true, ok: false }; }
+  await db.update(servers).set({ version: candidate.updatePreviousVersion || candidate.version, updateValidationStatus: "rollback-restored", updatedAt: new Date() }).where(eq(servers.id, serverId));
+  const restarted = await startFlow(serverId, true);
+  await db.update(servers).set({ updateValidationStatus: restarted.ok ? "rollback-validated" : "rollback-failed", updatedAt: new Date() }).where(eq(servers.id, serverId));
+  await logLine(serverId, restarted.ok ? "success" : "error", "Updater", restarted.ok ? "Previous version restored and readiness validated." : `Previous version restored but readiness failed: ${restarted.reason ?? "unknown error"}`);
+  return { attempted: true, ok: restarted.ok };
+}
+
 export async function startFlow(id: number, automatic = false): Promise<{ ok: boolean; reason?: string }> {
   await ensureRuntimeInitialized();
   const pendingRestart = state.restartTimers.get(id);
@@ -1634,7 +1653,7 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
     await db.update(servers).set({healthStatus:"checking",healthReason:waitingReason,healthProbe:probe,updatedAt:new Date()}).where(eq(servers.id,id));
     await logLine(id,"system","Readiness",`${waitingReason}.`);
     const ready = await waitUntilReady(entry);
-    if (!state.processes.has(id)) { await setHealth(id,"blocked","Process exited during startup",probe,false); await incident(id,"error","readiness","Process exited during startup",readinessRemediation(server.gameId,probe)); if(pendingUpdateValidation)await db.update(servers).set({updateValidationStatus:"readiness-failed",updatedAt:new Date()}).where(eq(servers.id,id)); return { ok: false, reason: "The server process exited during startup. Check Console for details." }; }
+    if (!state.processes.has(id)) { await setHealth(id,"blocked","Process exited during startup",probe,false); await incident(id,"error","readiness","Process exited during startup",readinessRemediation(server.gameId,probe)); if(pendingUpdateValidation){await db.update(servers).set({updateValidationStatus:"readiness-failed",updatedAt:new Date()}).where(eq(servers.id,id));await attemptAutomaticUpdateRollback(id);} return { ok: false, reason: "The server process exited during startup. Check Console for details." }; }
     if (!ready) { await setHealth(id,"blocked",`Readiness timed out after ${server.readinessTimeoutSec} seconds`,probe,false); await incident(id,"error","readiness","Provider readiness timed out",readinessRemediation(server.gameId,probe));
       entry.stopping = true;
       killProcessTree(child.pid, true);
@@ -1652,6 +1671,7 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
     const message = error instanceof Error ? error.message : String(error);
     if(pendingUpdateValidation)await db.update(servers).set({updateValidationStatus:"readiness-failed",updatedAt:new Date()}).where(eq(servers.id,id));
     await setStatus(id, "crashed");
+    if(pendingUpdateValidation)await attemptAutomaticUpdateRollback(id);
     await logLine(id, "error", "Runtime", message);
     return { ok: false, reason: message };
   }
