@@ -15,6 +15,7 @@ import { db, dbPath, sqliteClient } from "@/db";
 import { activity, backups, consoleLogs, incidents, installationEvents, installationJobs, players, servers, tasks } from "@/db/schema";
 import type { Backup, InstallationJob, Server } from "@/db/schema";
 import { getGame, type InstallerKind } from "./games";
+import { queryA2sInfo } from "./query-protocols";
 import { isProtectedSecret, protectAndVerify, revealSecret } from "./credential-vault";
 import { appDataDir, backupsDir, ensureDataDirs, safeFileName, serverDir, toolsDir } from "./storage";
 
@@ -1505,11 +1506,10 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
 
 function varInt(value:number){const out:number[]=[];do{let byte=value&127;value>>>=7;if(value)byte|=128;out.push(byte)}while(value);return Buffer.from(out)}
 async function minecraftReady(host:string,port:number){return new Promise<boolean>((resolve)=>{const socket=net.createConnection({host,port});let settled=false;const done=(ok:boolean)=>{if(settled)return;settled=true;socket.destroy();resolve(ok)};socket.setTimeout(1500);socket.once("connect",()=>{const address=Buffer.from(host);const body=Buffer.concat([Buffer.from([0]),varInt(0),varInt(address.length),address,Buffer.from([port>>8,port&255]),Buffer.from([1])]);socket.write(Buffer.concat([varInt(body.length),body,Buffer.from([1,0])]));});socket.once("data",data=>done(data.length>3&&data.includes(Buffer.from("version"))));socket.once("timeout",()=>done(false));socket.once("error",()=>done(false));})}
-async function a2sReady(host:string,port:number){return new Promise<boolean>((resolve)=>{const socket=dgram.createSocket("udp4");let settled=false;const done=(ok:boolean)=>{if(settled)return;settled=true;socket.close();resolve(ok)};const timer=setTimeout(()=>done(false),1500);socket.once("message",data=>{clearTimeout(timer);done(data.length>5&&data.readInt32LE(0)===-1&&(data[4]===0x49||data[4]===0x41))});socket.once("error",()=>done(false));socket.send(Buffer.concat([Buffer.from([255,255,255,255,0x54]),Buffer.from("Source Engine Query\0")]),port,host);})}
 async function probeEntry(entry:RuntimeEntry){
  const server=entry.server,game=getGame(server.gameId); const method=server.gameId.startsWith("minecraft")?"minecraft-status":["ark","rust","valheim"].includes(server.gameId)?"steam-a2s":game.protocol==="UDP"?"process-stability":"tcp-connect";
- const ok=method==="minecraft-status"?await minecraftReady(server.bindAddress,server.port):method==="steam-a2s"?await a2sReady(server.bindAddress,game.queryPort!):method==="process-stability"?state.processes.has(server.id):await new Promise<boolean>(resolve=>{const socket=net.createConnection({host:server.bindAddress,port:server.port});const done=(v:boolean)=>{socket.destroy();resolve(v)};socket.setTimeout(750);socket.once("connect",()=>done(true));socket.once("timeout",()=>done(false));socket.once("error",()=>done(false))});
- return {ok,method};
+ let detail=""; const ok=method==="minecraft-status"?await minecraftReady(server.bindAddress,server.port):method==="steam-a2s"?await queryA2sInfo(server.bindAddress,game.queryPort!).then(info=>{detail=`${info.name} · ${info.map} · ${info.players}/${info.maxPlayers} players · v${info.version}`;return true}).catch(()=>false):method==="process-stability"?state.processes.has(server.id):await new Promise<boolean>(resolve=>{const socket=net.createConnection({host:server.bindAddress,port:server.port});const done=(v:boolean)=>{socket.destroy();resolve(v)};socket.setTimeout(750);socket.once("connect",()=>done(true));socket.once("timeout",()=>done(false));socket.once("error",()=>done(false))});
+ return {ok,method,detail};
 }
 async function waitUntilReady(entry: RuntimeEntry) {
  const deadline=Date.now()+Math.max(10,Math.min(300,entry.server.readinessTimeoutSec))*1000;
@@ -1938,8 +1938,8 @@ export async function sweepTasks(serverId?: number) {
     }
     for (const entry of state.processes.values()) {
       if (serverId && entry.server.id !== serverId) continue;
-      const result=await probeEntry(entry).catch(()=>({ok:false,method:"probe-error"}));
-      if(result.ok) await setHealth(entry.server.id,"ready","Recurring provider health probe passed",result.method,true);
+      const result=await probeEntry(entry).catch(()=>({ok:false,method:"probe-error",detail:""}));
+      if(result.ok) await setHealth(entry.server.id,"ready",result.detail||"Recurring provider health probe passed",result.method,true);
       else { const failures=await setHealth(entry.server.id,"degraded","Provider health probe failed",result.method,false); if(failures===3) await incident(entry.server.id,"warning","health","Server became degraded after three consecutive probe failures","Review Diagnostics, firewall, and provider output"); }
     }
   } finally {

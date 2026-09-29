@@ -1,6 +1,6 @@
 {
   "name": "server-hub",
-  "version": "2.8.1",
+  "version": "2.9.0",
   "description": "Local desktop manager for real dedicated game-server processes",
   "private": true,
   "main": "electron/main.cjs",
@@ -20,14 +20,15 @@
     "test:security": "tsx scripts/test-security.ts",
     "test:extraction": "tsx --require ./scripts/register-better-sqlite3-stub.cjs scripts/test-extraction.ts",
     "test:migrations": "tsx --require ./scripts/register-better-sqlite3-stub.cjs scripts/test-migrations.ts",
-    "test": "npm run typecheck && npm run lint && npm run test:security && npm run test:extraction && npm run test:backup-validation && npm run test:support-bundle && npm run test:server-templates && npm run test:shutdown-lifecycle && npm run test:migrations && npm run test:migration-matrix && npm run test:installation-jobs && npm run test:package-integrity",
+    "test": "npm run typecheck && npm run lint && npm run test:security && npm run test:extraction && npm run test:backup-validation && npm run test:support-bundle && npm run test:server-templates && npm run test:shutdown-lifecycle && npm run test:query-protocols && npm run test:migrations && npm run test:migration-matrix && npm run test:installation-jobs && npm run test:package-integrity",
     "sbom": "node scripts/generate-sbom.mjs",
     "test:catalog": "tsx scripts/test-catalog.ts",
     "test:backup-validation": "tsx scripts/test-backup-validation.ts",
     "test:support-bundle": "tsx scripts/test-support-bundle.ts",
     "test:server-templates": "tsx scripts/test-server-templates.ts",
     "test:migration-matrix": "tsx --require ./scripts/register-better-sqlite3-stub.cjs scripts/test-migration-matrix.ts",
-    "test:shutdown-lifecycle": "node scripts/test-shutdown-lifecycle.mjs"
+    "test:shutdown-lifecycle": "node scripts/test-shutdown-lifecycle.mjs",
+    "test:query-protocols": "tsx scripts/test-query-protocols.ts"
   },
   "dependencies": {
     "clsx": "2.1.1",
