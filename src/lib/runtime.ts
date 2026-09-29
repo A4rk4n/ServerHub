@@ -846,12 +846,25 @@ async function installSteam(server: Server, root: string, context: InstallContex
   if (!game.steamAppId) throw new Error(`${game.name} has no verified SteamCMD application ID.`);
   const steamcmd = await ensureSteamCmd(context);
   await context.report("installing", 25, `Installing ${game.name} from official Steam app ${game.steamAppId}`);
-  await runLogged(context, steamcmd, [
+  const steamArgs = [
     "+force_install_dir", root,
     "+login", "anonymous",
     "+app_update", String(game.steamAppId), "validate",
     "+quit",
-  ], path.dirname(steamcmd));
+  ];
+  if (process.platform === "win32") {
+    // Some Windows hosts/filesystems reject direct CreateProcess calls for
+    // SteamCMD's 32-bit bootstrapper with spawn EFTYPE. PowerShell launches it
+    // through Windows' native command resolution while preserving each arg.
+    const ps = (value: string) => `'${value.replaceAll("'", "''")}'`;
+    const command = `$exe=${ps(steamcmd)}; $arguments=@(${steamArgs.map(ps).join(",")}); & $exe @arguments; exit $LASTEXITCODE`;
+    await runLogged(context, "powershell.exe", [
+      "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+      "-Command", command,
+    ], path.dirname(steamcmd));
+  } else {
+    await runLogged(context, steamcmd, steamArgs, path.dirname(steamcmd));
+  }
 }
 
 async function ensureHytaleDownloader(context: InstallContext) {
