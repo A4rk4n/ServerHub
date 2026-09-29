@@ -40,7 +40,18 @@ export async function POST(_request: Request, context: {params: Promise<{id:stri
       return NextResponse.json({error:`Safety backup failed; update was not started: ${error instanceof Error?error.message:String(error)}`},{status:409});
     }
   }
-  if(latest!=="latest" && latest!==server.version) await db.update(servers).set({version:latest,updatedAt:new Date()}).where(eq(servers.id,numeric));
+  const previousVersion=server.version;
+  await db.update(servers).set({
+    ...(latest!=="latest"&&latest!==server.version?{version:latest}:{}),
+    updateValidationStatus:"installing",
+    updatePreviousVersion:previousVersion,
+    updateTargetVersion:latest,
+    updateSafetyBackupId:safetyBackup?.id??null,
+    updateRollbackAttempted:false,
+    updateValidationStartedAt:new Date(),
+    updatedAt:new Date(),
+  }).where(eq(servers.id,numeric));
   const result=await installFlow(numeric);
-  return NextResponse.json({...result,version:latest,safetyBackupId:safetyBackup?.id??null},{status:result.ok?202:409});
+  if(!result.ok) await db.update(servers).set({version:previousVersion,updateValidationStatus:"none",updatePreviousVersion:"",updateTargetVersion:"",updateSafetyBackupId:null,updateValidationStartedAt:null,updatedAt:new Date()}).where(eq(servers.id,numeric));
+  return NextResponse.json({...result,version:latest,safetyBackupId:safetyBackup?.id??null,validationStatus:result.ok?"installing":"none"},{status:result.ok?202:409});
 }

@@ -64,6 +64,12 @@ const DDL = [
     restart_window_sec INTEGER NOT NULL DEFAULT 300,
     auto_backup_before_update INTEGER NOT NULL DEFAULT 1,
     update_backup_retention INTEGER NOT NULL DEFAULT 5,
+    update_validation_status TEXT NOT NULL DEFAULT 'none',
+    update_previous_version TEXT NOT NULL DEFAULT '',
+    update_target_version TEXT NOT NULL DEFAULT '',
+    update_safety_backup_id INTEGER,
+    update_rollback_attempted INTEGER NOT NULL DEFAULT 0,
+    update_validation_started_at INTEGER,
     managed_directory INTEGER NOT NULL DEFAULT 1,
     server_password TEXT NOT NULL DEFAULT '',
     admin_password TEXT NOT NULL DEFAULT '',
@@ -242,6 +248,12 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
     restart_window_sec: "INTEGER NOT NULL DEFAULT 300",
     auto_backup_before_update: "INTEGER NOT NULL DEFAULT 1",
     update_backup_retention: "INTEGER NOT NULL DEFAULT 5",
+    update_validation_status: "TEXT NOT NULL DEFAULT 'none'",
+    update_previous_version: "TEXT NOT NULL DEFAULT ''",
+    update_target_version: "TEXT NOT NULL DEFAULT ''",
+    update_safety_backup_id: "INTEGER",
+    update_rollback_attempted: "INTEGER NOT NULL DEFAULT 0",
+    update_validation_started_at: "INTEGER",
     managed_directory: "INTEGER NOT NULL DEFAULT 1",
     server_password: "TEXT NOT NULL DEFAULT ''",
     admin_password: "TEXT NOT NULL DEFAULT ''",
@@ -263,7 +275,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
   },
 };
 
-export const SCHEMA_VERSION = 21400;
+export const SCHEMA_VERSION = 21500;
 
 function migrate(db: DatabaseSync) {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -288,7 +300,7 @@ function migrate(db: DatabaseSync) {
     db.prepare("UPDATE servers SET bind_address = ? WHERE bind_address = ?")
       .run("192.168.1.210", "185.83.148.20");
     db.prepare("INSERT INTO schema_migrations (version, applied_at, description) VALUES (?, ?, ?)")
-      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add trusted tool update source metadata");
+      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add readiness-gated update validation state");
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");

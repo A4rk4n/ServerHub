@@ -1227,6 +1227,10 @@ async function executeInstallation(job: InstallationJob, server: Server, signal:
       })
       .where(eq(installationJobs.id, job.id));
     await addInstallationEvent(job.id, server.id, "success", "completed", 100, `${server.name} is ready to start.`);
+    if (job.kind === "update") {
+      await db.update(servers).set({updateValidationStatus:"awaiting-readiness",updatedAt:new Date()}).where(eq(servers.id,server.id));
+      await addInstallationEvent(job.id,server.id,"warn","completed",100,"Update installed and awaiting first-start readiness validation.");
+    }
     await setStatus(server.id, "offline");
     await logLine(server.id, "success", "Installer", `Installation complete. ${server.name} is ready to start.`);
     await act(server.id, "server", `${server.name} installed successfully`);
@@ -1262,6 +1266,7 @@ async function executeInstallation(job: InstallationJob, server: Server, signal:
       })
       .where(eq(installationJobs.id, job.id));
     await addInstallationEvent(job.id, server.id, cancelled ? "warn" : "error", cancelled ? "cancelled" : "failed", job.progress, message);
+    if (job.kind === "update") await db.update(servers).set({updateValidationStatus:cancelled?"installation-cancelled":"installation-failed",updatedAt:new Date()}).where(eq(servers.id,server.id));
     await setStatus(server.id, "error");
     await logLine(server.id, cancelled ? "warn" : "error", "Installer", message);
     await act(server.id, "server", `${server.name} installation ${cancelled ? "cancelled" : `failed: ${message}`}`);
@@ -1583,6 +1588,7 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
   if (state.processes.has(id)) return { ok: false, reason: "Server process is already running" };
   if (state.installs.has(id) || server.status === "installing") return { ok: false, reason: "Installation is still running" };
   if (server.status === "error") return { ok: false, reason: "Installation failed. Retry installation first." };
+  const pendingUpdateValidation=server.updateValidationStatus==="awaiting-readiness"||server.updateValidationStatus==="validating-runtime";
 
   try {
     const game = getGame(server.gameId);
@@ -1590,6 +1596,7 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
       throw new Error(`Port ${server.port}/${game.protocol} is currently in use. Stop the conflicting process or choose another port.`);
     }
     await writeServerConfig(server);
+    if(pendingUpdateValidation) await db.update(servers).set({updateValidationStatus:"validating-runtime",updatedAt:new Date()}).where(eq(servers.id,id));
     await setStatus(id, "starting");
     await logLine(id, "system", "Runtime", `Starting ${server.name} from ${serverDir(server)}`);
     const spec = await launchSpec(server);
@@ -1627,7 +1634,7 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
     await db.update(servers).set({healthStatus:"checking",healthReason:waitingReason,healthProbe:probe,updatedAt:new Date()}).where(eq(servers.id,id));
     await logLine(id,"system","Readiness",`${waitingReason}.`);
     const ready = await waitUntilReady(entry);
-    if (!state.processes.has(id)) { await setHealth(id,"blocked","Process exited during startup",probe,false); await incident(id,"error","readiness","Process exited during startup",readinessRemediation(server.gameId,probe)); return { ok: false, reason: "The server process exited during startup. Check Console for details." }; }
+    if (!state.processes.has(id)) { await setHealth(id,"blocked","Process exited during startup",probe,false); await incident(id,"error","readiness","Process exited during startup",readinessRemediation(server.gameId,probe)); if(pendingUpdateValidation)await db.update(servers).set({updateValidationStatus:"readiness-failed",updatedAt:new Date()}).where(eq(servers.id,id)); return { ok: false, reason: "The server process exited during startup. Check Console for details." }; }
     if (!ready) { await setHealth(id,"blocked",`Readiness timed out after ${server.readinessTimeoutSec} seconds`,probe,false); await incident(id,"error","readiness","Provider readiness timed out",readinessRemediation(server.gameId,probe));
       entry.stopping = true;
       killProcessTree(child.pid, true);
@@ -1636,12 +1643,14 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
     await db.update(servers).set({ status: "online", lastStartedAt: new Date(), updatedAt: new Date() }).where(eq(servers.id, id));
     await setHealth(id,"ready","Provider readiness probe passed",probe,true);
     await logLine(id,"success","Readiness",`${probe} readiness passed after ${Math.max(1,Math.round((Date.now()-entry.startedAtMs)/1000))} seconds.`);
+    if(pendingUpdateValidation){await db.update(servers).set({updateValidationStatus:"validated",updatedAt:new Date()}).where(eq(servers.id,id));await logLine(id,"success","Updater",`Update ${server.updatePreviousVersion} → ${server.updateTargetVersion} passed first-start readiness validation.`);}
     if(server.gameId === "minecraft" || server.gameId === "minecraft-modded") await recordSuccessfulToolUse("java","Started a Minecraft server and passed its readiness probe");
     await logLine(id, "success", "Runtime", `Process started with PID ${child.pid}.`);
     await act(id, "power", `${server.name} started (PID ${child.pid})`);
     return { ok: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if(pendingUpdateValidation)await db.update(servers).set({updateValidationStatus:"readiness-failed",updatedAt:new Date()}).where(eq(servers.id,id));
     await setStatus(id, "crashed");
     await logLine(id, "error", "Runtime", message);
     return { ok: false, reason: message };
