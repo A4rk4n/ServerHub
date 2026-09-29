@@ -15,6 +15,7 @@ type InstallJob = {
   message: string;
   error: string;
   attempt: number;
+  updatedAt: string | Date;
 };
 
 type InstallEvent = {
@@ -38,6 +39,7 @@ function phaseLabel(phase: string) {
 }
 
 export function InstallationProgress({ serverId, accent }: { serverId: number; accent: string }) {
+  const [now, setNow] = useState(0);
   const [job, setJob] = useState<InstallJob | null>(null);
   const [events, setEvents] = useState<InstallEvent[]>([]);
   const [acting, setActing] = useState(false);
@@ -49,6 +51,7 @@ export function InstallationProgress({ serverId, accent }: { serverId: number; a
       if (!response.ok) return;
       const data = (await response.json()) as { job: InstallJob | null; events: InstallEvent[] };
       setJob(data.job);
+      setNow(new Date().getTime());
       setEvents(data.events ?? []);
     } catch {
       // The normal server poll will recover after brief local-service restarts.
@@ -84,6 +87,7 @@ export function InstallationProgress({ serverId, accent }: { serverId: number; a
 
   if (!job || job.status === "succeeded") return null;
   const active = ACTIVE.has(job.status);
+  const stalled = active && now - new Date(job.updatedAt).getTime() > 120_000;
   const failed = job.status === "failed" || job.status === "cancelled";
   const transfer = job.bytesDone > 0
     ? job.bytesTotal > 0
@@ -112,7 +116,7 @@ export function InstallationProgress({ serverId, accent }: { serverId: number; a
             </h2>
             <span className="font-mono text-[10.5px] text-plum-400">job #{job.id} · attempt {job.attempt}</span>
           </div>
-          <p className={cn("mt-0.5 text-[12.5px]", failed ? "text-red-500" : "text-plum-500")}>{job.error || job.message}</p>
+          <p className={cn("mt-0.5 text-[12.5px]", failed ? "text-red-500" : "text-plum-500")}>{job.error || (stalled ? "No installer progress for over two minutes. You can cancel, then Repair and retry." : job.message)}</p>
         </div>
         {active ? (
           <Btn variant="ghost" size="sm" onClick={() => void act("cancel")} loading={acting} disabled={job.status === "cancelling"}>

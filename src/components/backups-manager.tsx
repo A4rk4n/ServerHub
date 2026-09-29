@@ -1,6 +1,6 @@
 "use client";
 
-import { DatabaseBackup, Download, History, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { DatabaseBackup, Download, History, Plus, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Backup } from "@/db/schema";
 import { cn, hexA, timeAgo } from "@/lib/format";
@@ -82,6 +82,10 @@ export function BackupsManager({ serverId, accent, status }: { serverId: number;
     }
   }
 
+  async function verify(b: Backup) {
+    setBusy(true); try { const r=await fetch(`/api/servers/${serverId}/backups/${b.id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"verify"})}); const j=await r.json(); setNotice(r.ok?`Verified ${j.entries} archive entries · SHA-256 matches`:j.error??"Backup verification failed"); } finally {setBusy(false)}
+  }
+
   function downloadArchive(b: Backup) {
     const a = document.createElement("a");
     a.href = `/api/servers/${serverId}/backups/${b.id}`;
@@ -143,6 +147,9 @@ export function BackupsManager({ serverId, accent, status }: { serverId: number;
                 <span className="font-mono text-[12px] text-plum-500">{fmtSize(b.sizeMb)}</span>
               )}
               <div className="flex items-center gap-1">
+                <IconBtn title="Verify checksum and archive" onClick={() => void verify(b)} disabled={busy || b.status !== "complete"}>
+                  <ShieldCheck size={14} />
+                </IconBtn>
                 <IconBtn title="Download backup archive" onClick={() => downloadArchive(b)} disabled={b.status !== "complete"}>
                   <Download size={14} />
                 </IconBtn>
