@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, CheckCircle2, Circle, Download, HardDrive, Loader2, RotateCw, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, Circle, Download, HardDrive, Loader2, RotateCw, Wrench, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { cn, hexA } from "@/lib/format";
 import { Btn } from "./ui";
@@ -62,7 +62,7 @@ export function InstallationProgress({ serverId, accent }: { serverId: number; a
     return () => clearInterval(timer);
   }, [pollingFast, refresh]);
 
-  async function act(action: "cancel" | "retry") {
+  async function act(action: "cancel" | "retry" | "repair") {
     if (acting) return;
     setActing(true);
     setActionError("");
@@ -119,9 +119,14 @@ export function InstallationProgress({ serverId, accent }: { serverId: number; a
             <X size={13} /> {job.status === "cancelling" ? "Cancelling" : "Cancel"}
           </Btn>
         ) : (
-          <Btn variant="primary" size="sm" accent={accent} onClick={() => void act("retry")} loading={acting}>
-            <RotateCw size={13} /> Retry
-          </Btn>
+          <div className="flex gap-2">
+            <Btn variant="ghost" size="sm" onClick={() => void act("repair")} loading={acting}>
+              <Wrench size={13} /> Repair and retry
+            </Btn>
+            <Btn variant="primary" size="sm" accent={accent} onClick={() => void act("retry")} loading={acting}>
+              <RotateCw size={13} /> Retry
+            </Btn>
+          </div>
         )}
       </div>
 

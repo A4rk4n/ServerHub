@@ -272,7 +272,19 @@ function throwIfCancelled(signal: AbortSignal) {
 }
 
 function cleanInstallMessage(message: string, limit = 2_000) {
-  return message.replace(/\0/g, "").replace(/[\r\n]+/g, " ").trim().slice(0, limit);
+  const clean = message.replace(/\0/g, "").replace(/[\r\n]+/g, " ").trim();
+  const friendly = /spawn\s+EFTYPE/i.test(clean)
+    ? "Windows could not launch an installation tool. Its executable may be damaged or incompatible; choose Repair and retry."
+    : /\bENOENT\b/i.test(clean)
+      ? "A required installation tool or file is missing; choose Repair and retry."
+      : /\bEACCES\b|access is denied/i.test(clean)
+        ? "Windows denied access to an installation file. Check antivirus, folder permissions, and run Repair and retry."
+        : /EADDRNOTAVAIL/i.test(clean)
+          ? "The configured bind address is not assigned to this PC. Select an address shown in Diagnostics."
+          : /EADDRINUSE/i.test(clean)
+            ? "The selected port is already being used by another program or server."
+            : clean;
+  return friendly.slice(0, limit);
 }
 
 async function addInstallationEvent(
@@ -457,6 +469,25 @@ export async function installFlow(id: number): Promise<{ ok: boolean; reason?: s
   await logLine(id, "system", "Installer", `Installation job #${job.id} queued (attempt ${job.attempt}).`);
   scheduleInstallPump();
   return { ok: true, jobId: job.id };
+}
+
+export async function repairInstallation(id: number): Promise<{ ok: boolean; reason?: string; jobId?: number }> {
+  await ensureRuntimeInitialized();
+  const [server] = await db.select().from(servers).where(eq(servers.id, id));
+  if (!server) return { ok: false, reason: "Server not found" };
+  const active = await latestInstallationJob(id);
+  if (active && ACTIVE_INSTALL_STATUSES.includes(active.status as (typeof ACTIVE_INSTALL_STATUSES)[number])) return { ok: false, reason: "Cancel the active installation before repairing tools" };
+  const installer = getGame(server.gameId).installer;
+  if (installer === "steamcmd") {
+    await fsp.rm(path.join(toolsDir(), "steamcmd"), { recursive: true, force: true });
+    await fsp.rm(path.join(appDataDir(), "downloads", process.platform === "win32" ? "steamcmd.zip" : "steamcmd.tar.gz"), { force: true });
+  } else if (installer === "hytale") {
+    await fsp.rm(path.join(toolsDir(), "hytale-downloader"), { recursive: true, force: true });
+    await fsp.rm(path.join(appDataDir(), "downloads", "hytale-downloader.zip"), { force: true });
+  }
+  await logLine(id, "system", "Repair", `Cleared cached ${installer} installation tools and downloads.`);
+  await act(id, "repair", `Repaired installation tools for ${server.name}`);
+  return installFlow(id);
 }
 
 export async function cancelInstallation(id: number, wait = false): Promise<{ ok: boolean; reason?: string }> {

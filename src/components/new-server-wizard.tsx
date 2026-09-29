@@ -12,6 +12,12 @@ const ease = [0.22, 1, 0.36, 1] as const;
 type RemoteVersion = { id: string; channel: "stable" | "preview" | "legacy"; releasedAt?: string };
 type CatalogDetails = { automatic: boolean; sourceName: string; sourceUrl: string; authentication: "none" | "oauth" | "user-files" };
 
+function generatedPassword() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
+  const bytes = crypto.getRandomValues(new Uint8Array(20));
+  return Array.from(bytes, (value) => alphabet[value % alphabet.length]).join("");
+}
+
 const SUGGESTIONS: Record<string, string> = {
   minecraft: "Skyfall SMP",
   "minecraft-modded": "Project Redux",
@@ -352,6 +358,7 @@ export function NewServerWizard() {
                       <KeyRound size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-plum-400" />
                       <input className={cn(inputCls, "pl-9")} type="password" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} placeholder="Enter an admin password" minLength={5} maxLength={200} autoComplete="new-password" />
                     </div>
+                    <button type="button" className="mt-1.5 text-[11px] font-semibold text-pink-600 hover:underline" onClick={() => setAdminPassword(generatedPassword())}>Generate secure password</button>
                     <p className="mt-1.5 text-[11px] leading-relaxed text-plum-500">Used for Dragonwilds server administration. This can be different from the player-facing server password.</p>
                   </Field>
                 </div>
@@ -363,6 +370,7 @@ export function NewServerWizard() {
                     <KeyRound size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-plum-400" />
                     <input className={cn(inputCls, "pl-9")} type="password" value={serverPassword} onChange={(e) => setServerPassword(e.target.value)} minLength={5} autoComplete="new-password" />
                   </div>
+                  <button type="button" className="mt-1.5 text-[11px] font-semibold text-pink-600 hover:underline" onClick={() => setServerPassword(generatedPassword())}>Generate secure password</button>
                 </Field>
               )}
 

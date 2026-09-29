@@ -2,7 +2,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { installationEvents, installationJobs, servers } from "@/db/schema";
-import { cancelInstallation, ensureRuntimeInitialized, installFlow } from "@/lib/runtime";
+import { cancelInstallation, ensureRuntimeInitialized, installFlow, repairInstallation } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +50,10 @@ export async function POST(req: Request, ctx: Ctx) {
   }
   if (body.action === "retry") {
     const result = await installFlow(id);
+    return NextResponse.json(result, { status: result.ok ? 202 : 409 });
+  }
+  if (body.action === "repair") {
+    const result = await repairInstallation(id);
     return NextResponse.json(result, { status: result.ok ? 202 : 409 });
   }
 
