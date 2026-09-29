@@ -1,3 +1,4 @@
+import { hostPlatform } from "./host-platform";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -20,7 +21,7 @@ export function classifyAuthenticode(value: SignatureJson): AuthenticodeResult {
 const defaultRunner: Runner = async (command, args) => exec(command, args, { windowsHide: true, timeout: 15_000, maxBuffer: 256 * 1024 });
 
 export async function verifyWindowsAuthenticode(file: string, runner: Runner = defaultRunner) {
-  if (process.platform !== "win32" && runner === defaultRunner) return { state: "unsupported", publisher: "", thumbprint: "", detail: "Authenticode verification is available on Windows only" } satisfies AuthenticodeResult;
+  if (hostPlatform() !== "win32" && runner === defaultRunner) return { state: "unsupported", publisher: "", thumbprint: "", detail: "Authenticode verification is available on Windows only" } satisfies AuthenticodeResult;
   const script = `$s=Get-AuthenticodeSignature -LiteralPath ${psLiteral(file)} -ErrorAction Stop; [pscustomobject]@{Status=[string]$s.Status;StatusMessage=$s.StatusMessage;Subject=if($s.SignerCertificate){$s.SignerCertificate.Subject}else{''};Thumbprint=if($s.SignerCertificate){$s.SignerCertificate.Thumbprint}else{''}}|ConvertTo-Json -Compress`;
   try {
     const { stdout } = await runner("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script]);

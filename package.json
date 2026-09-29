@@ -20,7 +20,7 @@
     "test:security": "tsx scripts/test-security.ts",
     "test:extraction": "tsx --require ./scripts/register-better-sqlite3-stub.cjs scripts/test-extraction.ts",
     "test:migrations": "tsx --require ./scripts/register-better-sqlite3-stub.cjs scripts/test-migrations.ts",
-    "test": "npm run typecheck && npm run lint && npm run test:security && npm run test:extraction && npm run test:backup-validation && npm run test:support-bundle && npm run test:server-templates && npm run test:tool-security && npm run test:tool-usage && npm run test:authenticode && npm run test:tool-repair-failures && npm run test:shutdown-lifecycle && npm run test:query-protocols && npm run test:a2s-players && npm run test:player-observations && npm run test:moderation && npm run test:scheduled-actions && npm run test:calendar-schedule && npm run test:minecraft-status && npm run test:migrations && npm run test:migration-matrix && npm run test:installation-jobs && npm run test:package-integrity",
+    "test": "npm run typecheck && npm run lint && npm run test:security && npm run test:extraction && npm run test:backup-validation && npm run test:support-bundle && npm run test:server-templates && npm run test:tool-security && npm run test:host-platform && npm run test:tool-usage && npm run test:authenticode && npm run test:tool-repair-failures && npm run test:shutdown-lifecycle && npm run test:query-protocols && npm run test:a2s-players && npm run test:player-observations && npm run test:moderation && npm run test:scheduled-actions && npm run test:calendar-schedule && npm run test:minecraft-status && npm run test:migrations && npm run test:migration-matrix && npm run test:installation-jobs && npm run test:package-integrity",
     "sbom": "node scripts/generate-sbom.mjs",
     "test:catalog": "tsx scripts/test-catalog.ts",
     "test:backup-validation": "tsx scripts/test-backup-validation.ts",
@@ -38,7 +38,8 @@
     "test:tool-security": "tsx scripts/test-tool-security.ts",
     "test:tool-repair-failures": "tsx scripts/test-tool-repair-failures.ts",
     "test:authenticode": "tsx scripts/test-authenticode.ts",
-    "test:tool-usage": "tsx scripts/test-tool-usage.ts"
+    "test:tool-usage": "tsx scripts/test-tool-usage.ts",
+    "test:host-platform": "tsx scripts/test-host-platform.ts"
   },
   "dependencies": {
     "clsx": "2.1.1",

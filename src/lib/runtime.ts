@@ -1,3 +1,4 @@
+import { hostPlatform } from "./host-platform";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -103,7 +104,7 @@ async function incident(serverId:number,severity:string,component:string,summary
 
 
 async function migrateCredentialVault() {
-  if (process.platform !== "win32") return;
+  if (hostPlatform() !== "win32") return;
   const rows = await db.select().from(servers);
   const pending = rows.filter(row => [row.serverPassword,row.adminPassword,row.ownerId].some(value => value && !isProtectedSecret(value)));
   const marker = path.join(appDataDir(), "credential-migration.json");
@@ -515,7 +516,7 @@ export async function repairInstallation(id: number): Promise<{ ok: boolean; rea
   const installer = getGame(server.gameId).installer;
   if (installer === "steamcmd") {
     await fsp.rm(path.join(toolsDir(), "steamcmd"), { recursive: true, force: true });
-    await fsp.rm(path.join(appDataDir(), "downloads", process.platform === "win32" ? "steamcmd.zip" : "steamcmd.tar.gz"), { force: true });
+    await fsp.rm(path.join(appDataDir(), "downloads", hostPlatform() === "win32" ? "steamcmd.zip" : "steamcmd.tar.gz"), { force: true });
   } else if (installer === "hytale") {
     await fsp.rm(path.join(toolsDir(), "hytale-downloader"), { recursive: true, force: true });
     await fsp.rm(path.join(appDataDir(), "downloads", "hytale-downloader.zip"), { force: true });
@@ -719,7 +720,7 @@ async function installFabric(server: Server, root: string, context: InstallConte
 }
 
 async function installBedrock(server: Server, root: string, context: InstallContext) {
-  if (!["win32", "linux"].includes(process.platform)) throw new Error("The official Bedrock server is only published for Windows and Linux.");
+  if (!["win32", "linux"].includes(hostPlatform())) throw new Error("The official Bedrock server is only published for Windows and Linux.");
   await context.report("downloading", 14, "Locating the current official Bedrock server archive");
   const page = await fetch("https://www.minecraft.net/en-us/download/server/bedrock", {
     headers: { "User-Agent": "Mozilla/5.0 ServerHub/1.1" },
@@ -727,7 +728,7 @@ async function installBedrock(server: Server, root: string, context: InstallCont
   });
   if (!page.ok) throw new Error(`Minecraft Bedrock download page failed: HTTP ${page.status}`);
   const html = (await page.text()).replaceAll("&amp;", "&").replaceAll("\\u0026", "&");
-  const platform = process.platform === "win32" ? "win" : "linux";
+  const platform = hostPlatform() === "win32" ? "win" : "linux";
   const matches = [...html.matchAll(/https:\/\/[^"'<>\\\s]+bedrock-server-[^"'<>\\\s]+\.zip/gi)].map((match) => match[0]);
   const url = matches.find((candidate) => candidate.toLowerCase().includes(`bin-${platform}`)) ?? matches.find((candidate) => candidate.toLowerCase().includes(platform));
   if (!url) throw new Error("Could not locate the official Bedrock archive. Microsoft may have changed its download page.");
@@ -741,7 +742,7 @@ async function installBedrock(server: Server, root: string, context: InstallCont
     throw error;
   }
   await fsp.rm(path.dirname(archive), { recursive: true, force: true });
-  if (process.platform !== "win32") await fsp.chmod(path.join(root, "bedrock_server"), 0o755).catch(() => {});
+  if (hostPlatform() !== "win32") await fsp.chmod(path.join(root, "bedrock_server"), 0o755).catch(() => {});
 }
 
 export async function extractZipSafe(archive: string, destination: string, signal?: AbortSignal, limits: { maxEntries?: number; maxExpandedBytes?: number } = {}) {
@@ -811,7 +812,7 @@ export async function extractZipSafe(archive: string, destination: string, signa
           await pipeline(input, fs.createWriteStream(temp, { flags: "w" }));
           await fsp.rm(target, { force: true });
           await fsp.rename(temp, target);
-          if (process.platform !== "win32" && (unixMode & 0o111)) await fsp.chmod(target, unixMode & 0o777).catch(() => {});
+          if (hostPlatform() !== "win32" && (unixMode & 0o111)) await fsp.chmod(target, unixMode & 0o777).catch(() => {});
         }
         zip.readEntry();
       })().catch(fail);
@@ -829,19 +830,19 @@ async function ensureSteamCmd(context: InstallContext): Promise<string> {
   const override = process.env.SERVERHUB_STEAMCMD_PATH;
   if (override && fs.existsSync(override)) return path.resolve(override);
   const root = path.join(toolsDir(), "steamcmd");
-  const executable = process.platform === "win32" ? path.join(root, "steamcmd.exe") : path.join(root, "steamcmd.sh");
+  const executable = hostPlatform() === "win32" ? path.join(root, "steamcmd.exe") : path.join(root, "steamcmd.sh");
   if (fs.existsSync(executable)) return executable;
-  if (process.platform === "darwin") throw new Error("SteamCMD no longer provides a native macOS dedicated-server runtime. Use a custom command, VM, or Linux host.");
+  if (hostPlatform() === "darwin") throw new Error("SteamCMD no longer provides a native macOS dedicated-server runtime. Use a custom command, VM, or Linux host.");
   await fsp.mkdir(root, { recursive: true });
-  const ext = process.platform === "win32" ? "zip" : "tar.gz";
+  const ext = hostPlatform() === "win32" ? "zip" : "tar.gz";
   const archive = path.join(appDataDir(), "downloads", `steamcmd.${ext}`);
-  const url = process.platform === "win32"
+  const url = hostPlatform() === "win32"
     ? "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip"
     : "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz";
   await downloadFile(url, archive, context.serverId, "SteamCMD", context, [12, 22]);
   throwIfCancelled(context.signal);
   try {
-    if (process.platform === "win32") await extractZipSafe(archive, root, context.signal);
+    if (hostPlatform() === "win32") await extractZipSafe(archive, root, context.signal);
     else await extractTarGz(archive, root);
   } catch (error) {
     await fsp.rm(archive, { force: true });
@@ -849,7 +850,7 @@ async function ensureSteamCmd(context: InstallContext): Promise<string> {
     throw error;
   }
   await fsp.rm(archive, { force: true });
-  if (process.platform !== "win32") await fsp.chmod(executable, 0o755);
+  if (hostPlatform() !== "win32") await fsp.chmod(executable, 0o755);
   return executable;
 }
 
@@ -859,7 +860,7 @@ async function runLogged(context: InstallContext, executable: string, args: stri
     const child = spawn(executable, args, {
       cwd,
       windowsHide: true,
-      detached: process.platform !== "win32",
+      detached: hostPlatform() !== "win32",
       env: { ...process.env },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -918,7 +919,7 @@ async function installSteam(server: Server, root: string, context: InstallContex
     "+app_update", String(game.steamAppId), "validate",
     "+quit",
   ];
-  if (process.platform === "win32") {
+  if (hostPlatform() === "win32") {
     // Some Windows hosts/filesystems reject direct CreateProcess calls for
     // SteamCMD's 32-bit bootstrapper with spawn EFTYPE. PowerShell launches it
     // through Windows' native command resolution while preserving each arg.
@@ -932,20 +933,20 @@ async function installSteam(server: Server, root: string, context: InstallContex
     await runLogged(context, steamcmd, steamArgs, path.dirname(steamcmd));
   }
   await recordSuccessfulToolUse("steamcmd",`Installed or validated Steam app ${game.steamAppId}`);
-  if(process.platform === "win32") await recordSuccessfulToolUse("powershell","Launched SteamCMD for a successful managed installation");
+  if(hostPlatform() === "win32") await recordSuccessfulToolUse("powershell","Launched SteamCMD for a successful managed installation");
 }
 
 async function ensureHytaleDownloader(context: InstallContext) {
   const override = process.env.SERVERHUB_HYTALE_DOWNLOADER_PATH;
   if (override && fs.existsSync(override)) return path.resolve(override);
   const root = path.join(toolsDir(), "hytale-downloader");
-  const candidates = process.platform === "win32"
+  const candidates = hostPlatform() === "win32"
     ? ["hytale-downloader-windows-amd64.exe", "hytale-downloader.exe", "downloader.exe"]
     : ["hytale-downloader-linux-amd64", "hytale-downloader", "downloader"];
   const existing = await findExecutable(root, candidates);
   if (existing) return existing;
-  if (!["win32", "linux"].includes(process.platform) || process.arch !== "x64") {
-    throw new Error(`The official Hytale Downloader is not available for ${process.platform}/${process.arch}.`);
+  if (!["win32", "linux"].includes(hostPlatform()) || process.arch !== "x64") {
+    throw new Error(`The official Hytale Downloader is not available for ${hostPlatform()}/${process.arch}.`);
   }
 
   const archive = path.join(appDataDir(), "downloads", "hytale-downloader.zip");
@@ -968,7 +969,7 @@ async function ensureHytaleDownloader(context: InstallContext) {
   await fsp.rm(archive, { force: true });
   const executable = await findExecutable(root, candidates);
   if (!executable) throw new Error("The official Hytale Downloader archive did not contain the expected executable.");
-  if (process.platform !== "win32") await fsp.chmod(executable, 0o755).catch(() => {});
+  if (hostPlatform() !== "win32") await fsp.chmod(executable, 0o755).catch(() => {});
   return executable;
 }
 
@@ -1074,7 +1075,7 @@ async function preflightInstallation(server: Server, root: string, context: Inst
 }
 
 async function validateInstalledArtifacts(server: Server, root: string) {
-  const platform = process.platform;
+  const platform = hostPlatform();
   if (server.gameId === "minecraft" || server.gameId === "minecraft-modded") {
     if (!fs.existsSync(path.join(root, "server.jar"))) throw new Error("The downloaded server.jar is missing.");
     return;
@@ -1303,7 +1304,7 @@ export async function writeServerConfig(storedServer: Server, rootOverride?: str
     const clean = (value: string) => value.replace(/[\r\n]/g, " ").trim();
     if (!clean(server.ownerId)) throw new Error("Dragonwilds requires the owner's in-game Player ID.");
     if (clean(server.adminPassword).length < 5) throw new Error("Dragonwilds requires an admin password of at least five characters.");
-    const platformFolder = process.platform === "win32" ? "WindowsServer" : "LinuxServer";
+    const platformFolder = hostPlatform() === "win32" ? "WindowsServer" : "LinuxServer";
     const configFile = path.join(root, "RSDragonwilds", "Saved", "Config", platformFolder, "DedicatedServer.ini");
     const config = [
       "[SectionsToSave]",
@@ -1381,7 +1382,7 @@ function javaMajorForMinecraft(version: string): number {
 async function ensureJava(serverId: number, major: number, context?: InstallContext): Promise<string> {
   const override = process.env[`SERVERHUB_JAVA_PATH_${major}`];
   if (override && fs.existsSync(override)) return path.resolve(override);
-  const executableName = process.platform === "win32" ? "java.exe" : "java";
+  const executableName = hostPlatform() === "win32" ? "java.exe" : "java";
   const javaRoot = path.join(toolsDir(), `java-${major}`);
   const existing = await findExecutable(javaRoot, [executableName, `bin/${executableName}`]);
   if (existing) return existing;
@@ -1389,10 +1390,10 @@ async function ensureJava(serverId: number, major: number, context?: InstallCont
   // Download a private JRE: users do not need Java or administrator rights.
   const platformMap: Record<string, string> = { win32: "windows", linux: "linux", darwin: "mac" };
   const archMap: Record<string, string> = { x64: "x64", arm64: "aarch64" };
-  const platform = platformMap[process.platform];
+  const platform = platformMap[hostPlatform()];
   const arch = archMap[process.arch];
-  if (!platform || !arch) throw new Error(`No automatic Java runtime is available for ${process.platform}/${process.arch}. Install Java ${major} and try again.`);
-  const ext = process.platform === "win32" ? "zip" : "tar.gz";
+  if (!platform || !arch) throw new Error(`No automatic Java runtime is available for ${hostPlatform()}/${process.arch}. Install Java ${major} and try again.`);
+  const ext = hostPlatform() === "win32" ? "zip" : "tar.gz";
   const archive = path.join(appDataDir(), "downloads", `temurin-jre${major}.${ext}`);
   const url = `https://api.adoptium.net/v3/binary/latest/${major}/ga/${platform}/${arch}/jre/hotspot/normal/eclipse`;
   await downloadFile(url, archive, serverId, `Eclipse Temurin Java ${major} runtime`, context, context ? [82, 89] : [20, 75]);
@@ -1409,7 +1410,7 @@ async function ensureJava(serverId: number, major: number, context?: InstallCont
   await fsp.rm(archive, { force: true });
   const java = await findExecutable(javaRoot, [executableName, `bin/${executableName}`]);
   if (!java) throw new Error("Java runtime archive did not contain a java executable.");
-  if (process.platform !== "win32") await fsp.chmod(java, 0o755).catch(() => {});
+  if (hostPlatform() !== "win32") await fsp.chmod(java, 0o755).catch(() => {});
   return java;
 }
 
@@ -1421,7 +1422,7 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
     let executable = server.launchCommand.trim();
     if ((executable.includes("/") || executable.includes("\\") || executable.startsWith(".")) && !path.isAbsolute(executable)) executable = path.resolve(root, executable);
     const args = parseArgs(server.launchArgs);
-    if (process.platform === "win32" && /\.(?:bat|cmd)$/i.test(executable)) {
+    if (hostPlatform() === "win32" && /\.(?:bat|cmd)$/i.test(executable)) {
       return { executable: process.env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", `call "${executable}" ${server.launchArgs}`] };
     }
     return { executable, args };
@@ -1434,22 +1435,22 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
     return { executable: java, args: [`-Xms${Math.min(1024, server.memoryMb)}M`, `-Xmx${server.memoryMb}M`, "-jar", jar, "nogui"] };
   }
   if (server.gameId === "minecraft-bedrock") {
-    const executable = path.join(root, process.platform === "win32" ? "bedrock_server.exe" : "bedrock_server");
+    const executable = path.join(root, hostPlatform() === "win32" ? "bedrock_server.exe" : "bedrock_server");
     if (!fs.existsSync(executable)) throw new Error("Bedrock server executable is missing. Retry installation first.");
-    return { executable, args: [], env: process.platform === "linux" ? { LD_LIBRARY_PATH: root } : undefined };
+    return { executable, args: [], env: hostPlatform() === "linux" ? { LD_LIBRARY_PATH: root } : undefined };
   }
   if (server.gameId === "valheim") {
-    const executable = await findExecutable(root, process.platform === "win32" ? ["valheim_server.exe"] : ["valheim_server.x86_64"]);
+    const executable = await findExecutable(root, hostPlatform() === "win32" ? ["valheim_server.exe"] : ["valheim_server.x86_64"]);
     if (!executable) throw new Error("Valheim server executable was not found after SteamCMD installation.");
     if (!server.serverPassword || server.serverPassword.length < 5) throw new Error("Valheim requires a server password of at least five characters.");
     return {
       executable,
       args: ["-nographics", "-batchmode", "-name", server.name, "-port", String(server.port), "-world", server.worldName, "-password", server.serverPassword, "-public", "1", "-ip", server.bindAddress],
-      env: process.platform === "linux" ? { LD_LIBRARY_PATH: `${path.dirname(executable)}/linux64:${process.env.LD_LIBRARY_PATH || ""}` } : undefined,
+      env: hostPlatform() === "linux" ? { LD_LIBRARY_PATH: `${path.dirname(executable)}/linux64:${process.env.LD_LIBRARY_PATH || ""}` } : undefined,
     };
   }
   if (server.gameId === "ark") {
-    const executable = await findExecutable(root, process.platform === "win32"
+    const executable = await findExecutable(root, hostPlatform() === "win32"
       ? ["ShooterGame/Binaries/Win64/ShooterGameServer.exe", "ShooterGameServer.exe"]
       : ["ShooterGame/Binaries/Linux/ShooterGameServer", "ShooterGameServer"]);
     if (!executable) throw new Error("ARK server executable was not found after SteamCMD installation.");
@@ -1457,14 +1458,14 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
     return { executable, args: [`${map}?SessionName=${server.name}?Port=${server.port}?QueryPort=${getGame(server.gameId).queryPort ?? 27015}?MaxPlayers=${server.maxPlayers}?MultiHome=${server.bindAddress}`, "-server", "-log"] };
   }
   if (server.gameId === "terraria") {
-    const executable = await findExecutable(root, process.platform === "win32"
+    const executable = await findExecutable(root, hostPlatform() === "win32"
       ? ["TerrariaServer.exe"]
       : ["TerrariaServer.bin.x86_64", "TerrariaServer"]);
     if (!executable) throw new Error("Terraria server executable was not found after SteamCMD installation.");
     return { executable, args: ["-config", path.join(root, "serverconfig.txt")] };
   }
   if (server.gameId === "rust") {
-    const executable = await findExecutable(root, process.platform === "win32" ? ["RustDedicated.exe"] : ["RustDedicated"]);
+    const executable = await findExecutable(root, hostPlatform() === "win32" ? ["RustDedicated.exe"] : ["RustDedicated"]);
     if (!executable) throw new Error("RustDedicated executable was not found after SteamCMD installation.");
     return { executable, args: [
       "-batchmode", "+server.identity", safeFileName(server.worldName, "serverhub"),
@@ -1475,13 +1476,13 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
     ] };
   }
   if (server.gameId === "dragonwilds") {
-    const executable = await findExecutable(root, process.platform === "win32"
+    const executable = await findExecutable(root, hostPlatform() === "win32"
       ? ["RSDragonwilds.exe", "RSDragonwildsServer.exe"]
       : ["RSDragonwildsServer.sh", "RSDragonwildsServer"]);
     if (!executable) throw new Error("The Dragonwilds dedicated-server executable was not found after SteamCMD installation.");
     if (!server.ownerId.trim()) throw new Error("Dragonwilds requires the owner's in-game Player ID.");
     if (server.adminPassword.length < 5) throw new Error("Dragonwilds requires an admin password of at least five characters.");
-    if (process.platform !== "win32") await fsp.chmod(executable, 0o755).catch(() => {});
+    if (hostPlatform() !== "win32") await fsp.chmod(executable, 0o755).catch(() => {});
     return { executable, args: ["-log", "-NewConsole", `-Port=${server.port}`, `-MULTIHOME=${server.bindAddress}`] };
   }
   if (server.gameId === "hytale") {
@@ -1556,7 +1557,7 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
       cwd: spec.cwd ?? serverDir(server),
       env,
       windowsHide: true,
-      detached: process.platform !== "win32",
+      detached: hostPlatform() !== "win32",
       stdio: ["pipe", "pipe", "pipe"],
     });
     const entry: RuntimeEntry = {
@@ -1736,7 +1737,7 @@ export async function killFlow(id: number) {
 function killProcessTree(pid: number | undefined, force: boolean) {
   if (!pid) return;
   try {
-    if (process.platform === "win32") {
+    if (hostPlatform() === "win32") {
       spawn("taskkill", ["/pid", String(pid), "/t", ...(force ? ["/f"] : [])], { windowsHide: true, stdio: "ignore" }).unref();
     } else {
       process.kill(-pid, force ? "SIGKILL" : "SIGTERM");
@@ -1771,7 +1772,7 @@ async function sampleEntry(entry: RuntimeEntry) {
 
 async function processUsage(pid: number, previous?: ProcSample): Promise<{ cpu: number; ram: number; sample?: ProcSample }> {
   try {
-    if (process.platform === "linux") {
+    if (hostPlatform() === "linux") {
       const stat = await fsp.readFile(`/proc/${pid}/stat`, "utf8");
       const end = stat.lastIndexOf(")");
       const fields = stat.slice(end + 2).split(" ");
@@ -1782,7 +1783,7 @@ async function processUsage(pid: number, previous?: ProcSample): Promise<{ cpu: 
       return { cpu: +cpu.toFixed(1), ram: Math.max(0, Math.round((rssPages * 4096) / 1024 / 1024)), sample: { at: now, cpuTime: ticks } };
     }
     const result = await new Promise<string>((resolve, reject) => {
-      const child = process.platform === "win32"
+      const child = hostPlatform() === "win32"
         ? spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(Get-Process -Id ${pid}) | ForEach-Object { \"$($_.CPU)|$($_.WorkingSet64)\" }`], { windowsHide: true })
         : spawn("ps", ["-o", "%cpu=,rss=", "-p", String(pid)]);
       let out = "";
@@ -1790,7 +1791,7 @@ async function processUsage(pid: number, previous?: ProcSample): Promise<{ cpu: 
       child.once("error", reject);
       child.once("exit", (code) => code === 0 ? resolve(out.trim()) : reject(new Error("process unavailable")));
     });
-    if (process.platform === "win32") {
+    if (hostPlatform() === "win32") {
       const [seconds, bytes] = result.split("|").map(Number);
       const now = Date.now();
       const cpuTime = seconds * 100;

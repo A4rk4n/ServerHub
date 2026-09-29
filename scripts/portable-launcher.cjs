@@ -132,6 +132,7 @@ function shutdown() {
   process.env.PORT = String(port);
   process.env.HOSTNAME = host;
   process.env.NODE_ENV = "production";
+  process.env.SERVERHUB_TARGET_PLATFORM = "win32";
   process.env.SERVERHUB_APPDATA = appData;
   process.env.SERVERHUB_SESSION_TOKEN = sessionToken;
   process.env.SERVERHUB_DB = process.env.SERVERHUB_DB || path.join(appData, "serverhub.db");
