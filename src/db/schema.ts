@@ -96,6 +96,9 @@ export const players = sqliteTable(
   (t) => [index("players_server_idx").on(t.serverId)]
 );
 
+export const toolInventory = sqliteTable("tool_inventory", { id: text("id").primaryKey(), name: text("name").notNull(), ownership: text("ownership").notNull(), pathCategory: text("path_category").notNull(), available: integer("available", { mode: "boolean" }).notNull().default(false), detectedVersion: text("detected_version").notNull().default(""), expectedVersion: text("expected_version").notNull().default(""), integrityStatus: text("integrity_status").notNull().default("unknown"), lastVerifiedAt: ts("last_verified_at"), lastUsedAt: ts("last_used_at"), lastError: text("last_error").notNull().default(""), updatedAt: tsNow("updated_at") });
+export const toolOperations = sqliteTable("tool_operations", { id: integer("id").primaryKey({autoIncrement:true}), toolId: text("tool_id").notNull(), operation: text("operation").notNull(), status: text("status").notNull(), summary: text("summary").notNull().default(""), versionBefore: text("version_before").notNull().default(""), versionAfter: text("version_after").notNull().default(""), startedAt: tsNow("started_at"), completedAt: ts("completed_at") }, t=>[index("tool_operations_tool_idx").on(t.toolId,t.startedAt)]);
+
 export const taskRuns = sqliteTable("task_runs", {
   id: integer("id").primaryKey({ autoIncrement: true }), retryOfRunId: integer("retry_of_run_id"), taskId: integer("task_id").notNull(), serverId: integer("server_id").notNull(), taskName: text("task_name").notNull(), type: text("type").notNull(), command: text("command").notNull().default(""), status: text("status").notNull(), error: text("error").notNull().default(""), createdAt: tsNow("created_at"),
 }, (t) => [index("task_runs_server_idx").on(t.serverId, t.createdAt)]);
@@ -252,6 +255,8 @@ export const installationEvents = sqliteTable(
 export type ServerTemplate = typeof serverTemplates.$inferSelect;
 export type Server = typeof servers.$inferSelect;
 export type ConsoleLog = typeof consoleLogs.$inferSelect;
+export type ToolInventory = typeof toolInventory.$inferSelect;
+export type ToolOperation = typeof toolOperations.$inferSelect;
 export type TaskRun = typeof taskRuns.$inferSelect;
 export type ModerationActionRecord = typeof moderationActions.$inferSelect;
 export type PlayerSession = typeof playerSessions.$inferSelect;
