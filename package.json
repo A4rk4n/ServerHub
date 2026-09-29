@@ -1,6 +1,6 @@
 {
   "name": "server-hub",
-  "version": "2.7.0",
+  "version": "2.8.0",
   "description": "Local desktop manager for real dedicated game-server processes",
   "private": true,
   "main": "electron/main.cjs",

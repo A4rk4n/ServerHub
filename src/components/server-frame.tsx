@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, AlertTriangle, CalendarClock, DatabaseBackup, FolderTree, Play, Puzzle, RotateCw, Settings, Square, Terminal, Users } from "lucide-react";
+import { Activity, AlertTriangle, CalendarClock, DatabaseBackup, FolderTree, Globe2, Play, Puzzle, RotateCw, Settings, Square, Terminal, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -63,6 +63,7 @@ export function ServerFrame({ initial, game, children }: { initial: Server; game
   const tabs = [
     { href: base, label: "Console", icon: Terminal, exact: true },
     { href: `${base}/players`, label: "Players", icon: Users },
+    { href: `${base}/connect`, label: "Connect", icon: Globe2 },
     { href: `${base}/backups`, label: "Backups", icon: DatabaseBackup },
     { href: `${base}/tasks`, label: "Scheduler", icon: CalendarClock },
     ...(game.supportsMods ? [{ href: `${base}/mods`, label: modsLabel, icon: Puzzle }] : []),
