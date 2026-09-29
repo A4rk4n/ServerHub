@@ -1,6 +1,7 @@
 import { hostPlatform } from "./host-platform";
 import { diagnoseInstallationFailure, installationFailureMessage } from "./installation-diagnostics";
 import { waitForManagedExecutableExit } from "./managed-process";
+import { isAssignedLocalAddress, validateDragonwildsPreflight } from "./provider-preflight";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -1083,6 +1084,17 @@ async function preflightInstallation(server: Server, root: string, context: Inst
   await context.report("preflight", 3, "Checking storage, port and installation paths");
   throwIfCancelled(context.signal);
   await fsp.mkdir(path.dirname(root), { recursive: true });
+
+  if (!isAssignedLocalAddress(server.bindAddress)) {
+    throw new Error(`The configured bind address ${server.bindAddress} is not assigned to this PC. Select an address shown in Diagnostics before installing.`);
+  }
+  await addInstallationEvent(context.jobId, server.id, "info", "preflight", 4, `Bind address check passed for ${game.protocol} port ${server.port}.`);
+
+  if (server.gameId === "dragonwilds") {
+    const [ownerId, adminPassword] = await Promise.all([revealSecret(server.ownerId), revealSecret(server.adminPassword)]);
+    validateDragonwildsPreflight(ownerId, adminPassword);
+    await addInstallationEvent(context.jobId, server.id, "success", "preflight", 5, "Dragonwilds Owner ID and admin configuration checks passed.");
+  }
 
   if (game.installer !== "manual" && process.env.SERVERHUB_SKIP_DISK_PREFLIGHT !== "1") {
     const stat = await fsp.statfs(path.dirname(root));
