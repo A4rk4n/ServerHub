@@ -15,7 +15,7 @@ import { db, dbPath, sqliteClient } from "@/db";
 import { activity, backups, consoleLogs, incidents, installationEvents, installationJobs, players, servers, tasks } from "@/db/schema";
 import type { Backup, InstallationJob, Server } from "@/db/schema";
 import { getGame, type InstallerKind } from "./games";
-import { queryA2sInfo } from "./query-protocols";
+import { queryA2sInfo, queryMinecraftStatus } from "./query-protocols";
 import { isProtectedSecret, protectAndVerify, revealSecret } from "./credential-vault";
 import { appDataDir, backupsDir, ensureDataDirs, safeFileName, serverDir, toolsDir } from "./storage";
 
@@ -1504,11 +1504,9 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
 // Real process lifecycle and metrics
 // ---------------------------------------------------------------------------
 
-function varInt(value:number){const out:number[]=[];do{let byte=value&127;value>>>=7;if(value)byte|=128;out.push(byte)}while(value);return Buffer.from(out)}
-async function minecraftReady(host:string,port:number){return new Promise<boolean>((resolve)=>{const socket=net.createConnection({host,port});let settled=false;const done=(ok:boolean)=>{if(settled)return;settled=true;socket.destroy();resolve(ok)};socket.setTimeout(1500);socket.once("connect",()=>{const address=Buffer.from(host);const body=Buffer.concat([Buffer.from([0]),varInt(0),varInt(address.length),address,Buffer.from([port>>8,port&255]),Buffer.from([1])]);socket.write(Buffer.concat([varInt(body.length),body,Buffer.from([1,0])]));});socket.once("data",data=>done(data.length>3&&data.includes(Buffer.from("version"))));socket.once("timeout",()=>done(false));socket.once("error",()=>done(false));})}
 async function probeEntry(entry:RuntimeEntry){
  const server=entry.server,game=getGame(server.gameId); const method=server.gameId.startsWith("minecraft")?"minecraft-status":["ark","rust","valheim"].includes(server.gameId)?"steam-a2s":game.protocol==="UDP"?"process-stability":"tcp-connect";
- let detail=""; const ok=method==="minecraft-status"?await minecraftReady(server.bindAddress,server.port):method==="steam-a2s"?await queryA2sInfo(server.bindAddress,game.queryPort!).then(info=>{detail=`${info.name} · ${info.map} · ${info.players}/${info.maxPlayers} players · v${info.version}`;return true}).catch(()=>false):method==="process-stability"?state.processes.has(server.id):await new Promise<boolean>(resolve=>{const socket=net.createConnection({host:server.bindAddress,port:server.port});const done=(v:boolean)=>{socket.destroy();resolve(v)};socket.setTimeout(750);socket.once("connect",()=>done(true));socket.once("timeout",()=>done(false));socket.once("error",()=>done(false))});
+ let detail=""; const ok=method==="minecraft-status"?await queryMinecraftStatus(server.bindAddress,server.port).then(info=>{detail=`${info.version} · ${info.players}/${info.maxPlayers} players · ${info.latencyMs} ms${info.motd?` · ${info.motd}`:""}`;return true}).catch(()=>false):method==="steam-a2s"?await queryA2sInfo(server.bindAddress,game.queryPort!).then(info=>{detail=`${info.name} · ${info.map} · ${info.players}/${info.maxPlayers} players · v${info.version}`;return true}).catch(()=>false):method==="process-stability"?state.processes.has(server.id):await new Promise<boolean>(resolve=>{const socket=net.createConnection({host:server.bindAddress,port:server.port});const done=(v:boolean)=>{socket.destroy();resolve(v)};socket.setTimeout(750);socket.once("connect",()=>done(true));socket.once("timeout",()=>done(false));socket.once("error",()=>done(false))});
  return {ok,method,detail};
 }
 async function waitUntilReady(entry: RuntimeEntry) {
