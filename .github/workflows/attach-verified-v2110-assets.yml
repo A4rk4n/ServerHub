@@ -122,6 +122,7 @@ jobs:
       - name: Record the attachment in the release notes
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           notes=$(gh release view "$TAG" --json body --jq .body)
