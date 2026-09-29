@@ -2,7 +2,7 @@ import { hostPlatform } from "./host-platform";
 import { diagnoseInstallationFailure, installationFailureMessage } from "./installation-diagnostics";
 import { waitForManagedExecutableExit } from "./managed-process";
 import { isAssignedLocalAddress, validateDragonwildsPreflight } from "./provider-preflight";
-import { processStabilityReady, readinessProbeFor, readinessRemediation } from "./readiness-policy";
+import { minimumProcessStabilityMs, processStabilityReady, readinessProbeFor, readinessRemediation, readinessWaitingReason } from "./readiness-policy";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -1569,7 +1569,7 @@ async function reconcileA2sPlayerSessions(server:Server,observed:Awaited<ReturnT
 }
 async function probeEntry(entry:RuntimeEntry){
  const server=entry.server,game=getGame(server.gameId); const method=readinessProbeFor(server.gameId,game.protocol);
- let detail="",metadata:Record<string,unknown>|null=null; const ok=method==="minecraft-status"?await queryMinecraftStatus(server.bindAddress,server.port).then(info=>{metadata={provider:"minecraft",version:info.version,protocol:info.protocol,motd:info.motd,players:info.players,maxPlayers:info.maxPlayers,latencyMs:info.latencyMs};detail=`${info.version} · ${info.players}/${info.maxPlayers} players · ${info.latencyMs} ms${info.motd?` · ${info.motd}`:""}`;return true}).catch(()=>false):method==="steam-a2s"?await queryA2sInfo(server.bindAddress,game.queryPort!).then(async info=>{const observed=await queryA2sPlayers(server.bindAddress,game.queryPort!).catch(()=>null);if(observed)await reconcileA2sPlayerSessions(server,observed);metadata={provider:"steam-a2s",name:info.name,map:info.map,game:info.game,players:info.players,maxPlayers:info.maxPlayers,bots:info.bots,password:info.password,vac:info.vac,version:info.version};detail=`${info.name} · ${info.map} · ${info.players}/${info.maxPlayers} players · v${info.version}`;return true}).catch(()=>false):method==="process-stability"?state.processes.has(server.id)&&processStabilityReady(entry.startedAtMs):await new Promise<boolean>(resolve=>{const socket=net.createConnection({host:server.bindAddress,port:server.port});const done=(v:boolean)=>{socket.destroy();resolve(v)};socket.setTimeout(750);socket.once("connect",()=>done(true));socket.once("timeout",()=>done(false));socket.once("error",()=>done(false))});
+ let detail="",metadata:Record<string,unknown>|null=null; const ok=method==="minecraft-status"?await queryMinecraftStatus(server.bindAddress,server.port).then(info=>{metadata={provider:"minecraft",version:info.version,protocol:info.protocol,motd:info.motd,players:info.players,maxPlayers:info.maxPlayers,latencyMs:info.latencyMs};detail=`${info.version} · ${info.players}/${info.maxPlayers} players · ${info.latencyMs} ms${info.motd?` · ${info.motd}`:""}`;return true}).catch(()=>false):method==="steam-a2s"?await queryA2sInfo(server.bindAddress,game.queryPort!).then(async info=>{const observed=await queryA2sPlayers(server.bindAddress,game.queryPort!).catch(()=>null);if(observed)await reconcileA2sPlayerSessions(server,observed);metadata={provider:"steam-a2s",name:info.name,map:info.map,game:info.game,players:info.players,maxPlayers:info.maxPlayers,bots:info.bots,password:info.password,vac:info.vac,version:info.version};detail=`${info.name} · ${info.map} · ${info.players}/${info.maxPlayers} players · v${info.version}`;return true}).catch(()=>false):method==="process-stability"?state.processes.has(server.id)&&processStabilityReady(entry.startedAtMs,Date.now(),minimumProcessStabilityMs(server.gameId)):await new Promise<boolean>(resolve=>{const socket=net.createConnection({host:server.bindAddress,port:server.port});const done=(v:boolean)=>{socket.destroy();resolve(v)};socket.setTimeout(750);socket.once("connect",()=>done(true));socket.once("timeout",()=>done(false));socket.once("error",()=>done(false))});
  if(ok&&metadata)await db.update(servers).set({queryMetadata:JSON.stringify(metadata),lastQueryAt:new Date()}).where(eq(servers.id,server.id));
  return {ok,method,detail};
 }
@@ -1631,7 +1631,9 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
     entry.monitor.unref?.();
 
     const probe=readinessProbeFor(server.gameId,getGame(server.gameId).protocol);
-    await db.update(servers).set({healthStatus:"checking",healthReason:"Waiting for provider readiness",healthProbe:probe,updatedAt:new Date()}).where(eq(servers.id,id));
+    const waitingReason=readinessWaitingReason(server.gameId,probe);
+    await db.update(servers).set({healthStatus:"checking",healthReason:waitingReason,healthProbe:probe,updatedAt:new Date()}).where(eq(servers.id,id));
+    await logLine(id,"system","Readiness",`${waitingReason}.`);
     const ready = await waitUntilReady(entry);
     if (!state.processes.has(id)) { await setHealth(id,"blocked","Process exited during startup",probe,false); await incident(id,"error","readiness","Process exited during startup",readinessRemediation(server.gameId,probe)); return { ok: false, reason: "The server process exited during startup. Check Console for details." }; }
     if (!ready) { await setHealth(id,"blocked",`Readiness timed out after ${server.readinessTimeoutSec} seconds`,probe,false); await incident(id,"error","readiness","Provider readiness timed out",readinessRemediation(server.gameId,probe));
@@ -1641,6 +1643,7 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
     }
     await db.update(servers).set({ status: "online", lastStartedAt: new Date(), updatedAt: new Date() }).where(eq(servers.id, id));
     await setHealth(id,"ready","Provider readiness probe passed",probe,true);
+    await logLine(id,"success","Readiness",`${probe} readiness passed after ${Math.max(1,Math.round((Date.now()-entry.startedAtMs)/1000))} seconds.`);
     if(server.gameId === "minecraft" || server.gameId === "minecraft-modded") await recordSuccessfulToolUse("java","Started a Minecraft server and passed its readiness probe");
     await logLine(id, "success", "Runtime", `Process started with PID ${child.pid}.`);
     await act(id, "power", `${server.name} started (PID ${child.pid})`);
