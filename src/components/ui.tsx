@@ -9,6 +9,7 @@ export const STATUS_META: Record<string, { label: string; color: string; pulse: 
   online: { label: "Online", color: "#17ab72", pulse: true },
   offline: { label: "Offline", color: "#a886ad", pulse: false },
   starting: { label: "Starting", color: "#e0a020", pulse: true },
+  restarting: { label: "Restart queued", color: "#d18a18", pulse: true },
   stopping: { label: "Stopping", color: "#ef7c30", pulse: true },
   installing: { label: "Installing", color: "#1f9fd6", pulse: true },
   crashed: { label: "Crashed", color: "#e2445c", pulse: false },

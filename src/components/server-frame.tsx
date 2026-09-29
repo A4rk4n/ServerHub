@@ -1,11 +1,12 @@
 "use client";
 
-import { AlertTriangle, CalendarClock, DatabaseBackup, FolderTree, Play, Puzzle, RotateCw, Settings, Square, Terminal, Users } from "lucide-react";
+import { Activity, AlertTriangle, CalendarClock, DatabaseBackup, FolderTree, Globe2, Play, Puzzle, RotateCw, Settings, Square, Terminal, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Server } from "@/db/schema";
 import { cn, hexA } from "@/lib/format";
+import { InstallationProgress } from "./installation-progress";
 import { Btn, Modal, StatusPill } from "./ui";
 
 export type FrameGame = { id: string; name: string; short: string; accent: string; art: string; protocol: string; modSource: string | null; supportsMods: boolean };
@@ -15,6 +16,7 @@ export function ServerFrame({ initial, game, children }: { initial: Server; game
   const [server, setServer] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [confirmKill, setConfirmKill] = useState(false);
+  const previousStatus = useRef(initial.status);
 
   useEffect(() => {
     let dead = false;
@@ -23,7 +25,15 @@ export function ServerFrame({ initial, game, children }: { initial: Server; game
         const r = await fetch(`/api/servers/${initial.id}`, { cache: "no-store" });
         if (!r.ok) return;
         const j = await r.json();
-        if (!dead && j.server) setServer((prev) => ({ ...prev, ...j.server }));
+        if (!dead && j.server) {
+          const nextStatus = String(j.server.status);
+          if (nextStatus !== previousStatus.current && typeof Notification !== "undefined") {
+            if (Notification.permission === "default") void Notification.requestPermission();
+            if (Notification.permission === "granted" && ["online","crashed","error","restarting"].includes(nextStatus)) new Notification(`${initial.name}: ${nextStatus}`, { body: nextStatus === "online" ? "The game server is ready for players." : "Open Server Hub for details." });
+          }
+          previousStatus.current = nextStatus;
+          setServer((prev) => ({ ...prev, ...j.server }));
+        }
       } catch {}
     };
     const t = setInterval(poll, 3500);
@@ -31,7 +41,7 @@ export function ServerFrame({ initial, game, children }: { initial: Server; game
       dead = true;
       clearInterval(t);
     };
-  }, [initial.id]);
+  }, [initial.id, initial.name]);
 
   async function power(action: string) {
     if (busy) return;
@@ -53,10 +63,12 @@ export function ServerFrame({ initial, game, children }: { initial: Server; game
   const tabs = [
     { href: base, label: "Console", icon: Terminal, exact: true },
     { href: `${base}/players`, label: "Players", icon: Users },
+    { href: `${base}/connect`, label: "Connect", icon: Globe2 },
     { href: `${base}/backups`, label: "Backups", icon: DatabaseBackup },
     { href: `${base}/tasks`, label: "Scheduler", icon: CalendarClock },
     ...(game.supportsMods ? [{ href: `${base}/mods`, label: modsLabel, icon: Puzzle }] : []),
     { href: `${base}/files`, label: "Files", icon: FolderTree },
+    { href: `${base}/diagnostics`, label: "Diagnostics", icon: Activity },
     { href: `${base}/settings`, label: "Settings", icon: Settings },
   ];
 
@@ -85,7 +97,7 @@ export function ServerFrame({ initial, game, children }: { initial: Server; game
             {" · "}v{server.version}
             {server.loader !== "vanilla" ? ` · ${server.loader}` : ""}
             {" · "}
-            <span className="font-mono text-[11.5px]">127.0.0.1:{server.port}</span>
+            <span className="font-mono text-[11.5px]">{server.publicAddress}:{server.port}</span>
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -109,6 +121,11 @@ export function ServerFrame({ initial, game, children }: { initial: Server; game
               </Btn>
             </>
           ) : null}
+          {st === "restarting" ? (
+            <Btn variant="danger" onClick={() => power("stop")} loading={busy}>
+              <Square size={13} /> Cancel restart
+            </Btn>
+          ) : null}
           {["starting", "stopping", "installing"].includes(st) && (
             <Btn variant="subtle" disabled>
               <RotateCw size={14} className="animate-spin" /> {st === "installing" ? "Installing" : st === "starting" ? "Starting" : "Stopping"}…
@@ -121,6 +138,8 @@ export function ServerFrame({ initial, game, children }: { initial: Server; game
           )}
         </div>
       </div>
+
+      <InstallationProgress serverId={server.id} accent={accent} />
 
       {/* tabs */}
       <div className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-0.5">

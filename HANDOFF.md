@@ -1,0 +1,102 @@
+# Server Hub recovery and v1.4 handoff
+
+Date: 2026-09-28
+
+## Authoritative links
+
+- GitHub repository: https://github.com/A4rk4n/ServerHub.git
+- Final v1.3.0 ZIP: https://drive.google.com/file/d/1mxY4uD79I0yLTmhVLjyt4OGpdoOHcFsP/view?usp=drive_link
+- Final v1.3.0 direct download: https://drive.google.com/uc?id=1mxY4uD79I0yLTmhVLjyt4OGpdoOHcFsP&export=download
+- Final v1.3.0 checksum file: https://drive.google.com/uc?id=1UnLrcQ25djE01qKfB8D0U2ibB_hfphcx&export=download
+- Hierarchy-preserving extracted v1.3.0 folder: https://drive.google.com/drive/folders/1knygGyt8nTxZ2ggjFuEnPy6EYiDBZthl?usp=drive_link
+
+## Validated release identity
+
+- Artifact: ServerHub-1.3.0-Windows-x64-Portable.zip
+- Size: 66,464,382 bytes
+- SHA-256: dbd4accf9b20006c82368d163c76bb8d4ce26d1253af3b4e0a2534bde88d8e5f
+- MD5: a2b9ac248269e603c3720adf6fd51c59
+- ServerHub.exe size: 90,080,768 bytes
+- ServerHub.exe SHA-256: e4d9488b351ff616c041934f933729c11f5ec42fdcf3c5e47513b48a990b0387
+
+## Git state observed in the closed session
+
+- Fixed working branch: arena/01a0e47e-serverhub
+- Working branch base: f96553443cd635d6a44960db46c46b8d13485243
+- Locally cached origin/main: 5b1afd83f29eb4270b25056deb3d92f61ec800e1
+- origin/main package version: 1.0.0
+- Surviving working source package version: 1.0.2
+- Drive release package version: 1.3.0
+- Missing historical commits previously created in an earlier workspace incarnation:
+  - 2de2521 — durable installation jobs
+  - a3531d7 — API security and native WebView2 shell
+  - 4512494 — Dragonwilds, Hytale, and secure extraction
+
+The working source in this archive is the latest surviving source from the closed session. It includes durable installation jobs plus bounded automatic crash recovery and launch-time port preflight. It is not yet the canonical v1.3 source: merge it with the exact recovered v1.3 references under recovery/v1.3-reference/.
+
+## Exact v1.3 source recovered from the portable package
+
+The hierarchy-preserving Drive extraction contains exact traced TypeScript source under resources/server/src. A small critical subset was downloaded byte-for-byte into recovery/v1.3-reference/, including:
+
+- src/lib/runtime.ts — exact shipped v1.3 providers, secure ZIP extraction, secret redaction, installation jobs, launch and backup behavior
+- src/lib/games.ts — exact automatic Dragonwilds and Hytale definitions
+- src/lib/filesys.ts
+- API server collection/detail routes
+- selected frontend components
+- package.json identifying server-hub 1.3.0
+- generated standalone server metadata
+
+This is a partial source reference, not a full historical checkout. Use the Drive extraction and compiled Next.js chunks for remaining equivalence checks.
+
+## Current watchdog functionality in the surviving source
+
+- Opt-in auto_restart, max_crash_restarts, and restart_window_sec schema fields/migrations
+- Crash-only automatic restart with exponential backoff: 2, 4, 8... seconds, capped at 30
+- Retry attempts bounded within a configurable 30–3600 second window
+- Stable-runtime and manual-start crash-history reset
+- Operator-visible restarting status
+- Pending restart cancellation through Stop, Kill, deletion, shutdown, or disabling the setting
+- Settings UI/API for watchdog configuration
+- TCP/UDP port availability check immediately before launch
+- Installation/update blocked while restart is pending
+- Integration fixture verifies initial launch plus two retries, terminal crashed state, limit logging, and cancellation
+
+Latest successful checks in the closed session:
+
+- npm run typecheck
+- npm run lint
+- npm run build:server
+- npm run test:installation-jobs
+- npm audit --omit=dev (0 vulnerabilities)
+
+Integration output included watchdogLaunches: 3 and cancelledWatchdogLaunches: 1.
+
+## Required desktop acceptance criteria
+
+- ServerHub.exe owns an embedded native desktop window.
+- It must not launch a browser, web link, Edge/Chrome app-mode window, or Command Prompt.
+- Closing the native window must gracefully shut down the local service and managed processes.
+- The local management API must remain loopback-only and hardened against Host/Origin boundary attacks.
+
+## Packaging defect discovered in v1.3.0
+
+The portable package includes build-time material under resources/server/build, resources/server/data, and resources/server/src. It also contains a recursive nested package path under resources/server/build/windows-portable/ServerHub/resources/server/....
+
+Fix the release builder to package an explicit allowlist only:
+
+- server.js
+- package.json
+- .next/
+- node_modules/
+- public/
+- start.mjs
+
+Package validation must reject build/, data/, src/, databases, logs, worlds, credentials, test fixtures, preview data, and any nested ServerHub.exe below the package root.
+
+## Intended release history
+
+1. Recover and validate a canonical v1.3.0 source baseline without changing the existing delivered artifact.
+2. Commit recovery/build-provenance/package-sanitization work separately.
+3. Apply the watchdog and readiness improvements afterward.
+4. Version the feature release as v1.4.0.
+5. Generate embedded build-info.json plus a sidecar release-manifest.json and SHA256SUMS tying every artifact to the full source commit.

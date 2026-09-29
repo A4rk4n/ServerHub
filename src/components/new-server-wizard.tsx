@@ -1,14 +1,24 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, ArrowRight, Boxes, Check, Cpu, Globe, HardDrive, KeyRound, Loader2, MemoryStick, ShieldCheck, Sparkles, Terminal, Users } from "lucide-react";
+import { ArrowLeft, ArrowRight, Boxes, Check, CloudDownload, Cpu, Globe, HardDrive, KeyRound, Loader2, MemoryStick, ShieldCheck, Sparkles, Terminal, Trash2, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { GAMES, type GameDef } from "@/lib/games";
+import { nextFreeServerPort } from "@/lib/server-templates";
 import { cn, hexA } from "@/lib/format";
 import { Btn, Field, Toggle, inputCls } from "./ui";
 
 const ease = [0.22, 1, 0.36, 1] as const;
+type RemoteVersion = { id: string; channel: "stable" | "preview" | "legacy"; releasedAt?: string };
+type SavedTemplate = {id:number;name:string;gameId:string;config:string};
+type CatalogDetails = { automatic: boolean; sourceName: string; sourceUrl: string; authentication: "none" | "oauth" | "user-files" };
+
+function generatedPassword() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
+  const bytes = crypto.getRandomValues(new Uint8Array(20));
+  return Array.from(bytes, (value) => alphabet[value % alphabet.length]).join("");
+}
 
 const SUGGESTIONS: Record<string, string> = {
   minecraft: "Skyfall SMP",
@@ -39,24 +49,65 @@ export function NewServerWizard() {
   const [motd, setMotd] = useState("");
   const [pvp, setPvp] = useState(true);
   const [serverPassword, setServerPassword] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [ownerId, setOwnerId] = useState("");
   const [eulaAccepted, setEulaAccepted] = useState(false);
   const [launchCommand, setLaunchCommand] = useState("");
   const [launchArgs, setLaunchArgs] = useState("");
   const [workingDirectory, setWorkingDirectory] = useState("");
+  const [availableVersions, setAvailableVersions] = useState<RemoteVersion[]>([]);
+  const [catalogDetails, setCatalogDetails] = useState<CatalogDetails | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogWarning, setCatalogWarning] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [templates, setTemplates] = useState<SavedTemplate[]>([]);
+  const [usedPorts, setUsedPorts] = useState<number[]>([]);
+  useEffect(()=>{void fetch("/api/templates",{cache:"no-store"}).then(r=>r.json()).then(j=>setTemplates(j.templates??[])).catch(()=>{});void fetch("/api/servers",{cache:"no-store"}).then(r=>r.json()).then(j=>setUsedPorts((j.servers??[]).map((server:{port:number})=>server.port))).catch(()=>{})},[]);
+
+  useEffect(() => {
+    if (!game) return;
+    const controller = new AbortController();
+    setCatalogLoading(true);
+    setCatalogWarning(null);
+    void Promise.all([
+      fetch("/api/catalog", { signal: controller.signal }).then((response) => response.json()),
+      fetch(`/api/catalog/${encodeURIComponent(game.id)}/versions`, { signal: controller.signal }).then(async (response) => {
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error ?? "Version catalog is unavailable");
+        return body;
+      }),
+    ]).then(([catalog, versionResult]) => {
+      const details = catalog.games?.find((item: { id: string }) => item.id === game.id) ?? null;
+      setCatalogDetails(details);
+      const versions = versionResult.versions as RemoteVersion[];
+      setAvailableVersions(versions);
+      if (versions.length) setVersion(versions[0].id);
+    }).catch((reason) => {
+      if (!controller.signal.aborted) {
+        setAvailableVersions(game.versions.map((id) => ({ id, channel: id === "latest" ? "stable" : "legacy" })));
+        setCatalogWarning(`Using bundled version information: ${reason instanceof Error ? reason.message : String(reason)}`);
+      }
+    }).finally(() => { if (!controller.signal.aborted) setCatalogLoading(false); });
+    return () => controller.abort();
+  }, [game]);
+
+  function applyTemplate(template:SavedTemplate){const g=GAMES.find(item=>item.id===template.gameId);if(!g)return;chooseGame(g);const c=JSON.parse(template.config) as Record<string,unknown>;if(typeof c.version==="string")setVersion(c.version);if(typeof c.loader==="string")setLoader(c.loader);if(typeof c.memoryMb==="number")setMemory(c.memoryMb);if(typeof c.maxPlayers==="number")setSlots(c.maxPlayers);if(typeof c.motd==="string")setMotd(c.motd);if(typeof c.difficulty==="string")setDifficulty(c.difficulty);if(typeof c.pvp==="boolean")setPvp(c.pvp);setName(`${template.name.replace(/ template$/i,"")} New`);setPort(nextFreeServerPort(g.defaultPort,usedPorts))}
+  async function deleteTemplate(id:number){await fetch(`/api/templates/${id}`,{method:"DELETE"});setTemplates(items=>items.filter(item=>item.id!==id))}
 
   function chooseGame(g: GameDef) {
     setGame(g);
     setName(SUGGESTIONS[g.id] ?? "My Server");
     setVersion(g.versions[0]);
     setLoader(g.loaders?.[0]?.id ?? "vanilla");
-    setPort(g.defaultPort);
+    setPort(nextFreeServerPort(g.defaultPort,usedPorts));
     setMemory(g.defaultMemory);
     setSlots(g.defaultMaxPlayers);
     setWorld(g.id === "ark" ? "TheIsland" : g.id === "valheim" ? "Midgard" : "world");
     setMotd(`A ${g.short} server by Server Hub`);
     setServerPassword("");
+    setAdminPassword("");
+    setOwnerId("");
     setEulaAccepted(false);
     setLaunchCommand("");
     setLaunchArgs("");
@@ -74,6 +125,7 @@ export function NewServerWizard() {
           port >= 1024 &&
           (!isMinecraft || eulaAccepted) &&
           (!game?.requiresPassword || serverPassword.length >= 5) &&
+          (game?.id !== "dragonwilds" || (ownerId.trim().length > 0 && adminPassword.length >= 5)) &&
           (game?.installer !== "manual" || launchCommand.trim())
         )
       : true;
@@ -100,6 +152,8 @@ export function NewServerWizard() {
           difficulty,
           pvp,
           serverPassword,
+          adminPassword,
+          ownerId: ownerId.trim(),
           eulaAccepted,
           launchCommand,
           launchArgs,
@@ -156,6 +210,7 @@ export function NewServerWizard() {
         {/* ---------------- STEP 0: game ---------------- */}
         {step === 0 && (
           <motion.section key="s0" initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -18 }} transition={{ duration: 0.45, ease }}>
+            {templates.length>0&&<div className="mb-5 rounded-2xl border border-candy-200 bg-candy-50/50 p-4"><p className="mb-3 text-xs font-bold uppercase tracking-wider text-plum-500">Start from a saved template</p><div className="flex flex-wrap gap-2">{templates.map(template=><div key={template.id} className="flex items-center rounded-xl border border-candy-200 bg-white"><button className="px-3 py-2 text-sm font-semibold text-plum-700 hover:text-candy-600" onClick={()=>applyTemplate(template)}>{template.name}</button><button className="border-l border-candy-100 p-2 text-plum-400 hover:text-red-500" aria-label={`Delete ${template.name}`} onClick={()=>void deleteTemplate(template.id)}><Trash2 size={13}/></button></div>)}</div><p className="mt-3 text-[11px] text-plum-500">Templates apply non-secret settings only. Choose fresh ports, world identity, and credentials below.</p></div>}
             <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
               {GAMES.map((g, i) => {
                 const selected = game?.id === g.id;
@@ -212,8 +267,8 @@ export function NewServerWizard() {
               <div className="grid grid-cols-2 gap-4">
                 <Field label={game.loaders ? "Game version" : "Version"}>
                   <select className={inputCls} value={version} onChange={(e) => setVersion(e.target.value)}>
-                    {game.versions.map((v) => (
-                      <option key={v} value={v} className="bg-white">{v}</option>
+                    {(availableVersions.length ? availableVersions : game.versions.map((id) => ({ id, channel: "legacy" as const }))).map((item) => (
+                      <option key={item.id} value={item.id} className="bg-white">{item.id}{item.channel === "preview" ? " — preview" : item.channel === "legacy" ? " — legacy" : ""}</option>
                     ))}
                   </select>
                 </Field>
@@ -234,6 +289,24 @@ export function NewServerWizard() {
                     </select>
                   </Field>
                 )}
+              </div>
+
+              <div className="rounded-xl border border-candy-200 bg-candy-50/70 p-4">
+                <div className="flex items-start gap-3">
+                  <CloudDownload size={18} className="mt-0.5 shrink-0" style={{ color: accent }} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-semibold text-plum-800">
+                      {catalogLoading ? "Checking official downloads…" : catalogDetails?.automatic ? "Downloaded and installed by Server Hub" : "Use files already on this computer"}
+                    </p>
+                    <p className="mt-1 text-[11.5px] leading-relaxed text-plum-500">
+                      {catalogDetails?.automatic
+                        ? `Official source: ${catalogDetails.sourceName}. Server Hub downloads, verifies, stages, and activates the selected server version without opening an external website.${catalogDetails.authentication === "oauth" ? " Authorization is completed in the installation console." : ""}`
+                        : "This custom provider does not publish an automatic server package. Point Server Hub at an existing local installation below."}
+                    </p>
+                    {catalogWarning && <p className="mt-2 text-[11px] text-amber-700">{catalogWarning}</p>}
+                  </div>
+                  {catalogDetails?.automatic && <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-semibold text-emerald-700">Official</span>}
+                </div>
               </div>
 
               <Field label={`Memory allocation — ${ramGb.toFixed(ramGb >= 10 ? 0 : 1)} GB`} hint={`${game.minMemory / 1024}G min · ${game.maxMemory / 1024}G max`}>
@@ -280,12 +353,33 @@ export function NewServerWizard() {
                 </Field>
               </div>
 
+              {game.id === "dragonwilds" && (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Field label="In-game Player ID" hint="required · identifies the server owner/admin">
+                  <div className="relative">
+                    <KeyRound size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-plum-400" />
+                    <input className={cn(inputCls, "pl-9 font-mono")} value={ownerId} onChange={(e) => setOwnerId(e.target.value)} placeholder="Enter your Dragonwilds Player ID" maxLength={200} autoComplete="off" />
+                  </div>
+                    <p className="mt-1.5 text-[11px] leading-relaxed text-plum-500">Find this ID in Dragonwilds, then paste it here. Server Hub passes it to the dedicated server as the owner identifier.</p>
+                  </Field>
+                  <Field label="Admin password" hint="required · minimum 5 characters · stored locally">
+                    <div className="relative">
+                      <KeyRound size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-plum-400" />
+                      <input className={cn(inputCls, "pl-9")} type="password" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} placeholder="Enter an admin password" minLength={5} maxLength={200} autoComplete="new-password" />
+                    </div>
+                    <button type="button" className="mt-1.5 text-[11px] font-semibold text-pink-600 hover:underline" onClick={() => setAdminPassword(generatedPassword())}>Generate secure password</button>
+                    <p className="mt-1.5 text-[11px] leading-relaxed text-plum-500">Used for Dragonwilds server administration. This can be different from the player-facing server password.</p>
+                  </Field>
+                </div>
+              )}
+
               {game.requiresPassword && (
                 <Field label="Server password" hint="minimum 5 characters · stored locally">
                   <div className="relative">
                     <KeyRound size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-plum-400" />
                     <input className={cn(inputCls, "pl-9")} type="password" value={serverPassword} onChange={(e) => setServerPassword(e.target.value)} minLength={5} autoComplete="new-password" />
                   </div>
+                  <button type="button" className="mt-1.5 text-[11px] font-semibold text-pink-600 hover:underline" onClick={() => setServerPassword(generatedPassword())}>Generate secure password</button>
                 </Field>
               )}
 
@@ -377,7 +471,7 @@ export function NewServerWizard() {
                   ["Port", String(port)],
                   ["World", world || "world"],
                   ["Seed", seed || "random"],
-                  ["PvP", pvp ? "enabled" : "disabled"],
+                  game.id === "dragonwilds" ? ["Player ID", ownerId] : ["PvP", pvp ? "enabled" : "disabled"],
                 ].map(([k, v]) => (
                   <div key={k} className="bg-white px-4 py-3.5">
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-plum-400">{k}</p>

@@ -21,6 +21,9 @@ export type CardServer = {
   lastStartedAt?: string | Date | null;
   game: { id: string; short: string; name: string; accent: string; art: string; protocol: string };
   live: { cpu: number; ram: number; players: number; tps: number | null } | null;
+  updateValidationStatus?: string;
+  updatePreviousVersion?: string;
+  updateTargetVersion?: string;
 };
 
 export function ServerCard({ server, index = 0 }: { server: CardServer; index?: number }) {
@@ -97,6 +100,8 @@ export function ServerCard({ server, index = 0 }: { server: CardServer; index?: 
         <Vital icon={<Timer size={12} />} label="uptime" value={fmtUptime(server.lastStartedAt, server.status)} />
       </div>
 
+      {server.updateValidationStatus && !["none","validated"].includes(server.updateValidationStatus) && <div className={cn("mx-3.5 mb-3 rounded-lg px-2.5 py-2 text-[10.5px] font-semibold",server.updateValidationStatus==="readiness-failed"||server.updateValidationStatus==="installation-failed"?"bg-red-50 text-red-600":"bg-amber-50 text-amber-700")}>{server.updateValidationStatus==="installing"?"Update installation in progress":server.updateValidationStatus==="awaiting-readiness"?"Update awaiting first-start validation":server.updateValidationStatus==="validating-runtime"?"Validating updated server readiness":server.updateValidationStatus==="readiness-failed"?"Updated server failed readiness — rollback is available":server.updateValidationStatus==="installation-cancelled"?"Update installation was cancelled":server.updateValidationStatus==="rollback-running"?"Update failed — restoring previous version":server.updateValidationStatus==="rollback-restored"?"Previous version restored — start to validate":server.updateValidationStatus==="rollback-validating"?"Validating restored version readiness":server.updateValidationStatus==="rollback-validated"?"Previous version restored and validated":server.updateValidationStatus==="rollback-failed"?"Automatic rollback needs attention":"Update validation needs attention"}{server.updatePreviousVersion&&server.updateTargetVersion?` · ${server.updatePreviousVersion} → ${server.updateTargetVersion}`:""}</div>}
+
       {/* actions */}
       <div className="flex items-center gap-2 border-t border-candy-200/60 px-3.5 py-2.5">
         <span className="mr-auto truncate text-[11px] italic text-plum-400">{server.motd || "—"}</span>
@@ -108,6 +113,11 @@ export function ServerCard({ server, index = 0 }: { server: CardServer; index?: 
         {server.status === "error" && (
           <PowerBtn onClick={(e) => power(e, "install")} disabled={transitioning} accent={g.accent} loading={busy === "install"}>
             <RotateCw size={12} /> Retry install
+          </PowerBtn>
+        )}
+        {server.status === "restarting" && (
+          <PowerBtn onClick={(e) => power(e, "stop")} disabled={busy !== null} accent="#e2445c" loading={busy === "stop"}>
+            <Square size={12} /> Cancel restart
           </PowerBtn>
         )}
         {isOnline && (

@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Check, Cpu, Globe, KeyRound, Save, Swords, Terminal, Trash2, User } from "lucide-react";
+import { AlertTriangle, Check, CloudDownload, Copy, Cpu, Globe, KeyRound, RefreshCw, RotateCw, Save, Swords, Terminal, Trash2, User } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Server } from "@/db/schema";
@@ -26,38 +26,64 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
     name: initial.name,
     motd: initial.motd,
     port: initial.port,
+    bindAddress: initial.bindAddress,
+    publicAddress: initial.publicAddress,
+    readinessTimeoutSec: initial.readinessTimeoutSec,
     memoryMb: initial.memoryMb,
     maxPlayers: initial.maxPlayers,
     worldName: initial.worldName,
     seed: initial.seed,
     difficulty: initial.difficulty,
     pvp: initial.pvp,
+    autoRestart: initial.autoRestart,
+    maxCrashRestarts: initial.maxCrashRestarts,
+    restartWindowSec: initial.restartWindowSec,
+    autoBackupBeforeUpdate: initial.autoBackupBeforeUpdate,
+    updateBackupRetention: initial.updateBackupRetention,
     serverPassword: initial.serverPassword,
     launchCommand: initial.launchCommand,
     launchArgs: initial.launchArgs,
     workingDirectory: initial.workingDirectory,
   });
   const [saving, setSaving] = useState(false);
+  const [resettingCredentials, setResettingCredentials] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
   const [delName, setDelName] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [cloning, setCloning] = useState(false);
+  const [templating, setTemplating] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<{supported:boolean; currentVersion:string; latestVersion?:string; updateAvailable?:boolean; rolling?:boolean; provider?:string; reason?:string; validationStatus?:string; previousVersion?:string; targetVersion?:string; rollbackAvailable?:boolean; rollbackRequiresStop?:boolean} | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updating, setUpdating] = useState(false);
 
   const dirty =
     form.name !== initial.name ||
     form.motd !== initial.motd ||
     form.port !== initial.port ||
+    form.bindAddress !== initial.bindAddress ||
+    form.publicAddress !== initial.publicAddress ||
+    form.readinessTimeoutSec !== initial.readinessTimeoutSec ||
     form.memoryMb !== initial.memoryMb ||
     form.maxPlayers !== initial.maxPlayers ||
     form.worldName !== initial.worldName ||
     form.seed !== initial.seed ||
     form.difficulty !== initial.difficulty ||
     form.pvp !== initial.pvp ||
+    form.autoRestart !== initial.autoRestart ||
+    form.maxCrashRestarts !== initial.maxCrashRestarts ||
+    form.restartWindowSec !== initial.restartWindowSec ||
+    form.autoBackupBeforeUpdate !== initial.autoBackupBeforeUpdate ||
+    form.updateBackupRetention !== initial.updateBackupRetention ||
     form.serverPassword !== initial.serverPassword ||
     form.launchCommand !== initial.launchCommand ||
     form.launchArgs !== initial.launchArgs ||
     form.workingDirectory !== initial.workingDirectory;
+
+  async function saveTemplate() {setTemplating(true);setErr(null);try{const r=await fetch("/api/templates",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({serverId:initial.id,name:`${initial.name} template`})});const j=await r.json();if(!r.ok)setErr(j.error??"Template save failed");else setSavedAt(Date.now())}finally{setTemplating(false)}}
+
+  async function cloneConfiguration() { setCloning(true);setErr(null);try{const r=await fetch(`/api/servers/${initial.id}/clone`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:`${initial.name} Copy`})});const j=await r.json();if(!r.ok)setErr(j.error??"Clone failed");else router.push(`/servers/${j.server.id}/settings`)}finally{setCloning(false)}}
 
   async function save() {
     setSaving(true);
@@ -77,6 +103,38 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
     } finally {
       setSaving(false);
     }
+  }
+
+  async function checkUpdate() {
+    setCheckingUpdate(true); setErr(null);
+    try { const response=await fetch(`/api/servers/${initial.id}/updates`,{cache:"no-store"}); const body=await response.json(); if(!response.ok) throw new Error(body.error??"Update check failed"); setUpdateInfo(body); }
+    catch(error) { setErr(error instanceof Error?error.message:String(error)); }
+    finally { setCheckingUpdate(false); }
+  }
+
+  async function applyUpdate() {
+    setUpdating(true); setErr(null);
+    try { const response=await fetch(`/api/servers/${initial.id}/updates`,{method:"POST"}); const body=await response.json(); if(!response.ok) throw new Error(body.error??body.reason??"Update failed"); router.refresh(); }
+    catch(error) { setErr(error instanceof Error?error.message:String(error)); }
+    finally { setUpdating(false); }
+  }
+
+  async function restorePreviousVersion() {
+    if(!window.confirm(`Restore the previous server version ${updateInfo?.previousVersion||"from the safety backup"}? The current managed files will be replaced.`))return;
+    setUpdating(true);setErr(null);
+    try{const response=await fetch(`/api/servers/${initial.id}/updates`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"rollback"})});const body=await response.json();if(!response.ok)throw new Error(body.reason??body.error??"Rollback failed");await checkUpdate();router.refresh();}
+    catch(error){setErr(error instanceof Error?error.message:String(error));}finally{setUpdating(false);}
+  }
+
+  async function resetCredentials() {
+    if (!window.confirm("Reset all stored passwords and the Player/Owner ID for this server? This cannot decrypt or recover credentials protected by another Windows account.")) return;
+    setResettingCredentials(true); setErr(null);
+    try {
+      const response=await fetch(`/api/servers/${initial.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({resetCredentials:true})});
+      const body=await response.json(); if(!response.ok) throw new Error(body.error??"Credential reset failed");
+      setForm(current=>({...current,serverPassword:""})); setSavedAt(Date.now()); router.refresh();
+    } catch(error) { setErr(error instanceof Error?error.message:String(error)); }
+    finally { setResettingCredentials(false); }
   }
 
   async function destroy() {
@@ -120,8 +178,9 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
               <input className={cn(inputCls, "font-mono opacity-60")} readOnly value={game.protocol === "UDP" ? form.port + 1 : form.port} />
             </Field>
           </div>
+          <div className="mt-4 grid grid-cols-3 gap-4"><Field label="Bind IP" hint="local server interface"><input className={cn(inputCls,"font-mono")} value={form.bindAddress} onChange={(e)=>setForm({...form,bindAddress:e.target.value})}/></Field><Field label="Public address" hint="what internet players enter"><input className={cn(inputCls,"font-mono")} value={form.publicAddress} onChange={(e)=>setForm({...form,publicAddress:e.target.value})}/></Field><Field label="Readiness timeout" hint="seconds"><input className={cn(inputCls,"font-mono")} type="number" min={10} max={300} value={form.readinessTimeoutSec} onChange={(e)=>setForm({...form,readinessTimeoutSec:Number(e.target.value)})}/></Field></div>
           <p className="mt-3 rounded-lg bg-candy-50 px-3 py-2 font-mono text-[11px] text-plum-500">
-            players connect via <span className="text-plum-800">127.0.0.1:{form.port}</span>
+            LAN players use <span className="text-plum-800">{form.bindAddress}:{form.port}</span>; internet players use <span className="text-plum-800">{form.publicAddress}:{form.port}</span>. Forward the game ports to {form.bindAddress}.
           </p>
         </section>
 
@@ -209,6 +268,82 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
           </section>
         )}
 
+        {game.installer !== "manual" && (
+          <section className="panel p-5">
+            <h3 className="font-display mb-3 flex items-center gap-2 text-[14px] font-semibold text-plum-900">
+              <CloudDownload size={14} style={{ color: accent }} /> Updates
+            </h3>
+            <p className="text-[12px] leading-relaxed text-plum-500">
+              Check the official provider and install updates through Server Hub’s staged, rollback-safe installation system.
+            </p>
+            {updateInfo && (
+              <div className="mt-3 rounded-xl border border-candy-200 bg-candy-50 px-4 py-3 text-[12px]">
+                <p className="font-medium text-plum-800">
+                  {updateInfo.rolling ? "Latest provider build can be refreshed" : updateInfo.updateAvailable ? `${updateInfo.latestVersion} is available` : "Already up to date"}
+                </p>
+                <p className="mt-1 text-plum-500">Installed: {updateInfo.currentVersion}{updateInfo.provider ? ` · ${updateInfo.provider}` : ""}</p>
+                {updateInfo.validationStatus&&updateInfo.validationStatus!=="none"&&<p className="mt-1 font-medium text-amber-700">Validation: {updateInfo.validationStatus.replaceAll("-"," ")}{updateInfo.previousVersion&&updateInfo.targetVersion?` · ${updateInfo.previousVersion} → ${updateInfo.targetVersion}`:""}</p>}
+              </div>
+            )}
+            <div className="mt-4 flex items-center justify-between rounded-xl border border-candy-200 bg-candy-50 px-4 py-3">
+              <div><p className="text-[13px] font-medium text-plum-800">Safety backup before updates</p><p className="text-[11px] text-plum-500">An update will not start unless the backup completes.</p></div>
+              <Toggle checked={form.autoBackupBeforeUpdate} onChange={(value)=>setForm({...form,autoBackupBeforeUpdate:value})} accent={accent}/>
+            </div>
+            {form.autoBackupBeforeUpdate && <div className="mt-3"><Field label="Automatic update backups to keep" hint="1–20"><input className={cn(inputCls,"font-mono")} type="number" min={1} max={20} value={form.updateBackupRetention} onChange={(event)=>setForm({...form,updateBackupRetention:Number(event.target.value)})}/></Field></div>}
+            <div className="mt-4 flex gap-2">
+              <Btn variant="subtle" loading={checkingUpdate} onClick={checkUpdate}><RefreshCw size={14}/> Check</Btn>
+              {updateInfo?.updateAvailable && (
+                <Btn variant="primary" accent={accent} loading={updating} disabled={!['offline','crashed','error'].includes(initial.status)} onClick={applyUpdate}>
+                  <CloudDownload size={14}/> {updateInfo.rolling ? "Refresh build" : "Install update"}
+                </Btn>
+              )}
+              {updateInfo?.rollbackAvailable&&<Btn variant="subtle" loading={updating} disabled={updateInfo.rollbackRequiresStop} onClick={restorePreviousVersion}><RotateCw size={14}/> Restore {updateInfo.previousVersion||"previous"}</Btn>}
+            </div>
+            {(updateInfo?.updateAvailable||updateInfo?.rollbackAvailable) && !['offline','crashed','error'].includes(initial.status) && <p className="mt-2 text-[11px] text-amber-700">Stop the server before updating or restoring a previous version.</p>}
+          </section>
+        )}
+
+        {/* watchdog */}
+        <section className="panel p-5">
+          <h3 className="font-display mb-4 flex items-center gap-2 text-[14px] font-semibold text-plum-900">
+            <RotateCw size={14} style={{ color: accent }} /> Crash recovery
+          </h3>
+          <div className="flex items-center justify-between rounded-xl border border-candy-200 bg-candy-50 px-4 py-3">
+            <div>
+              <p className="text-[13.5px] font-medium text-plum-800">Automatic restart</p>
+              <p className="text-[11.5px] text-plum-500">Restart after an unexpected process exit</p>
+            </div>
+            <Toggle checked={form.autoRestart} onChange={(value) => setForm({ ...form, autoRestart: value })} accent={accent} />
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-4">
+            <Field label="Restart limit" hint="0–20 attempts">
+              <input
+                className={cn(inputCls, "font-mono")}
+                type="number"
+                min={0}
+                max={20}
+                disabled={!form.autoRestart}
+                value={form.maxCrashRestarts}
+                onChange={(event) => setForm({ ...form, maxCrashRestarts: Number(event.target.value) })}
+              />
+            </Field>
+            <Field label="Time window" hint="seconds">
+              <input
+                className={cn(inputCls, "font-mono")}
+                type="number"
+                min={30}
+                max={3600}
+                disabled={!form.autoRestart}
+                value={form.restartWindowSec}
+                onChange={(event) => setForm({ ...form, restartWindowSec: Number(event.target.value) })}
+              />
+            </Field>
+          </div>
+          <p className="mt-3 text-[11.5px] leading-relaxed text-plum-500">
+            Restarts use exponential backoff and stop at the configured limit to prevent crash loops. A manual start resets the counter.
+          </p>
+        </section>
+
         {/* resources */}
         <section className="panel p-5">
           <h3 className="font-display mb-4 flex items-center gap-2 text-[14px] font-semibold text-plum-900">
@@ -248,6 +383,8 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
           {err && <p className="mt-3 text-[12px] text-red-500">{err}</p>}
         </section>
 
+        <section className="panel p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div className="max-w-xl"><p className="text-sm font-semibold text-plum-800">Clone configuration</p><p className="mt-1 text-xs text-plum-500">Creates a new setup with a free adjacent port. Credentials, worlds, backups, players, logs, tasks, mods, and private paths are excluded.</p></div><div className="flex gap-2"><Btn variant="ghost" loading={templating} onClick={saveTemplate}><Save size={14}/> Save template</Btn><Btn variant="subtle" loading={cloning} onClick={cloneConfiguration}><Copy size={14}/> Clone safely</Btn></div></div></section>
+
         {/* danger zone */}
         <section className="rounded-2xl border border-red-200 bg-red-50 p-5">
           <h3 className="font-display mb-2 flex items-center gap-2 text-[14px] font-semibold text-red-600">
@@ -256,9 +393,14 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
           <p className="mb-4 text-[12px] leading-relaxed text-plum-500">
             Permanently deletes <span className="text-plum-800">{initial.name}</span>, its backups, logs and schedules. {initial.managedDirectory ? "Managed server files and worlds are also deleted." : "Your external working directory is left untouched."} This cannot be undone.
           </p>
-          <Btn variant="danger" onClick={() => setConfirmDel(true)}>
-            <Trash2 size={14} /> Delete server
-          </Btn>
+          <div className="flex flex-wrap gap-2">
+            <Btn variant="ghost" loading={resettingCredentials} onClick={() => void resetCredentials()}>
+              <KeyRound size={14} /> Reset stored credentials
+            </Btn>
+            <Btn variant="danger" onClick={() => setConfirmDel(true)}>
+              <Trash2 size={14} /> Delete server
+            </Btn>
+          </div>
         </section>
       </div>
 

@@ -1,0 +1,1 @@
+import { ToolHealthManager } from "@/components/tool-health-manager";export const dynamic="force-dynamic";export const metadata={title:"Tool Health — Server Hub"};export default function ToolsPage(){return <ToolHealthManager/>}

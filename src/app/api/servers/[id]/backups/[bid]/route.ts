@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { backups, servers } from "@/db/schema";
 import { act, backupArchivePath, deleteBackupFile, restoreBackup } from "@/lib/runtime";
 import { safeFileName } from "@/lib/storage";
+import { inspectBackupArchive } from "@/lib/backup-validation";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,11 @@ export async function POST(req: Request, ctx: Context) {
     const result = await restoreBackup(id, bid);
     if (!result.ok) return NextResponse.json({ error: result.reason ?? "Restore failed" }, { status: 409 });
     return NextResponse.json({ ok: true });
+  }
+  if (action === "verify" || action === "preview") {
+    if (!backup || backup.status !== "complete") return NextResponse.json({error:"Backup is unavailable"},{status:404});
+    const archive=backupArchivePath(backup); if(!fs.existsSync(archive))return NextResponse.json({error:"Backup archive is missing"},{status:404});
+    try { const result=await inspectBackupArchive(archive,backup.checksum); if(action==="verify")return NextResponse.json({ok:result.valid,checksum:result.actualChecksum,expected:result.expectedChecksum,entries:result.entries},{status:result.valid?200:409}); return NextResponse.json({ok:result.valid,checksumValid:result.valid,archiveBytes:result.archiveBytes,entries:result.entries,sample:result.sample}); } catch(error) { return NextResponse.json({error:error instanceof Error?error.message:"Backup validation failed"},{status:409}); }
   }
   if (action === "manifest") {
     const [server] = await db.select().from(servers).where(eq(servers.id, id));

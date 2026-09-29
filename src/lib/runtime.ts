@@ -1,19 +1,34 @@
+import { hostPlatform } from "./host-platform";
+import { diagnoseInstallationFailure, installationFailureMessage } from "./installation-diagnostics";
+import { waitForManagedExecutableExit } from "./managed-process";
+import { isAssignedLocalAddress, validateDragonwildsPreflight } from "./provider-preflight";
+import { minimumProcessStabilityMs, processStabilityReady, readinessProbeFor, readinessRemediation, readinessWaitingReason } from "./readiness-policy";
+import { activateServerStaging } from "./server-activation";
+import { recoverInterruptedUpdateState } from "./update-recovery";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
+import dgram from "node:dgram";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { finished } from "node:stream/promises";
-import AdmZip from "adm-zip";
+import { finished, pipeline } from "node:stream/promises";
+import yauzl from "yauzl";
 import * as tar from "tar";
-import { and, asc, eq, gt } from "drizzle-orm";
-import { db } from "@/db";
-import { activity, backups, consoleLogs, players, servers, tasks } from "@/db/schema";
-import type { Backup, Server } from "@/db/schema";
-import { getGame } from "./games";
+import { and, asc, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
+import { db, dbPath, sqliteClient } from "@/db";
+import { activity, backups, consoleLogs, incidents, installationEvents, installationJobs, moderationActions, playerSessions, players, servers, taskRuns, tasks } from "@/db/schema";
+import type { Backup, InstallationJob, Server } from "@/db/schema";
+import { getGame, type InstallerKind } from "./games";
+import { observationKey, reconcileObservationKeys } from "./player-observations";
+import { nextCalendarRun } from "./calendar-schedule";
+import { scheduledCommand } from "./scheduled-actions";
+import { queryA2sInfo, queryA2sPlayers, queryMinecraftStatus } from "./query-protocols";
+import { isProtectedSecret, protectAndVerify, revealSecret } from "./credential-vault";
 import { appDataDir, backupsDir, ensureDataDirs, safeFileName, serverDir, toolsDir } from "./storage";
+import { recordSuccessfulToolUse } from "./tool-usage";
 
 export type Metric = { t: number; cpu: number; ram: number; players: number; tps: number | null };
 
@@ -27,13 +42,24 @@ type RuntimeEntry = {
   stopping: boolean;
   restarting: boolean;
   lineCount: number;
+  startedAtMs: number;
+};
+
+type ActiveInstallation = {
+  jobId: number;
+  controller: AbortController;
+  done: Promise<void>;
 };
 
 type RuntimeState = {
   processes: Map<number, RuntimeEntry>;
-  installs: Set<number>;
+  installs: Map<number, ActiveInstallation>;
+  restartTimers: Map<number, NodeJS.Timeout>;
+  crashHistory: Map<number, number[]>;
   initialized?: Promise<void>;
   scheduler?: NodeJS.Timeout;
+  installPumpScheduled: boolean;
+  installPumpRunning: boolean;
   sweeping: boolean;
   closing: boolean;
 };
@@ -41,11 +67,29 @@ type RuntimeState = {
 const globalRuntime = globalThis as typeof globalThis & { __serverHubRuntime?: RuntimeState };
 const state: RuntimeState =
   globalRuntime.__serverHubRuntime ??
-  ({ processes: new Map(), installs: new Set(), sweeping: false, closing: false } satisfies RuntimeState);
+  ({
+    processes: new Map(),
+    installs: new Map(),
+    restartTimers: new Map(),
+    crashHistory: new Map(),
+    installPumpScheduled: false,
+    installPumpRunning: false,
+    sweeping: false,
+    closing: false,
+  } satisfies RuntimeState);
+// Hot reload can retain state created by an older runtime module.
+if (!(state.installs instanceof Map)) state.installs = new Map();
+if (!(state.restartTimers instanceof Map)) state.restartTimers = new Map();
+if (!(state.crashHistory instanceof Map)) state.crashHistory = new Map();
+state.installPumpScheduled ??= false;
+state.installPumpRunning ??= false;
 globalRuntime.__serverHubRuntime = state;
 
+export { redactLogSecrets } from "./support-redaction";
+import { redactLogSecrets } from "./support-redaction";
+
 export async function logLine(serverId: number, level: string, source: string, message: string) {
-  const clean = message.replace(/\0/g, "").slice(0, 16_000);
+  const clean = redactLogSecrets(message).replace(/\0/g, "").slice(0, 16_000);
   await db.insert(consoleLogs).values({ serverId, level, source, message: clean });
 }
 
@@ -57,19 +101,62 @@ export async function setStatus(id: number, status: string) {
   await db.update(servers).set({ status, updatedAt: new Date() }).where(eq(servers.id, id));
 }
 
+async function setHealth(id:number,status:string,reason:string,probe:string,success:boolean){
+ const [current]=await db.select({failures:servers.healthFailures}).from(servers).where(eq(servers.id,id)); const failures=success?0:(current?.failures??0)+1;
+ await db.update(servers).set({healthStatus:success?status:(failures>=3?status:"checking"),healthReason:reason,healthProbe:probe,healthFailures:failures,...(success?{lastHealthSuccessAt:new Date()}:{lastHealthFailureAt:new Date()}),updatedAt:new Date()}).where(eq(servers.id,id));
+ return failures;
+}
+async function incident(serverId:number,severity:string,component:string,summary:string,remediation=""){await db.insert(incidents).values({serverId,severity,component,summary:redactLogSecrets(summary),remediation:redactLogSecrets(remediation)});}
+
+
+async function migrateCredentialVault() {
+  if (hostPlatform() !== "win32") return;
+  const rows = await db.select().from(servers);
+  const pending = rows.filter(row => [row.serverPassword,row.adminPassword,row.ownerId].some(value => value && !isProtectedSecret(value)));
+  const marker = path.join(appDataDir(), "credential-migration.json");
+  if (!pending.length) { await fsp.rm(marker,{force:true}).catch(()=>{}); return; }
+  const prior = await fsp.readFile(marker,"utf8").then(value=>JSON.parse(value) as {backup:string}).catch(()=>null);
+  const backup = prior?.backup ?? `${dbPath}.pre-dpapi-${new Date().toISOString().replace(/[:.]/g,"-")}.bak`;
+  if (!prior) {
+    sqliteClient().exec("PRAGMA wal_checkpoint(FULL)");
+    await fsp.copyFile(dbPath,backup);
+    await fsp.writeFile(marker,JSON.stringify({version:1,phase:"prepared",backup,serverIds:pending.map(row=>row.id),createdAt:new Date().toISOString()},null,2));
+  }
+  try {
+    const encrypted = await Promise.all(pending.map(async row => ({ id: row.id, serverPassword: await protectAndVerify(row.serverPassword), adminPassword: await protectAndVerify(row.adminPassword), ownerId: await protectAndVerify(row.ownerId) })));
+    await fsp.writeFile(marker,JSON.stringify({version:1,phase:"applying",backup,serverIds:pending.map(row=>row.id),createdAt:new Date().toISOString()},null,2));
+    await db.transaction(async tx => { for (const row of encrypted) await tx.update(servers).set({serverPassword:row.serverPassword,adminPassword:row.adminPassword,ownerId:row.ownerId,updatedAt:new Date()}).where(eq(servers.id,row.id)); });
+    await fsp.rm(marker,{force:true});
+  } catch (error) {
+    await fsp.writeFile(marker,JSON.stringify({version:1,phase:"failed",backup,error:error instanceof Error?error.message:String(error),failedAt:new Date().toISOString()},null,2)).catch(()=>{});
+    throw new Error(`Credential migration failed without changing plaintext credentials. Recovery backup: ${backup}`);
+  }
+}
+
 async function initializeRuntime() {
   ensureDataDirs();
+  await migrateCredentialVault();
+  await recoverInstallationQueue();
+  const activeJobs = await db
+    .select({ serverId: installationJobs.serverId })
+    .from(installationJobs)
+    .where(inArray(installationJobs.status, ["queued", "running", "cancelling"]));
+  const installingServers = new Set(activeJobs.map((job) => job.serverId));
   const rows = await db.select().from(servers);
   for (const server of rows) {
+    const recoveredUpdate=recoverInterruptedUpdateState(server.updateValidationStatus,installingServers.has(server.id));
+    if(recoveredUpdate){await db.update(servers).set({updateValidationStatus:recoveredUpdate.status,updatedAt:new Date()}).where(eq(servers.id,server.id));await logLine(server.id,"warn","Updater",recoveredUpdate.message);}
     if (["online", "starting", "stopping"].includes(server.status)) {
       await setStatus(server.id, "crashed");
       await logLine(server.id, "warn", "Runtime", "The Server Hub runtime restarted; the previous process is no longer attached.");
-    } else if (server.status === "installing") {
+    } else if (server.status === "installing" && !installingServers.has(server.id)) {
+      // Compatibility with databases created before durable installation jobs.
       await setStatus(server.id, "error");
-      await logLine(server.id, "warn", "Installer", "Installation was interrupted. Use Retry installation to continue.");
+      await logLine(server.id, "warn", "Installer", "A legacy installation was interrupted. Retry installation to create a recoverable job.");
     }
     await db.update(players).set({ isOnline: false }).where(eq(players.serverId, server.id));
   }
+  scheduleInstallPump();
 
   if (!state.scheduler) {
     state.scheduler = setInterval(() => void sweepTasks().catch(() => {}), 15_000);
@@ -79,6 +166,10 @@ async function initializeRuntime() {
   const shutdown = () => {
     if (state.closing) return;
     state.closing = true;
+    if (state.scheduler) { clearInterval(state.scheduler); state.scheduler = undefined; }
+    for (const timer of state.restartTimers.values()) clearTimeout(timer);
+    state.restartTimers.clear();
+    for (const install of state.installs.values()) install.controller.abort("Server Hub is shutting down");
     for (const entry of state.processes.values()) {
       entry.stopping = true;
       try { entry.child.stdin.write(`${stopCommand(entry.server)}\n`); } catch { /* already closed */ }
@@ -91,6 +182,7 @@ async function initializeRuntime() {
   };
   process.once("SIGTERM", shutdown);
   process.once("SIGINT", shutdown);
+  process.once("serverhub:shutdown", shutdown);
 }
 
 export async function ensureRuntimeInitialized() {
@@ -180,35 +272,415 @@ async function upsertPlayer(serverId: number, name: string, online: boolean) {
 }
 
 // ---------------------------------------------------------------------------
-// Installation
+// Durable installation jobs
 // ---------------------------------------------------------------------------
 
-async function downloadFile(url: string, destination: string, serverId: number, label: string) {
-  await fsp.mkdir(path.dirname(destination), { recursive: true });
-  await logLine(serverId, "system", "Installer", `Downloading ${label}…`);
-  const response = await fetch(url, {
-    redirect: "follow",
-    headers: { "User-Agent": "ServerHub/1.0 (+local desktop server manager)" },
+type InstallPhase =
+  | "queued"
+  | "preflight"
+  | "preparing"
+  | "downloading"
+  | "installing"
+  | "recovering"
+  | "validating"
+  | "configuring"
+  | "activating"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+type InstallContext = {
+  jobId: number;
+  serverId: number;
+  signal: AbortSignal;
+  report: (phase: InstallPhase, progress: number, message: string, level?: string) => Promise<void>;
+  transfer: (progress: number, bytesDone: number, bytesTotal: number, message: string) => Promise<void>;
+};
+
+class InstallationCancelledError extends Error {
+  constructor(message = "Installation cancelled") {
+    super(message);
+    this.name = "InstallationCancelledError";
+  }
+}
+
+const ACTIVE_INSTALL_STATUSES = ["queued", "running", "cancelling"] as const;
+const MAX_CONCURRENT_INSTALLATIONS = 1;
+
+function cancellationMessage(signal: AbortSignal) {
+  return typeof signal.reason === "string" && signal.reason.trim() ? signal.reason : "Installation cancelled";
+}
+
+function throwIfCancelled(signal: AbortSignal) {
+  if (signal.aborted) throw new InstallationCancelledError(cancellationMessage(signal));
+}
+
+function cleanInstallMessage(message: string, limit = 2_000) {
+  const clean = message.replace(/\0/g, "").replace(/[\r\n]+/g, " ").trim();
+  const diagnosed = installationFailureMessage(clean);
+  if (diagnosed !== clean) return diagnosed.slice(0, limit);
+  const friendly = /\bENOENT\b/i.test(clean)
+      ? "A required installation tool or file is missing; choose Repair and retry."
+      : /\bEACCES\b|access is denied/i.test(clean)
+        ? "Windows denied access to an installation file. Check antivirus, folder permissions, and run Repair and retry."
+        : /EADDRNOTAVAIL/i.test(clean)
+          ? "The configured bind address is not assigned to this PC. Select an address shown in Diagnostics."
+          : /EADDRINUSE/i.test(clean)
+            ? "The selected port is already being used by another program or server."
+            : clean;
+  return friendly.slice(0, limit);
+}
+
+async function addInstallationEvent(
+  jobId: number,
+  serverId: number,
+  level: string,
+  phase: string,
+  progress: number,
+  message: string
+) {
+  await db.insert(installationEvents).values({
+    jobId,
+    serverId,
+    level,
+    phase,
+    progress: Math.max(0, Math.min(100, Math.round(progress))),
+    message: cleanInstallMessage(message),
   });
-  if (!response.ok || !response.body) throw new Error(`${label} download failed: HTTP ${response.status}`);
-  const total = Number(response.headers.get("content-length") || 0);
+}
+
+async function recoverInstallationQueue() {
+  const interrupted = await db
+    .select()
+    .from(installationJobs)
+    .where(inArray(installationJobs.status, ["running", "cancelling"]));
+  for (const job of interrupted) {
+    await db
+      .update(installationJobs)
+      .set({
+        status: "queued",
+        phase: "queued",
+        message: "Server Hub restarted; installation queued for automatic recovery",
+        error: "",
+        cancelRequested: false,
+        attempt: sql`${installationJobs.attempt} + 1`,
+        updatedAt: new Date(),
+        startedAt: null,
+        completedAt: null,
+      })
+      .where(eq(installationJobs.id, job.id));
+    await setStatus(job.serverId, "installing");
+    await addInstallationEvent(
+      job.id,
+      job.serverId,
+      "warn",
+      "queued",
+      job.progress,
+      "The application restarted during installation. The job will resume automatically."
+    );
+    await logLine(job.serverId, "warn", "Installer", "Interrupted installation recovered and returned to the queue.");
+  }
+}
+
+function scheduleInstallPump() {
+  if (state.installPumpScheduled || state.closing) return;
+  state.installPumpScheduled = true;
+  setImmediate(() => {
+    state.installPumpScheduled = false;
+    void pumpInstallQueue().catch((error) => console.error("[serverhub] installation queue failed", error));
+  });
+}
+
+async function pumpInstallQueue() {
+  if (state.installPumpRunning || state.closing) return;
+  state.installPumpRunning = true;
+  try {
+    while (state.installs.size < MAX_CONCURRENT_INSTALLATIONS && !state.closing) {
+      const [job] = await db
+        .select()
+        .from(installationJobs)
+        .where(eq(installationJobs.status, "queued"))
+        .orderBy(asc(installationJobs.id))
+        .limit(1);
+      if (!job) break;
+      const [server] = await db.select().from(servers).where(eq(servers.id, job.serverId));
+      if (!server) {
+        await db
+          .update(installationJobs)
+          .set({
+            status: "failed",
+            phase: "failed",
+            error: "The server entry no longer exists",
+            message: "Installation failed",
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(installationJobs.id, job.id));
+        continue;
+      }
+      if (state.installs.has(server.id)) break;
+
+      const controller = new AbortController();
+      const claimed = await db
+        .update(installationJobs)
+        .set({
+          status: "running",
+          phase: "preflight",
+          message: "Checking installation requirements",
+          error: "",
+          cancelRequested: false,
+          startedAt: new Date(),
+          completedAt: null,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(installationJobs.id, job.id), eq(installationJobs.status, "queued")))
+        .returning({ id: installationJobs.id });
+      if (claimed.length === 0) continue;
+
+      const active: ActiveInstallation = { jobId: job.id, controller, done: Promise.resolve() };
+      state.installs.set(server.id, active);
+      active.done = executeInstallation(job, server, controller.signal).finally(() => {
+        if (state.installs.get(server.id) === active) state.installs.delete(server.id);
+        scheduleInstallPump();
+      });
+    }
+  } finally {
+    state.installPumpRunning = false;
+  }
+}
+
+async function latestInstallationJob(serverId: number): Promise<InstallationJob | undefined> {
+  const [job] = await db
+    .select()
+    .from(installationJobs)
+    .where(eq(installationJobs.serverId, serverId))
+    .orderBy(desc(installationJobs.id))
+    .limit(1);
+  return job;
+}
+
+export async function installFlow(id: number): Promise<{ ok: boolean; reason?: string; jobId?: number }> {
+  await ensureRuntimeInitialized();
+  const [storedServer] = await db.select().from(servers).where(eq(servers.id, id));
+  if (!storedServer) return { ok: false, reason: "Server not found" };
+  const server = { ...storedServer, serverPassword: await revealSecret(storedServer.serverPassword), adminPassword: await revealSecret(storedServer.adminPassword), ownerId: await revealSecret(storedServer.ownerId) };
+  if (state.processes.has(id) || state.restartTimers.has(id)) return { ok: false, reason: "Stop the server and cancel any pending restart before installing or updating it" };
+
+  const [active] = await db
+    .select()
+    .from(installationJobs)
+    .where(and(eq(installationJobs.serverId, id), inArray(installationJobs.status, [...ACTIVE_INSTALL_STATUSES])))
+    .orderBy(desc(installationJobs.id))
+    .limit(1);
+  if (active) return { ok: false, reason: "Installation is already queued or running", jobId: active.id };
+
+  const previous = await latestInstallationJob(id);
+  let job: InstallationJob;
+  if (previous && ["failed", "cancelled"].includes(previous.status) && server.status === "error") {
+    [job] = await db
+      .update(installationJobs)
+      .set({
+        status: "queued",
+        phase: "queued",
+        progress: 0,
+        bytesDone: 0,
+        bytesTotal: 0,
+        message: "Waiting to retry installation",
+        error: "",
+        cancelRequested: false,
+        attempt: sql`${installationJobs.attempt} + 1`,
+        updatedAt: new Date(),
+        startedAt: null,
+        completedAt: null,
+      })
+      .where(eq(installationJobs.id, previous.id))
+      .returning();
+  } else {
+    [job] = await db
+      .insert(installationJobs)
+      .values({
+        serverId: id,
+        kind: server.status === "offline" ? "update" : "install",
+        status: "queued",
+        phase: "queued",
+        progress: 0,
+        message: "Waiting for the installer",
+      })
+      .returning();
+  }
+
+  await setStatus(id, "installing");
+  await addInstallationEvent(job.id, id, "info", "queued", job.progress, job.message);
+  await logLine(id, "system", "Installer", `Installation job #${job.id} queued (attempt ${job.attempt}).`);
+  scheduleInstallPump();
+  return { ok: true, jobId: job.id };
+}
+
+export async function repairInstallation(id: number): Promise<{ ok: boolean; reason?: string; jobId?: number }> {
+  await ensureRuntimeInitialized();
+  const [server] = await db.select().from(servers).where(eq(servers.id, id));
+  if (!server) return { ok: false, reason: "Server not found" };
+  const active = await latestInstallationJob(id);
+  if (active && ACTIVE_INSTALL_STATUSES.includes(active.status as (typeof ACTIVE_INSTALL_STATUSES)[number])) return { ok: false, reason: "Cancel the active installation before repairing tools" };
+  const installer = getGame(server.gameId).installer;
+  if (installer === "steamcmd") {
+    await fsp.rm(path.join(toolsDir(), "steamcmd"), { recursive: true, force: true });
+    await fsp.rm(path.join(appDataDir(), "downloads", hostPlatform() === "win32" ? "steamcmd.zip" : "steamcmd.tar.gz"), { force: true });
+  } else if (installer === "hytale") {
+    await fsp.rm(path.join(toolsDir(), "hytale-downloader"), { recursive: true, force: true });
+    await fsp.rm(path.join(appDataDir(), "downloads", "hytale-downloader.zip"), { force: true });
+  }
+  await logLine(id, "system", "Repair", `Cleared cached ${installer} installation tools and downloads.`);
+  await act(id, "repair", `Repaired installation tools for ${server.name}`);
+  return installFlow(id);
+}
+
+export async function cancelInstallation(id: number, wait = false): Promise<{ ok: boolean; reason?: string }> {
+  await ensureRuntimeInitialized();
+  const [job] = await db
+    .select()
+    .from(installationJobs)
+    .where(and(eq(installationJobs.serverId, id), inArray(installationJobs.status, [...ACTIVE_INSTALL_STATUSES])))
+    .orderBy(desc(installationJobs.id))
+    .limit(1);
+  if (!job) return { ok: false, reason: "No installation is queued or running" };
+
+  if (job.status === "queued") {
+    await db
+      .update(installationJobs)
+      .set({
+        status: "cancelled",
+        phase: "cancelled",
+        message: "Installation cancelled",
+        cancelRequested: true,
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(installationJobs.id, job.id));
+    await addInstallationEvent(job.id, id, "warn", "cancelled", job.progress, "Installation cancelled before it started.");
+    await setStatus(id, "error");
+    await logLine(id, "warn", "Installer", "Queued installation cancelled.");
+    return { ok: true };
+  }
+
+  await db
+    .update(installationJobs)
+    .set({ status: "cancelling", cancelRequested: true, message: "Cancelling installation…", updatedAt: new Date() })
+    .where(eq(installationJobs.id, job.id));
+  await addInstallationEvent(job.id, id, "warn", job.phase, job.progress, "Cancellation requested.");
+  const active = state.installs.get(id);
+  if (active?.jobId === job.id) active.controller.abort("Cancelled by user");
+  if (wait && active) {
+    const finished = await Promise.race([
+      active.done.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 10_000)),
+    ]);
+    if (!finished) return { ok: false, reason: "Installation cancellation is still in progress. Try deleting the server again shortly." };
+  }
+  return { ok: true };
+}
+
+async function reportInstallation(
+  context: InstallContext,
+  phase: InstallPhase,
+  progress: number,
+  message: string,
+  level = "info"
+) {
+  throwIfCancelled(context.signal);
+  const clean = cleanInstallMessage(message);
+  const bounded = Math.max(0, Math.min(100, Math.round(progress)));
+  await db
+    .update(installationJobs)
+    .set({ phase, progress: bounded, message: clean, updatedAt: new Date() })
+    .where(eq(installationJobs.id, context.jobId));
+  await addInstallationEvent(context.jobId, context.serverId, level, phase, bounded, clean);
+  await logLine(context.serverId, level === "info" ? "system" : level, "Installer", clean);
+}
+
+async function updateTransfer(
+  context: InstallContext,
+  progress: number,
+  bytesDone: number,
+  bytesTotal: number,
+  message: string
+) {
+  throwIfCancelled(context.signal);
+  await db
+    .update(installationJobs)
+    .set({
+      phase: "downloading",
+      progress: Math.max(0, Math.min(100, Math.round(progress))),
+      bytesDone: Math.max(0, Math.round(bytesDone)),
+      bytesTotal: Math.max(0, Math.round(bytesTotal)),
+      message: cleanInstallMessage(message),
+      updatedAt: new Date(),
+    })
+    .where(eq(installationJobs.id, context.jobId));
+}
+
+async function downloadFile(
+  url: string,
+  destination: string,
+  serverId: number,
+  label: string,
+  context?: InstallContext,
+  progressRange: [number, number] = [20, 75]
+) {
+  await fsp.mkdir(path.dirname(destination), { recursive: true });
+  if (fs.existsSync(destination)) {
+    await logLine(serverId, "system", "Installer", `Using previously downloaded ${label}.`);
+    return;
+  }
+  throwIfCancelled(context?.signal ?? new AbortController().signal);
+  await logLine(serverId, "system", "Installer", `Downloading ${label}…`);
   const temp = `${destination}.download`;
-  const output = fs.createWriteStream(temp);
-  let received = 0;
+  const partial = await fsp.stat(temp).then((stat) => stat.size).catch(() => 0);
+  const headers: Record<string, string> = { "User-Agent": "ServerHub/1.1 (+local desktop server manager)" };
+  if (partial > 0) headers.Range = `bytes=${partial}-`;
+  const response = await fetch(url, { redirect: "follow", headers, signal: context?.signal });
+  if (response.status === 416 && partial > 0) {
+    await fsp.rm(temp, { force: true });
+    return downloadFile(url, destination, serverId, label, context, progressRange);
+  }
+  if (!response.ok || !response.body) throw new Error(`${label} download failed: HTTP ${response.status}`);
+  const resumed = partial > 0 && response.status === 206;
+  const startAt = resumed ? partial : 0;
+  const contentLength = Number(response.headers.get("content-length") || 0);
+  const contentRange = response.headers.get("content-range") || "";
+  const rangeTotal = Number(contentRange.match(/\/(\d+)$/)?.[1] || 0);
+  const total = rangeTotal || (contentLength ? startAt + contentLength : 0);
+  const output = fs.createWriteStream(temp, { flags: resumed ? "a" : "w" });
+  let received = startAt;
+  let lastUpdateAt = 0;
   let lastPercent = -10;
   const source = Readable.fromWeb(response.body as never);
+  const abort = () => {
+    source.destroy(new InstallationCancelledError(cancellationMessage(context!.signal)));
+    output.destroy();
+  };
+  if (context) context.signal.addEventListener("abort", abort, { once: true });
   source.on("data", (chunk: Buffer) => {
     received += chunk.length;
-    if (total) {
-      const percent = Math.floor((received / total) * 100);
-      if (percent >= lastPercent + 10) {
-        lastPercent = percent;
-        void logLine(serverId, "system", "Installer", `${label}: ${percent}% (${(received / 1024 / 1024).toFixed(1)} MB)`).catch(() => {});
-      }
+    const now = Date.now();
+    const ratio = total ? Math.min(1, received / total) : 0;
+    const percent = Math.floor(ratio * 100);
+    if (context && (now - lastUpdateAt >= 500 || percent >= lastPercent + 2)) {
+      lastUpdateAt = now;
+      lastPercent = percent;
+      const progress = progressRange[0] + ratio * (progressRange[1] - progressRange[0]);
+      const suffix = total
+        ? `${(received / 1024 / 1024).toFixed(1)} of ${(total / 1024 / 1024).toFixed(1)} MB`
+        : `${(received / 1024 / 1024).toFixed(1)} MB`;
+      void context.transfer(progress, received, total, `Downloading ${label} — ${suffix}`).catch(() => {});
     }
   });
-  source.pipe(output);
-  await finished(output);
+  try {
+    await pipeline(source, output);
+  } finally {
+    if (context) context.signal.removeEventListener("abort", abort);
+  }
+  throwIfCancelled(context?.signal ?? new AbortController().signal);
   await fsp.rm(destination, { force: true });
   await fsp.rename(temp, destination);
   await logLine(serverId, "success", "Installer", `${label} downloaded (${(received / 1024 / 1024).toFixed(1)} MB).`);
@@ -222,70 +694,140 @@ async function sha1(file: string): Promise<string> {
   return hash.digest("hex");
 }
 
-async function installMojang(server: Server, root: string) {
-  const manifestResponse = await fetch("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json");
+async function installMojang(server: Server, root: string, context: InstallContext) {
+  await context.report("downloading", 15, "Reading Mojang's official version manifest");
+  const manifestResponse = await fetch("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json", { signal: context.signal });
   if (!manifestResponse.ok) throw new Error(`Mojang version manifest failed: HTTP ${manifestResponse.status}`);
   const manifest = (await manifestResponse.json()) as { versions: { id: string; url: string }[] };
   const selected = manifest.versions.find((version) => version.id === server.version);
   if (!selected) throw new Error(`Minecraft ${server.version} is not present in Mojang's official manifest.`);
-  const detailResponse = await fetch(selected.url);
+  const detailResponse = await fetch(selected.url, { signal: context.signal });
   if (!detailResponse.ok) throw new Error(`Minecraft ${server.version} metadata failed: HTTP ${detailResponse.status}`);
   const detail = (await detailResponse.json()) as { downloads?: { server?: { url: string; sha1: string } } };
   const artifact = detail.downloads?.server;
   if (!artifact) throw new Error(`Minecraft ${server.version} has no dedicated-server artifact.`);
   const jar = path.join(root, "server.jar");
-  await downloadFile(artifact.url, jar, server.id, `Minecraft ${server.version} server`);
-  if ((await sha1(jar)) !== artifact.sha1) throw new Error("Minecraft server checksum did not match Mojang metadata.");
+  await downloadFile(artifact.url, jar, server.id, `Minecraft ${server.version} server`, context, [20, 76]);
+  throwIfCancelled(context.signal);
+  if ((await sha1(jar)) !== artifact.sha1) {
+    await fsp.rm(jar, { force: true });
+    throw new Error("Minecraft server checksum did not match Mojang metadata. The cached artifact was removed.");
+  }
   await logLine(server.id, "success", "Installer", "Mojang SHA-1 checksum verified.");
 }
 
-async function installFabric(server: Server, root: string) {
-  const response = await fetch(`https://meta.fabricmc.net/v2/versions/loader/${encodeURIComponent(server.version)}`);
+async function installFabric(server: Server, root: string, context: InstallContext) {
+  await context.report("downloading", 15, "Resolving the latest stable Fabric loader");
+  const response = await fetch(`https://meta.fabricmc.net/v2/versions/loader/${encodeURIComponent(server.version)}`, { signal: context.signal });
   if (!response.ok) throw new Error(`Fabric does not publish a loader for Minecraft ${server.version} (HTTP ${response.status}).`);
   const versions = (await response.json()) as { loader: { version: string; stable: boolean }; installer: { version: string; stable: boolean } }[];
   const choice = versions.find((item) => item.loader.stable && item.installer.stable) ?? versions[0];
   if (!choice) throw new Error(`No Fabric loader is available for Minecraft ${server.version}.`);
   const url = `https://meta.fabricmc.net/v2/versions/loader/${encodeURIComponent(server.version)}/${encodeURIComponent(choice.loader.version)}/${encodeURIComponent(choice.installer.version)}/server/jar`;
-  await downloadFile(url, path.join(root, "server.jar"), server.id, `Fabric loader ${choice.loader.version}`);
+  await downloadFile(url, path.join(root, "server.jar"), server.id, `Fabric loader ${choice.loader.version}`, context, [20, 76]);
   await logLine(server.id, "success", "Installer", `Fabric ${choice.loader.version} installed for Minecraft ${server.version}.`);
 }
 
-async function installBedrock(server: Server, root: string) {
-  if (!["win32", "linux"].includes(process.platform)) throw new Error("The official Bedrock server is only published for Windows and Linux.");
+async function installBedrock(server: Server, root: string, context: InstallContext) {
+  if (!["win32", "linux"].includes(hostPlatform())) throw new Error("The official Bedrock server is only published for Windows and Linux.");
+  await context.report("downloading", 14, "Locating the current official Bedrock server archive");
   const page = await fetch("https://www.minecraft.net/en-us/download/server/bedrock", {
-    headers: { "User-Agent": "Mozilla/5.0 ServerHub/1.0" },
+    headers: { "User-Agent": "Mozilla/5.0 ServerHub/1.1" },
+    signal: context.signal,
   });
   if (!page.ok) throw new Error(`Minecraft Bedrock download page failed: HTTP ${page.status}`);
   const html = (await page.text()).replaceAll("&amp;", "&").replaceAll("\\u0026", "&");
-  const platform = process.platform === "win32" ? "win" : "linux";
+  const platform = hostPlatform() === "win32" ? "win" : "linux";
   const matches = [...html.matchAll(/https:\/\/[^"'<>\\\s]+bedrock-server-[^"'<>\\\s]+\.zip/gi)].map((match) => match[0]);
   const url = matches.find((candidate) => candidate.toLowerCase().includes(`bin-${platform}`)) ?? matches.find((candidate) => candidate.toLowerCase().includes(platform));
   if (!url) throw new Error("Could not locate the official Bedrock archive. Microsoft may have changed its download page.");
-  const archive = path.join(appDataDir(), "downloads", `bedrock-${server.id}.zip`);
-  await downloadFile(url, archive, server.id, "Minecraft Bedrock server");
-  await extractZipSafe(archive, root);
-  await fsp.rm(archive, { force: true });
-  if (process.platform !== "win32") await fsp.chmod(path.join(root, "bedrock_server"), 0o755).catch(() => {});
+  const archive = path.join(root, ".serverhub-downloads", "bedrock.zip");
+  await downloadFile(url, archive, server.id, "Minecraft Bedrock server", context, [20, 68]);
+  await context.report("installing", 72, "Extracting the Bedrock server archive");
+  try {
+    await extractZipSafe(archive, root, context.signal);
+  } catch (error) {
+    await fsp.rm(archive, { force: true });
+    throw error;
+  }
+  await fsp.rm(path.dirname(archive), { recursive: true, force: true });
+  if (hostPlatform() !== "win32") await fsp.chmod(path.join(root, "bedrock_server"), 0o755).catch(() => {});
 }
 
-async function extractZipSafe(archive: string, destination: string) {
-  const opened = new AdmZip(archive);
+export async function extractZipSafe(archive: string, destination: string, signal?: AbortSignal, limits: { maxEntries?: number; maxExpandedBytes?: number } = {}) {
+  const zip = await new Promise<yauzl.ZipFile>((resolve, reject) => {
+    yauzl.open(archive, { lazyEntries: true, decodeStrings: true, validateEntrySizes: true }, (error, opened) => {
+      if (error || !opened) reject(error ?? new Error("Could not open ZIP archive"));
+      else resolve(opened);
+    });
+  });
   const root = path.resolve(destination);
   await fsp.mkdir(root, { recursive: true });
-  for (const entry of opened.getEntries()) {
-    const normalized = entry.entryName.replaceAll("\\", "/");
-    const target = path.resolve(root, normalized);
-    const unixMode = (entry.attr >>> 16) & 0xffff;
-    const isSymlink = (unixMode & 0o170000) === 0o120000;
-    if (!normalized || isSymlink || normalized.startsWith("/") || normalized.split("/").includes("..") || (target !== root && !target.startsWith(`${root}${path.sep}`))) {
-      throw new Error(`Unsafe ZIP entry rejected: ${entry.entryName}`);
-    }
-    if (entry.isDirectory) await fsp.mkdir(target, { recursive: true });
-    else {
-      await fsp.mkdir(path.dirname(target), { recursive: true });
-      await fsp.writeFile(target, entry.getData());
-    }
-  }
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let entryCount = 0;
+    let expandedBytes = 0;
+    const maxEntries = limits.maxEntries ?? 100_000;
+    const maxExpandedBytes = limits.maxExpandedBytes ?? 20 * 1024 * 1024 * 1024;
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      try { zip.close(); } catch { /* already closed */ }
+      reject(error);
+    };
+    const abort = () => fail(new InstallationCancelledError(cancellationMessage(signal!)));
+    signal?.addEventListener("abort", abort, { once: true });
+    zip.once("error", fail);
+    zip.once("end", () => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    });
+    zip.on("entry", (entry) => {
+      void (async () => {
+        throwIfCancelled(signal ?? new AbortController().signal);
+        entryCount += 1;
+        expandedBytes += entry.uncompressedSize;
+        if (entryCount > maxEntries) throw new Error(`ZIP entry limit exceeded (${maxEntries})`);
+        if (!Number.isSafeInteger(expandedBytes) || expandedBytes > maxExpandedBytes) throw new Error(`ZIP expanded-size limit exceeded (${maxExpandedBytes} bytes)`);
+        const normalized = entry.fileName.replaceAll("\\", "/");
+        const target = path.resolve(root, normalized);
+        const unixMode = (entry.externalFileAttributes >>> 16) & 0xffff;
+        const isSymlink = (unixMode & 0o170000) === 0o120000;
+        const unsafe =
+          !normalized ||
+          isSymlink ||
+          normalized.startsWith("/") ||
+          /^[A-Za-z]:\//.test(normalized) ||
+          normalized.split("/").includes("..") ||
+          (target !== root && !target.startsWith(`${root}${path.sep}`));
+        if (unsafe) throw new Error(`Unsafe ZIP entry rejected: ${entry.fileName}`);
+
+        if (normalized.endsWith("/")) {
+          await fsp.mkdir(target, { recursive: true });
+        } else {
+          await fsp.mkdir(path.dirname(target), { recursive: true });
+          const input = await new Promise<NodeJS.ReadableStream>((resolveStream, rejectStream) => {
+            zip.openReadStream(entry, (error, stream) => {
+              if (error || !stream) rejectStream(error ?? new Error(`Could not read ${entry.fileName}`));
+              else resolveStream(stream);
+            });
+          });
+          const existing = await fsp.lstat(target).catch(() => null);
+          if (existing?.isSymbolicLink() || (existing && !existing.isFile())) throw new Error(`Unsafe ZIP target rejected: ${entry.fileName}`);
+          const temp = `${target}.serverhub-extract-${process.pid}.tmp`;
+          await pipeline(input, fs.createWriteStream(temp, { flags: "w" }));
+          await fsp.rm(target, { force: true });
+          await fsp.rename(temp, target);
+          if (hostPlatform() !== "win32" && (unixMode & 0o111)) await fsp.chmod(target, unixMode & 0o777).catch(() => {});
+        }
+        zip.readEntry();
+      })().catch(fail);
+    });
+    zip.readEntry();
+  });
 }
 
 async function extractTarGz(archive: string, destination: string) {
@@ -293,29 +835,58 @@ async function extractTarGz(archive: string, destination: string) {
   await tar.x({ file: archive, cwd: destination, gzip: true, strict: true, preservePaths: false });
 }
 
-async function ensureSteamCmd(serverId: number): Promise<string> {
+async function ensureSteamCmd(context: InstallContext): Promise<string> {
+  const override = process.env.SERVERHUB_STEAMCMD_PATH;
+  if (override && fs.existsSync(override)) return path.resolve(override);
   const root = path.join(toolsDir(), "steamcmd");
-  const executable = process.platform === "win32" ? path.join(root, "steamcmd.exe") : path.join(root, "steamcmd.sh");
+  const executable = hostPlatform() === "win32" ? path.join(root, "steamcmd.exe") : path.join(root, "steamcmd.sh");
   if (fs.existsSync(executable)) return executable;
-  if (process.platform === "darwin") throw new Error("SteamCMD no longer provides a native macOS dedicated-server runtime. Use a custom command, VM, or Linux host.");
+  if (hostPlatform() === "darwin") throw new Error("SteamCMD no longer provides a native macOS dedicated-server runtime. Use a custom command, VM, or Linux host.");
   await fsp.mkdir(root, { recursive: true });
-  const ext = process.platform === "win32" ? "zip" : "tar.gz";
+  const ext = hostPlatform() === "win32" ? "zip" : "tar.gz";
   const archive = path.join(appDataDir(), "downloads", `steamcmd.${ext}`);
-  const url = process.platform === "win32"
+  const url = hostPlatform() === "win32"
     ? "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip"
     : "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz";
-  await downloadFile(url, archive, serverId, "SteamCMD");
-  if (process.platform === "win32") await extractZipSafe(archive, root);
-  else await extractTarGz(archive, root);
+  await downloadFile(url, archive, context.serverId, "SteamCMD", context, [12, 22]);
+  throwIfCancelled(context.signal);
+  try {
+    if (hostPlatform() === "win32") await extractZipSafe(archive, root, context.signal);
+    else await extractTarGz(archive, root);
+  } catch (error) {
+    await fsp.rm(archive, { force: true });
+    await fsp.rm(root, { recursive: true, force: true });
+    throw error;
+  }
   await fsp.rm(archive, { force: true });
-  if (process.platform !== "win32") await fsp.chmod(executable, 0o755);
+  if (hostPlatform() !== "win32") await fsp.chmod(executable, 0o755);
   return executable;
 }
 
-async function runLogged(serverId: number, executable: string, args: string[], cwd: string) {
+async function runLogged(context: InstallContext, executable: string, args: string[], cwd: string) {
+  throwIfCancelled(context.signal);
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(executable, args, { cwd, windowsHide: true, env: { ...process.env }, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(executable, args, {
+      cwd,
+      windowsHide: true,
+      detached: hostPlatform() !== "win32",
+      env: { ...process.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let tail = "";
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      context.signal.removeEventListener("abort", cancel);
+      if (error) reject(error);
+      else resolve();
+    };
+    const cancel = () => {
+      killProcessTree(child.pid, true);
+      finish(new InstallationCancelledError(cancellationMessage(context.signal)));
+    };
+    context.signal.addEventListener("abort", cancel, { once: true });
     const read = (stream: NodeJS.ReadableStream, isError: boolean) => {
       let pending = "";
       stream.setEncoding("utf8");
@@ -326,68 +897,386 @@ async function runLogged(serverId: number, executable: string, args: string[], c
         for (const line of lines) {
           if (!line.trim()) continue;
           tail = `${tail}\n${line}`.slice(-4000);
-          void logLine(serverId, inferLevel(line, isError), "Installer", line).catch(() => {});
+          void logLine(context.serverId, inferLevel(line, isError), "Installer", line).catch(() => {});
+          const steamProgress = line.match(/progress\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*%/i);
+          if (steamProgress) {
+            const providerPercent = Math.max(0, Math.min(100, Number(steamProgress[1])));
+            void context.transfer(25 + providerPercent * 0.55, 0, 0, `SteamCMD installation — ${providerPercent.toFixed(1)}%`).catch(() => {});
+          }
         }
       });
     };
     read(child.stdout, false);
     read(child.stderr, true);
-    child.once("error", reject);
-    child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`Installer exited with code ${code}.${tail ? ` Last output:${tail}` : ""}`)));
+    child.once("error", (error) => finish(error));
+    child.once("exit", (code) => {
+      if (context.signal.aborted) finish(new InstallationCancelledError(cancellationMessage(context.signal)));
+      else if (code === 0) finish();
+      else finish(new Error(`Installer exited with code ${code}.${tail ? ` Last output:${tail}` : ""}`));
+    });
   });
 }
 
-async function installSteam(server: Server, root: string) {
+async function runSteamCmdLogged(context: InstallContext, executable: string, args: string[], cwd: string) {
+  let recoveryStartedAt = 0;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await runLogged(context, executable, args, cwd);
+      if (attempt > 1) await context.report("installing", 25, `SteamCMD recovery succeeded on attempt ${attempt} after ${Math.max(1, Math.round((Date.now() - recoveryStartedAt) / 1000))} seconds`, "success");
+      return;
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const bootstrapRestart = /exited with code 7/i.test(message) && /(?:Downloading update|Installing update|Update complete, launching Steamcmd)/i.test(message);
+      const diagnosis = diagnoseInstallationFailure(message);
+      const transientProviderFailure = diagnosis?.transient === true;
+      if ((!bootstrapRestart && !transientProviderFailure) || attempt === 3) throw error;
+      const reason = bootstrapRestart ? "bootstrap-self-update" : (diagnosis?.code ?? "temporary-provider-failure");
+      if (!recoveryStartedAt) recoveryStartedAt = Date.now();
+      const delaySeconds = bootstrapRestart ? 8 : attempt * 5;
+      await context.report("recovering", 25, `Recovery attempt ${attempt + 1}/3 scheduled in ${delaySeconds} seconds: ${reason}`, "warn");
+      await new Promise<void>((resolve, reject) => {
+        const done = () => { context.signal.removeEventListener("abort", cancel); resolve(); };
+        const timer = setTimeout(done, bootstrapRestart ? 8_000 : attempt * 5_000);
+        const cancel = () => { clearTimeout(timer); context.signal.removeEventListener("abort", cancel); reject(new InstallationCancelledError(cancellationMessage(context.signal))); };
+        context.signal.addEventListener("abort", cancel, { once: true });
+        timer.unref?.();
+      });
+      if (hostPlatform() === "win32") {
+        await context.report("recovering", 25, "Recovery waiting for the managed SteamCMD bootstrap process to exit safely", "warn");
+        await waitForManagedExecutableExit(path.join(cwd, "steamcmd.exe"), context.signal);
+      }
+    }
+  }
+}
+
+async function installSteam(server: Server, root: string, context: InstallContext) {
   const game = getGame(server.gameId);
   if (!game.steamAppId) throw new Error(`${game.name} has no verified SteamCMD application ID.`);
-  const steamcmd = await ensureSteamCmd(server.id);
-  await logLine(server.id, "system", "Installer", `Installing ${game.name} from Steam app ${game.steamAppId}. Large games can take a long time.`);
-  await runLogged(server.id, steamcmd, [
+  const steamcmd = await ensureSteamCmd(context);
+  await context.report("installing", 25, `Installing ${game.name} from official Steam app ${game.steamAppId}`);
+  const steamArgs = [
     "+force_install_dir", root,
     "+login", "anonymous",
     "+app_update", String(game.steamAppId), "validate",
     "+quit",
-  ], path.dirname(steamcmd));
+  ];
+  if (hostPlatform() === "win32") {
+    // Some Windows hosts/filesystems reject direct CreateProcess calls for
+    // SteamCMD's 32-bit bootstrapper with spawn EFTYPE. PowerShell launches it
+    // through Windows' native command resolution while preserving each arg.
+    const ps = (value: string) => `'${value.replaceAll("'", "''")}'`;
+    const command = `$exe=${ps(steamcmd)}; $arguments=@(${steamArgs.map(ps).join(",")}); & $exe @arguments; exit $LASTEXITCODE`;
+    await runSteamCmdLogged(context, "powershell.exe", [
+      "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+      "-Command", command,
+    ], path.dirname(steamcmd));
+  } else {
+    await runSteamCmdLogged(context, steamcmd, steamArgs, path.dirname(steamcmd));
+  }
+  await recordSuccessfulToolUse("steamcmd",`Installed or validated Steam app ${game.steamAppId}`);
+  if(hostPlatform() === "win32") await recordSuccessfulToolUse("powershell","Launched SteamCMD for a successful managed installation");
 }
 
-export async function installFlow(id: number) {
-  await ensureRuntimeInitialized();
-  if (state.installs.has(id)) return { ok: false, reason: "Installation is already running" };
-  const [server] = await db.select().from(servers).where(eq(servers.id, id));
-  if (!server) return { ok: false, reason: "Server not found" };
-  if (state.processes.has(id)) return { ok: false, reason: "Stop the server before reinstalling" };
-  state.installs.add(id);
-  await setStatus(id, "installing");
+async function ensureHytaleDownloader(context: InstallContext) {
+  const override = process.env.SERVERHUB_HYTALE_DOWNLOADER_PATH;
+  if (override && fs.existsSync(override)) return path.resolve(override);
+  const root = path.join(toolsDir(), "hytale-downloader");
+  const candidates = hostPlatform() === "win32"
+    ? ["hytale-downloader-windows-amd64.exe", "hytale-downloader.exe", "downloader.exe"]
+    : ["hytale-downloader-linux-amd64", "hytale-downloader", "downloader"];
+  const existing = await findExecutable(root, candidates);
+  if (existing) return existing;
+  if (!["win32", "linux"].includes(hostPlatform()) || process.arch !== "x64") {
+    throw new Error(`The official Hytale Downloader is not available for ${hostPlatform()}/${process.arch}.`);
+  }
 
-  void (async () => {
-    const root = serverDir(server);
-    try {
-      await fsp.mkdir(root, { recursive: true });
-      const game = getGame(server.gameId);
-      await logLine(id, "system", "Installer", `Installing ${game.name} into ${root}`);
-      if (game.installer === "mojang") await installMojang(server, root);
-      else if (game.installer === "fabric") await installFabric(server, root);
-      else if (game.installer === "bedrock") await installBedrock(server, root);
-      else if (game.installer === "steamcmd") await installSteam(server, root);
-      else {
-        if (!server.launchCommand.trim()) throw new Error("A launch command is required for a manual server.");
-        await logLine(id, "system", "Installer", "Manual server registered; Server Hub will not modify or download its program files.");
-      }
-      await writeServerConfig(server);
-      await setStatus(id, "offline");
-      await logLine(id, "success", "Installer", `Installation complete. ${server.name} is ready to start.`);
-      await act(id, "server", `${server.name} installed successfully`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      await setStatus(id, "error");
-      await logLine(id, "error", "Installer", message);
-      await act(id, "server", `${server.name} installation failed: ${message}`);
-    } finally {
-      state.installs.delete(id);
+  const archive = path.join(appDataDir(), "downloads", "hytale-downloader.zip");
+  await downloadFile(
+    "https://downloader.hytale.com/hytale-downloader.zip",
+    archive,
+    context.serverId,
+    "official Hytale Downloader",
+    context,
+    [12, 22]
+  );
+  await fsp.rm(root, { recursive: true, force: true });
+  await fsp.mkdir(root, { recursive: true });
+  try {
+    await extractZipSafe(archive, root, context.signal);
+  } catch (error) {
+    await fsp.rm(archive, { force: true });
+    throw error;
+  }
+  await fsp.rm(archive, { force: true });
+  const executable = await findExecutable(root, candidates);
+  if (!executable) throw new Error("The official Hytale Downloader archive did not contain the expected executable.");
+  if (hostPlatform() !== "win32") await fsp.chmod(executable, 0o755).catch(() => {});
+  return executable;
+}
+
+async function installHytale(server: Server, root: string, context: InstallContext) {
+  const downloader = await ensureHytaleDownloader(context);
+  const downloadDir = path.join(root, ".serverhub-downloads");
+  const archive = path.join(downloadDir, "hytale-server.zip");
+  await fsp.mkdir(downloadDir, { recursive: true });
+  if (!fs.existsSync(archive)) {
+    await context.report(
+      "downloading",
+      25,
+      "Authorize the official Hytale Downloader using the URL and device code shown in Console"
+    );
+    await runLogged(context, downloader, ["-download-path", archive], path.dirname(downloader));
+    await recordSuccessfulToolUse("hytale-downloader","Downloaded Hytale server archive");
+  } else {
+    await context.report("downloading", 68, "Reusing the Hytale server archive downloaded by the previous attempt");
+  }
+  throwIfCancelled(context.signal);
+  await context.report("installing", 72, "Securely extracting the official Hytale server archive");
+  try {
+    await extractZipSafe(archive, root, context.signal);
+  } catch (error) {
+    await fsp.rm(archive, { force: true });
+    throw error;
+  }
+  await fsp.rm(downloadDir, { recursive: true, force: true });
+  await context.report("installing", 82, "Installing a private Eclipse Temurin Java 25 runtime");
+  await ensureJava(server.id, 25, context);
+}
+
+type InstallationProvider = {
+  label: string;
+  install: (server: Server, root: string, context: InstallContext) => Promise<void>;
+};
+
+const INSTALLATION_PROVIDERS = {
+  mojang: { label: "Mojang", install: installMojang },
+  fabric: { label: "Fabric", install: installFabric },
+  bedrock: { label: "Minecraft Bedrock", install: installBedrock },
+  steamcmd: { label: "SteamCMD", install: installSteam },
+  hytale: { label: "Official Hytale Downloader", install: installHytale },
+  manual: {
+    label: "Manual",
+    install: async (server: Server, _root: string, context: InstallContext) => {
+      if (!server.launchCommand.trim()) throw new Error("A launch command is required for a manual server.");
+      await context.report("installing", 75, "Manual server registered; program files will not be modified");
+    },
+  },
+} satisfies Record<InstallerKind, InstallationProvider>;
+
+export async function portAvailable(port: number, protocol: "TCP" | "UDP", address = "0.0.0.0") {
+  if (protocol === "TCP") {
+    return new Promise<boolean>((resolve) => {
+      const probe = net.createServer();
+      probe.unref();
+      probe.once("error", () => resolve(false));
+      probe.listen(port, address, () => probe.close(() => resolve(true)));
+    });
+  }
+  return new Promise<boolean>((resolve) => {
+    const probe = dgram.createSocket("udp4");
+    probe.unref();
+    probe.once("error", () => {
+      try { probe.close(); } catch { /* socket never bound */ }
+      resolve(false);
+    });
+    probe.bind(port, address, () => probe.close(() => resolve(true)));
+  });
+}
+
+async function preflightInstallation(server: Server, root: string, context: InstallContext) {
+  const game = getGame(server.gameId);
+  await context.report("preflight", 3, "Checking storage, port and installation paths");
+  throwIfCancelled(context.signal);
+  await fsp.mkdir(path.dirname(root), { recursive: true });
+
+  if (!isAssignedLocalAddress(server.bindAddress)) {
+    throw new Error(`The configured bind address ${server.bindAddress} is not assigned to this PC. Select an address shown in Diagnostics before installing.`);
+  }
+  await addInstallationEvent(context.jobId, server.id, "info", "preflight", 4, `Bind address check passed for ${game.protocol} port ${server.port}.`);
+
+  if (server.gameId === "dragonwilds") {
+    const [ownerId, adminPassword] = await Promise.all([revealSecret(server.ownerId), revealSecret(server.adminPassword)]);
+    validateDragonwildsPreflight(ownerId, adminPassword);
+    await addInstallationEvent(context.jobId, server.id, "success", "preflight", 5, "Dragonwilds Owner ID and admin configuration checks passed.");
+  }
+
+  if (game.installer !== "manual" && process.env.SERVERHUB_SKIP_DISK_PREFLIGHT !== "1") {
+    const stat = await fsp.statfs(path.dirname(root));
+    const available = Number(stat.bavail) * Number(stat.bsize);
+    const requiredMb = Math.ceil(game.installSizeMb * 1.15 + 256);
+    const required = requiredMb * 1024 * 1024;
+    if (available < required) {
+      throw new Error(
+        `Not enough disk space. ${game.name} needs approximately ${(requiredMb / 1024).toFixed(1)} GB, but only ${(available / 1024 / 1024 / 1024).toFixed(1)} GB is available.`
+      );
     }
-  })();
-  return { ok: true };
+    await addInstallationEvent(
+      context.jobId,
+      server.id,
+      "info",
+      "preflight",
+      5,
+      `Storage check passed: ${(available / 1024 / 1024 / 1024).toFixed(1)} GB available.`
+    );
+  }
+
+  if (!(await portAvailable(server.port, game.protocol, server.bindAddress))) {
+    throw new Error(`Port ${server.port}/${game.protocol} is currently in use. Free the port or choose another one before retrying.`);
+  }
+  await context.report("preflight", 8, `Preflight checks passed for ${game.name}`);
 }
+
+async function validateInstalledArtifacts(server: Server, root: string) {
+  const platform = hostPlatform();
+  if (server.gameId === "minecraft" || server.gameId === "minecraft-modded") {
+    if (!fs.existsSync(path.join(root, "server.jar"))) throw new Error("The downloaded server.jar is missing.");
+    return;
+  }
+  if (server.gameId === "minecraft-bedrock") {
+    const expected = path.join(root, platform === "win32" ? "bedrock_server.exe" : "bedrock_server");
+    if (!fs.existsSync(expected)) throw new Error("The Bedrock server executable is missing from the official archive.");
+    return;
+  }
+  const candidates: Record<string, string[]> = {
+    valheim: platform === "win32" ? ["valheim_server.exe"] : ["valheim_server.x86_64"],
+    ark: platform === "win32"
+      ? ["ShooterGame/Binaries/Win64/ShooterGameServer.exe", "ShooterGameServer.exe"]
+      : ["ShooterGame/Binaries/Linux/ShooterGameServer", "ShooterGameServer"],
+    terraria: platform === "win32" ? ["TerrariaServer.exe"] : ["TerrariaServer.bin.x86_64", "TerrariaServer"],
+    rust: platform === "win32" ? ["RustDedicated.exe"] : ["RustDedicated"],
+    dragonwilds: platform === "win32"
+      ? ["RSDragonwilds.exe", "RSDragonwildsServer.exe"]
+      : ["RSDragonwildsServer.sh", "RSDragonwildsServer"],
+  };
+  if (server.gameId === "hytale") {
+    if (!fs.existsSync(path.join(root, "Server", "HytaleServer.jar"))) throw new Error("HytaleServer.jar is missing from the official server archive.");
+    if (!fs.existsSync(path.join(root, "Assets.zip"))) throw new Error("Assets.zip is missing from the official server archive.");
+    return;
+  }
+  const expected = candidates[server.gameId];
+  if (expected && !(await findExecutable(root, expected))) {
+    throw new Error(`${getGame(server.gameId).name} installation completed, but its dedicated-server executable was not found.`);
+  }
+  if (getGame(server.gameId).installer === "manual" && !server.launchCommand.trim()) {
+    throw new Error("A launch command is required for a manual server.");
+  }
+}
+
+async function executeInstallation(job: InstallationJob, server: Server, signal: AbortSignal) {
+  const root = serverDir(server);
+  const staged = server.managedDirectory ? `${root}.serverhub-install-${job.id}` : root;
+  const context: InstallContext = {
+    jobId: job.id,
+    serverId: server.id,
+    signal,
+    report: async (phase, progress, message, level = "info") => reportInstallation(context, phase, progress, message, level),
+    transfer: async (progress, bytesDone, bytesTotal, message) => updateTransfer(context, progress, bytesDone, bytesTotal, message),
+  };
+
+  try {
+    await setStatus(server.id, "installing");
+    await preflightInstallation(server, staged, context);
+    await context.report("preparing", 10, `Preparing a recoverable staging area for ${server.name}`);
+    await fsp.mkdir(staged, { recursive: true });
+    if (job.kind === "update" && server.managedDirectory && fs.existsSync(root)) {
+      await context.report("preparing", 12, "Copying the current installation so worlds can be preserved during the update");
+      await fsp.cp(root, staged, {
+        recursive: true,
+        force: false,
+        errorOnExist: false,
+        preserveTimestamps: true,
+        filter: () => {
+          throwIfCancelled(signal);
+          return true;
+        },
+      });
+    }
+    throwIfCancelled(signal);
+
+    const game = getGame(server.gameId);
+    const provider = INSTALLATION_PROVIDERS[game.installer];
+    await addInstallationEvent(job.id, server.id, "info", "preparing", 10, `Using the ${provider.label} installation provider.`);
+    await provider.install(server, staged, context);
+
+    throwIfCancelled(signal);
+    await context.report("validating", 84, "Validating installed dedicated-server files");
+    await validateInstalledArtifacts(server, staged);
+    await context.report("configuring", 90, "Writing managed server configuration");
+    await writeServerConfig(server, staged, root);
+    throwIfCancelled(signal);
+
+    if (server.managedDirectory) {
+      await context.report("activating", 96, "Activating and re-verifying the staged installation");
+      await activateServerStaging(root, staged, `${root}.serverhub-previous-${job.id}`, async activated => {
+        await validateInstalledArtifacts(server, activated);
+        const expectedConfigRoot = server.gameId === "dragonwilds" ? path.join(activated,"RSDragonwilds","Saved","Config",hostPlatform() === "win32" ? "WindowsServer" : "LinuxServer","DedicatedServer.ini") : null;
+        if (expectedConfigRoot) await fsp.stat(expectedConfigRoot);
+      });
+      await context.report("activating", 99, "Activated installation passed post-swap verification", "success");
+    }
+
+    await db
+      .update(installationJobs)
+      .set({
+        status: "succeeded",
+        phase: "completed",
+        progress: 100,
+        message: "Installation complete",
+        error: "",
+        cancelRequested: false,
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(installationJobs.id, job.id));
+    await addInstallationEvent(job.id, server.id, "success", "completed", 100, `${server.name} is ready to start.`);
+    if (job.kind === "update") {
+      await db.update(servers).set({updateValidationStatus:"awaiting-readiness",updatedAt:new Date()}).where(eq(servers.id,server.id));
+      await addInstallationEvent(job.id,server.id,"warn","completed",100,"Update installed and awaiting first-start readiness validation.");
+    }
+    await setStatus(server.id, "offline");
+    await logLine(server.id, "success", "Installer", `Installation complete. ${server.name} is ready to start.`);
+    await act(server.id, "server", `${server.name} installed successfully`);
+  } catch (error) {
+    const cancelled = error instanceof InstallationCancelledError || signal.aborted;
+    const message = cleanInstallMessage(error instanceof Error ? error.message : String(error));
+    if (cancelled && state.closing) {
+      await db
+        .update(installationJobs)
+        .set({
+          status: "queued",
+          phase: "queued",
+          message: "Installation paused while Server Hub shuts down",
+          cancelRequested: false,
+          updatedAt: new Date(),
+          startedAt: null,
+        })
+        .where(eq(installationJobs.id, job.id));
+      await addInstallationEvent(job.id, server.id, "warn", "queued", job.progress, "Installation paused and will recover on the next launch.");
+      return;
+    }
+
+    await db
+      .update(installationJobs)
+      .set({
+        status: cancelled ? "cancelled" : "failed",
+        phase: cancelled ? "cancelled" : "failed",
+        message: cancelled ? "Installation cancelled" : "Installation failed",
+        error: cancelled ? "" : message,
+        cancelRequested: cancelled,
+        completedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(installationJobs.id, job.id));
+    await addInstallationEvent(job.id, server.id, cancelled ? "warn" : "error", cancelled ? "cancelled" : "failed", job.progress, message);
+    if (job.kind === "update") await db.update(servers).set({updateValidationStatus:cancelled?"installation-cancelled":"installation-failed",updatedAt:new Date()}).where(eq(servers.id,server.id));
+    await setStatus(server.id, "error");
+    await logLine(server.id, cancelled ? "warn" : "error", "Installer", message);
+    await act(server.id, "server", `${server.name} installation ${cancelled ? "cancelled" : `failed: ${message}`}`);
+    if (cancelled && server.managedDirectory) await fsp.rm(staged, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 
 // ---------------------------------------------------------------------------
 // Configuration and launch recipes
@@ -413,8 +1302,10 @@ async function mergeProperties(file: string, values: Record<string, string | num
   await fsp.writeFile(file, propertiesText(existing, values), "utf8");
 }
 
-export async function writeServerConfig(server: Server) {
-  const root = serverDir(server);
+export async function writeServerConfig(storedServer: Server, rootOverride?: string, activatedRootOverride?: string) {
+  const server = { ...storedServer, serverPassword: await revealSecret(storedServer.serverPassword), adminPassword: await revealSecret(storedServer.adminPassword), ownerId: await revealSecret(storedServer.ownerId) };
+  const root = rootOverride ?? serverDir(server);
+  const activatedRoot = activatedRootOverride ?? root;
   await fsp.mkdir(root, { recursive: true });
   if (server.gameId === "minecraft" || server.gameId === "minecraft-modded") {
     if (!server.eulaAccepted) throw new Error("The Minecraft EULA must be accepted before installation.");
@@ -422,6 +1313,7 @@ export async function writeServerConfig(server: Server) {
     await mergeProperties(path.join(root, "server.properties"), {
       motd: server.motd,
       "server-port": server.port,
+      "server-ip": server.bindAddress,
       "max-players": server.maxPlayers,
       difficulty: server.difficulty,
       pvp: server.pvp,
@@ -435,6 +1327,7 @@ export async function writeServerConfig(server: Server) {
     await mergeProperties(path.join(root, "server.properties"), {
       "server-name": server.name,
       "server-port": server.port,
+      "server-ip": server.bindAddress,
       "server-portv6": server.port + 1,
       "max-players": server.maxPlayers,
       "level-name": server.worldName,
@@ -445,7 +1338,7 @@ export async function writeServerConfig(server: Server) {
     });
   } else if (server.gameId === "terraria") {
     const config = [
-      `world=${path.join(root, "Worlds", `${safeFileName(server.worldName, "world")}.wld`)}`,
+      `world=${path.join(activatedRoot, "Worlds", `${safeFileName(server.worldName, "world")}.wld`)}`,
       "autocreate=3",
       `worldname=${server.worldName}`,
       `difficulty=${Math.max(0, ["peaceful", "easy", "normal", "hard"].indexOf(server.difficulty))}`,
@@ -456,6 +1349,26 @@ export async function writeServerConfig(server: Server) {
       "",
     ].join("\n");
     await fsp.writeFile(path.join(root, "serverconfig.txt"), config, "utf8");
+  } else if (server.gameId === "dragonwilds") {
+    const clean = (value: string) => value.replace(/[\r\n]/g, " ").trim();
+    if (!clean(server.ownerId)) throw new Error("Dragonwilds requires the owner's in-game Player ID.");
+    if (clean(server.adminPassword).length < 5) throw new Error("Dragonwilds requires an admin password of at least five characters.");
+    const platformFolder = hostPlatform() === "win32" ? "WindowsServer" : "LinuxServer";
+    const configFile = path.join(root, "RSDragonwilds", "Saved", "Config", platformFolder, "DedicatedServer.ini");
+    const config = [
+      "[SectionsToSave]",
+      "bCanSaveAllSections=true",
+      "",
+      "[/Script/Dominion.DedicatedServerSettings]",
+      `OwnerId=${clean(server.ownerId)}`,
+      `ServerName=${clean(server.name).slice(0, 16)}`,
+      `DefaultWorldName=${clean(server.worldName).slice(0, 16)}`,
+      `AdminPassword=${clean(server.adminPassword)}`,
+      `WorldPassword=${clean(server.serverPassword)}`,
+      "",
+    ].join("\n");
+    await fsp.mkdir(path.dirname(configFile), { recursive: true });
+    await fsp.writeFile(configFile, config, { encoding: "utf8", mode: 0o600 });
   }
 }
 
@@ -483,6 +1396,11 @@ function parseArgs(input: string): string[] {
 }
 
 async function findExecutable(root: string, candidates: string[]): Promise<string | null> {
+  for (const candidate of candidates) {
+    const direct = path.resolve(root, candidate);
+    const prefix = `${path.resolve(root)}${path.sep}`;
+    if (direct.startsWith(prefix) && await fsp.stat(direct).then((stat) => stat.isFile()).catch(() => false)) return direct;
+  }
   const wanted = new Set(candidates.map((item) => item.toLowerCase().replaceAll("\\", "/")));
   const queue = [root];
   let seen = 0;
@@ -510,8 +1428,10 @@ function javaMajorForMinecraft(version: string): number {
   return 21;
 }
 
-async function ensureJava(serverId: number, major: number): Promise<string> {
-  const executableName = process.platform === "win32" ? "java.exe" : "java";
+async function ensureJava(serverId: number, major: number, context?: InstallContext): Promise<string> {
+  const override = process.env[`SERVERHUB_JAVA_PATH_${major}`];
+  if (override && fs.existsSync(override)) return path.resolve(override);
+  const executableName = hostPlatform() === "win32" ? "java.exe" : "java";
   const javaRoot = path.join(toolsDir(), `java-${major}`);
   const existing = await findExecutable(javaRoot, [executableName, `bin/${executableName}`]);
   if (existing) return existing;
@@ -519,25 +1439,31 @@ async function ensureJava(serverId: number, major: number): Promise<string> {
   // Download a private JRE: users do not need Java or administrator rights.
   const platformMap: Record<string, string> = { win32: "windows", linux: "linux", darwin: "mac" };
   const archMap: Record<string, string> = { x64: "x64", arm64: "aarch64" };
-  const platform = platformMap[process.platform];
+  const platform = platformMap[hostPlatform()];
   const arch = archMap[process.arch];
-  if (!platform || !arch) throw new Error(`No automatic Java runtime is available for ${process.platform}/${process.arch}. Install Java ${major} and try again.`);
-  const ext = process.platform === "win32" ? "zip" : "tar.gz";
+  if (!platform || !arch) throw new Error(`No automatic Java runtime is available for ${hostPlatform()}/${process.arch}. Install Java ${major} and try again.`);
+  const ext = hostPlatform() === "win32" ? "zip" : "tar.gz";
   const archive = path.join(appDataDir(), "downloads", `temurin-jre${major}.${ext}`);
   const url = `https://api.adoptium.net/v3/binary/latest/${major}/ga/${platform}/${arch}/jre/hotspot/normal/eclipse`;
-  await downloadFile(url, archive, serverId, `Eclipse Temurin Java ${major} runtime`);
+  await downloadFile(url, archive, serverId, `Eclipse Temurin Java ${major} runtime`, context, context ? [82, 89] : [20, 75]);
   await fsp.rm(javaRoot, { recursive: true, force: true });
   await fsp.mkdir(javaRoot, { recursive: true });
-  if (ext === "zip") await extractZipSafe(archive, javaRoot);
-  else await extractTarGz(archive, javaRoot);
+  try {
+    if (ext === "zip") await extractZipSafe(archive, javaRoot, context?.signal);
+    else await extractTarGz(archive, javaRoot);
+  } catch (error) {
+    await fsp.rm(archive, { force: true });
+    await fsp.rm(javaRoot, { recursive: true, force: true });
+    throw error;
+  }
   await fsp.rm(archive, { force: true });
   const java = await findExecutable(javaRoot, [executableName, `bin/${executableName}`]);
   if (!java) throw new Error("Java runtime archive did not contain a java executable.");
-  if (process.platform !== "win32") await fsp.chmod(java, 0o755).catch(() => {});
+  if (hostPlatform() !== "win32") await fsp.chmod(java, 0o755).catch(() => {});
   return java;
 }
 
-type LaunchSpec = { executable: string; args: string[]; env?: Record<string, string | undefined> };
+type LaunchSpec = { executable: string; args: string[]; env?: Record<string, string | undefined>; cwd?: string };
 
 async function launchSpec(server: Server): Promise<LaunchSpec> {
   const root = serverDir(server);
@@ -545,7 +1471,7 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
     let executable = server.launchCommand.trim();
     if ((executable.includes("/") || executable.includes("\\") || executable.startsWith(".")) && !path.isAbsolute(executable)) executable = path.resolve(root, executable);
     const args = parseArgs(server.launchArgs);
-    if (process.platform === "win32" && /\.(?:bat|cmd)$/i.test(executable)) {
+    if (hostPlatform() === "win32" && /\.(?:bat|cmd)$/i.test(executable)) {
       return { executable: process.env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", `call "${executable}" ${server.launchArgs}`] };
     }
     return { executable, args };
@@ -558,45 +1484,75 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
     return { executable: java, args: [`-Xms${Math.min(1024, server.memoryMb)}M`, `-Xmx${server.memoryMb}M`, "-jar", jar, "nogui"] };
   }
   if (server.gameId === "minecraft-bedrock") {
-    const executable = path.join(root, process.platform === "win32" ? "bedrock_server.exe" : "bedrock_server");
+    const executable = path.join(root, hostPlatform() === "win32" ? "bedrock_server.exe" : "bedrock_server");
     if (!fs.existsSync(executable)) throw new Error("Bedrock server executable is missing. Retry installation first.");
-    return { executable, args: [], env: process.platform === "linux" ? { LD_LIBRARY_PATH: root } : undefined };
+    return { executable, args: [], env: hostPlatform() === "linux" ? { LD_LIBRARY_PATH: root } : undefined };
   }
   if (server.gameId === "valheim") {
-    const executable = await findExecutable(root, process.platform === "win32" ? ["valheim_server.exe"] : ["valheim_server.x86_64"]);
+    const executable = await findExecutable(root, hostPlatform() === "win32" ? ["valheim_server.exe"] : ["valheim_server.x86_64"]);
     if (!executable) throw new Error("Valheim server executable was not found after SteamCMD installation.");
     if (!server.serverPassword || server.serverPassword.length < 5) throw new Error("Valheim requires a server password of at least five characters.");
     return {
       executable,
-      args: ["-nographics", "-batchmode", "-name", server.name, "-port", String(server.port), "-world", server.worldName, "-password", server.serverPassword, "-public", "1"],
-      env: process.platform === "linux" ? { LD_LIBRARY_PATH: `${path.dirname(executable)}/linux64:${process.env.LD_LIBRARY_PATH || ""}` } : undefined,
+      args: ["-nographics", "-batchmode", "-name", server.name, "-port", String(server.port), "-world", server.worldName, "-password", server.serverPassword, "-public", "1", "-ip", server.bindAddress],
+      env: hostPlatform() === "linux" ? { LD_LIBRARY_PATH: `${path.dirname(executable)}/linux64:${process.env.LD_LIBRARY_PATH || ""}` } : undefined,
     };
   }
   if (server.gameId === "ark") {
-    const executable = await findExecutable(root, process.platform === "win32"
+    const executable = await findExecutable(root, hostPlatform() === "win32"
       ? ["ShooterGame/Binaries/Win64/ShooterGameServer.exe", "ShooterGameServer.exe"]
       : ["ShooterGame/Binaries/Linux/ShooterGameServer", "ShooterGameServer"]);
     if (!executable) throw new Error("ARK server executable was not found after SteamCMD installation.");
     const map = server.worldName || "TheIsland";
-    return { executable, args: [`${map}?SessionName=${server.name}?Port=${server.port}?QueryPort=${getGame(server.gameId).queryPort ?? 27015}?MaxPlayers=${server.maxPlayers}`, "-server", "-log"] };
+    return { executable, args: [`${map}?SessionName=${server.name}?Port=${server.port}?QueryPort=${getGame(server.gameId).queryPort ?? 27015}?MaxPlayers=${server.maxPlayers}?MultiHome=${server.bindAddress}`, "-server", "-log"] };
   }
   if (server.gameId === "terraria") {
-    const executable = await findExecutable(root, process.platform === "win32"
+    const executable = await findExecutable(root, hostPlatform() === "win32"
       ? ["TerrariaServer.exe"]
       : ["TerrariaServer.bin.x86_64", "TerrariaServer"]);
     if (!executable) throw new Error("Terraria server executable was not found after SteamCMD installation.");
     return { executable, args: ["-config", path.join(root, "serverconfig.txt")] };
   }
   if (server.gameId === "rust") {
-    const executable = await findExecutable(root, process.platform === "win32" ? ["RustDedicated.exe"] : ["RustDedicated"]);
+    const executable = await findExecutable(root, hostPlatform() === "win32" ? ["RustDedicated.exe"] : ["RustDedicated"]);
     if (!executable) throw new Error("RustDedicated executable was not found after SteamCMD installation.");
     return { executable, args: [
       "-batchmode", "+server.identity", safeFileName(server.worldName, "serverhub"),
-      "+server.hostname", server.name, "+server.port", String(server.port),
+      "+server.hostname", server.name, "+server.ip", server.bindAddress, "+server.port", String(server.port),
       "+server.queryport", String(getGame(server.gameId).queryPort ?? server.port + 1),
       "+server.maxplayers", String(server.maxPlayers), "+server.seed", server.seed || "0",
       "+server.description", server.motd,
     ] };
+  }
+  if (server.gameId === "dragonwilds") {
+    const executable = await findExecutable(root, hostPlatform() === "win32"
+      ? ["RSDragonwilds.exe", "RSDragonwildsServer.exe"]
+      : ["RSDragonwildsServer.sh", "RSDragonwildsServer"]);
+    if (!executable) throw new Error("The Dragonwilds dedicated-server executable was not found after SteamCMD installation.");
+    if (!server.ownerId.trim()) throw new Error("Dragonwilds requires the owner's in-game Player ID.");
+    if (server.adminPassword.length < 5) throw new Error("Dragonwilds requires an admin password of at least five characters.");
+    if (hostPlatform() !== "win32") await fsp.chmod(executable, 0o755).catch(() => {});
+    return { executable, args: ["-log", "-NewConsole", `-Port=${server.port}`, `-MULTIHOME=${server.bindAddress}`] };
+  }
+  if (server.gameId === "hytale") {
+    const serverRoot = path.join(root, "Server");
+    const jar = path.join(serverRoot, "HytaleServer.jar");
+    const assets = path.join(root, "Assets.zip");
+    if (!fs.existsSync(jar) || !fs.existsSync(assets)) throw new Error("Hytale server artifacts are missing. Retry installation first.");
+    const java = await ensureJava(server.id, 25);
+    const aot = fs.existsSync(path.join(serverRoot, "HytaleServer.aot")) ? ["-XX:AOTCache=HytaleServer.aot"] : [];
+    return {
+      executable: java,
+      cwd: serverRoot,
+      args: [
+        `-Xms${Math.min(2048, server.memoryMb)}M`,
+        `-Xmx${server.memoryMb}M`,
+        ...aot,
+        "-jar", "HytaleServer.jar",
+        "--assets", "../Assets.zip",
+        "--bind", `${server.bindAddress}:${server.port}`,
+      ],
+    };
   }
   throw new Error("This manual server needs a launch command in Settings.");
 }
@@ -605,28 +1561,92 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
 // Real process lifecycle and metrics
 // ---------------------------------------------------------------------------
 
-export async function startFlow(id: number): Promise<{ ok: boolean; reason?: string }> {
+async function reconcileA2sPlayerSessions(server:Server,observed:Awaited<ReturnType<typeof queryA2sPlayers>>){
+ const provider="steam-a2s",now=new Date(),open=await db.select().from(playerSessions).where(and(eq(playerSessions.serverId,server.id),eq(playerSessions.provider,provider),isNull(playerSessions.leftAt))); const byKey=new Map(observed.filter(item=>item.name.trim()).map(item=>[observationKey(provider,item.name),item])); const changes=reconcileObservationKeys(open.map(item=>item.observationKey),[...byKey.keys()]);
+ for(const key of changes.left){const session=open.find(item=>item.observationKey===key);if(session)await db.update(playerSessions).set({leftAt:now,durationSec:Math.max(session.durationSec,Math.round((now.getTime()-(session.joinedAt?.getTime()??now.getTime()))/1000))}).where(eq(playerSessions.id,session.id));}
+ for(const key of changes.joined){const item=byKey.get(key);if(item)await db.insert(playerSessions).values({serverId:server.id,provider,observationKey:key,displayName:item.name.slice(0,100),joinedAt:new Date(now.getTime()-Math.max(0,item.durationSeconds)*1000),durationSec:Math.round(Math.max(0,item.durationSeconds)),score:item.score});}
+ const known=await db.select().from(players).where(eq(players.serverId,server.id)); for(const row of known.filter(row=>row.externalId.startsWith(`${provider}:`)&&!changes.online.includes(row.externalId)))await db.update(players).set({isOnline:false,lastSeen:now}).where(eq(players.id,row.id)); for(const [key,item] of byKey){const row=known.find(value=>value.externalId===key);if(row)await db.update(players).set({name:item.name.slice(0,100),isOnline:true,ping:0,lastSeen:now}).where(eq(players.id,row.id));else await db.insert(players).values({serverId:server.id,name:item.name.slice(0,100),externalId:key,isOnline:true,lastSeen:now});}
+}
+async function probeEntry(entry:RuntimeEntry){
+ const server=entry.server,game=getGame(server.gameId); const method=readinessProbeFor(server.gameId,game.protocol);
+ let detail="",metadata:Record<string,unknown>|null=null; const ok=method==="minecraft-status"?await queryMinecraftStatus(server.bindAddress,server.port).then(info=>{metadata={provider:"minecraft",version:info.version,protocol:info.protocol,motd:info.motd,players:info.players,maxPlayers:info.maxPlayers,latencyMs:info.latencyMs};detail=`${info.version} · ${info.players}/${info.maxPlayers} players · ${info.latencyMs} ms${info.motd?` · ${info.motd}`:""}`;return true}).catch(()=>false):method==="steam-a2s"?await queryA2sInfo(server.bindAddress,game.queryPort!).then(async info=>{const observed=await queryA2sPlayers(server.bindAddress,game.queryPort!).catch(()=>null);if(observed)await reconcileA2sPlayerSessions(server,observed);metadata={provider:"steam-a2s",name:info.name,map:info.map,game:info.game,players:info.players,maxPlayers:info.maxPlayers,bots:info.bots,password:info.password,vac:info.vac,version:info.version};detail=`${info.name} · ${info.map} · ${info.players}/${info.maxPlayers} players · v${info.version}`;return true}).catch(()=>false):method==="process-stability"?state.processes.has(server.id)&&processStabilityReady(entry.startedAtMs,Date.now(),minimumProcessStabilityMs(server.gameId)):await new Promise<boolean>(resolve=>{const socket=net.createConnection({host:server.bindAddress,port:server.port});const done=(v:boolean)=>{socket.destroy();resolve(v)};socket.setTimeout(750);socket.once("connect",()=>done(true));socket.once("timeout",()=>done(false));socket.once("error",()=>done(false))});
+ if(ok&&metadata)await db.update(servers).set({queryMetadata:JSON.stringify(metadata),lastQueryAt:new Date()}).where(eq(servers.id,server.id));
+ return {ok,method,detail};
+}
+async function waitUntilReady(entry: RuntimeEntry) {
+ const deadline=Date.now()+Math.max(10,Math.min(300,entry.server.readinessTimeoutSec))*1000;
+ while(Date.now()<deadline&&state.processes.has(entry.server.id)){if((await probeEntry(entry)).ok)return true;await new Promise(resolve=>setTimeout(resolve,500));} return false;
+}
+
+async function attemptAutomaticUpdateRollback(serverId: number) {
+  const [candidate] = await db.select().from(servers).where(eq(servers.id, serverId));
+  if (!candidate || candidate.updateValidationStatus !== "readiness-failed" || candidate.updateRollbackAttempted || !candidate.managedDirectory || !candidate.updateSafetyBackupId) return { attempted: false, ok: false };
+  const claimed = await db.update(servers).set({ updateRollbackAttempted: true, updateValidationStatus: "rollback-running", updatedAt: new Date() }).where(and(eq(servers.id, serverId), eq(servers.updateRollbackAttempted, false), eq(servers.updateValidationStatus, "readiness-failed"))).returning({ id: servers.id });
+  if (!claimed.length) return { attempted: false, ok: false };
+  await logLine(serverId, "warn", "Updater", `Updated server failed readiness; restoring verified safety backup ${candidate.updateSafetyBackupId}.`);
+  const deadline = Date.now() + 20_000;
+  while (state.processes.has(serverId) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 250));
+  if (state.processes.has(serverId)) { await db.update(servers).set({ updateValidationStatus: "rollback-failed", updatedAt: new Date() }).where(eq(servers.id, serverId)); await logLine(serverId, "error", "Updater", "Automatic rollback could not begin because the failed process did not exit."); return { attempted: true, ok: false }; }
+  await setStatus(serverId, "crashed");
+  const restored = await restoreBackup(serverId, candidate.updateSafetyBackupId);
+  if (!restored.ok) { await db.update(servers).set({ updateValidationStatus: "rollback-failed", updatedAt: new Date() }).where(eq(servers.id, serverId)); await logLine(serverId, "error", "Updater", `Automatic rollback failed: ${restored.reason ?? "restore failed"}`); return { attempted: true, ok: false }; }
+  await db.update(servers).set({ version: candidate.updatePreviousVersion || candidate.version, updateValidationStatus: "rollback-restored", updatedAt: new Date() }).where(eq(servers.id, serverId));
+  const restarted = await startFlow(serverId, true);
+  await db.update(servers).set({ updateValidationStatus: restarted.ok ? "rollback-validated" : "rollback-failed", updatedAt: new Date() }).where(eq(servers.id, serverId));
+  await logLine(serverId, restarted.ok ? "success" : "error", "Updater", restarted.ok ? "Previous version restored and readiness validated." : `Previous version restored but readiness failed: ${restarted.reason ?? "unknown error"}`);
+  return { attempted: true, ok: restarted.ok };
+}
+
+export async function restoreUpdateSafetyBackup(serverId: number) {
   await ensureRuntimeInitialized();
+  const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
+  if (!server) return { ok: false, reason: "Server not found" };
+  if (!server.managedDirectory || !server.updateSafetyBackupId || !server.updatePreviousVersion) return { ok: false, reason: "No managed pre-update safety backup is available" };
+  if (state.processes.has(serverId) || !["offline","crashed","error"].includes(server.status)) return { ok: false, reason: "Stop the server before restoring the previous version" };
+  if (!["readiness-failed","rollback-failed","validated","awaiting-readiness"].includes(server.updateValidationStatus)) return { ok: false, reason: "The current update state is not eligible for rollback" };
+  await db.update(servers).set({updateRollbackAttempted:true,updateValidationStatus:"rollback-running",updatedAt:new Date()}).where(eq(servers.id,serverId));
+  const restored=await restoreBackup(serverId,server.updateSafetyBackupId);
+  if(!restored.ok){await db.update(servers).set({updateValidationStatus:"rollback-failed",updatedAt:new Date()}).where(eq(servers.id,serverId));return restored;}
+  await db.update(servers).set({version:server.updatePreviousVersion,updateValidationStatus:"rollback-restored",updatedAt:new Date()}).where(eq(servers.id,serverId));
+  await logLine(serverId,"success","Updater",`Previous version ${server.updatePreviousVersion} restored manually from the verified safety backup.`);
+  return {ok:true,version:server.updatePreviousVersion};
+}
+
+export async function startFlow(id: number, automatic = false): Promise<{ ok: boolean; reason?: string }> {
+  await ensureRuntimeInitialized();
+  const pendingRestart = state.restartTimers.get(id);
+  if (pendingRestart) {
+    clearTimeout(pendingRestart);
+    state.restartTimers.delete(id);
+  }
+  if (!automatic) state.crashHistory.delete(id);
   const [server] = await db.select().from(servers).where(eq(servers.id, id));
   if (!server) return { ok: false, reason: "Server not found" };
   if (state.processes.has(id)) return { ok: false, reason: "Server process is already running" };
   if (state.installs.has(id) || server.status === "installing") return { ok: false, reason: "Installation is still running" };
   if (server.status === "error") return { ok: false, reason: "Installation failed. Retry installation first." };
+  const rollbackReadinessValidation=server.updateValidationStatus==="rollback-restored"||server.updateValidationStatus==="rollback-validating";
+  const pendingUpdateValidation=server.updateValidationStatus==="awaiting-readiness"||server.updateValidationStatus==="validating-runtime"||rollbackReadinessValidation;
 
   try {
+    const game = getGame(server.gameId);
+    if (!(await portAvailable(server.port, game.protocol, server.bindAddress))) {
+      throw new Error(`Port ${server.port}/${game.protocol} is currently in use. Stop the conflicting process or choose another port.`);
+    }
     await writeServerConfig(server);
+    if(pendingUpdateValidation) await db.update(servers).set({updateValidationStatus:rollbackReadinessValidation?"rollback-validating":"validating-runtime",updatedAt:new Date()}).where(eq(servers.id,id));
     await setStatus(id, "starting");
     await logLine(id, "system", "Runtime", `Starting ${server.name} from ${serverDir(server)}`);
     const spec = await launchSpec(server);
     const env = { ...process.env, ...spec.env };
     const child = spawn(spec.executable, spec.args, {
-      cwd: serverDir(server),
+      cwd: spec.cwd ?? serverDir(server),
       env,
       windowsHide: true,
-      detached: process.platform !== "win32",
+      detached: hostPlatform() !== "win32",
       stdio: ["pipe", "pipe", "pipe"],
     });
-    const entry = {
+    const entry: RuntimeEntry = {
       child,
       server,
       metrics: [],
@@ -634,6 +1654,7 @@ export async function startFlow(id: number): Promise<{ ok: boolean; reason?: str
       stopping: false,
       restarting: false,
       lineCount: 0,
+      startedAtMs: Date.now(),
     } satisfies RuntimeEntry;
     state.processes.set(id, entry);
     pipeLines(entry, child.stdout, false);
@@ -646,15 +1667,30 @@ export async function startFlow(id: number): Promise<{ ok: boolean; reason?: str
     entry.monitor = setInterval(() => void sampleEntry(entry).catch(() => {}), 2_000);
     entry.monitor.unref?.();
 
-    await new Promise((resolve) => setTimeout(resolve, 700));
-    if (!state.processes.has(id)) return { ok: false, reason: "The server process exited during startup. Check Console for details." };
+    const probe=readinessProbeFor(server.gameId,getGame(server.gameId).protocol);
+    const waitingReason=readinessWaitingReason(server.gameId,probe);
+    await db.update(servers).set({healthStatus:"checking",healthReason:waitingReason,healthProbe:probe,updatedAt:new Date()}).where(eq(servers.id,id));
+    await logLine(id,"system","Readiness",`${waitingReason}.`);
+    const ready = await waitUntilReady(entry);
+    if (!state.processes.has(id)) { await setHealth(id,"blocked","Process exited during startup",probe,false); await incident(id,"error","readiness","Process exited during startup",readinessRemediation(server.gameId,probe)); if(pendingUpdateValidation){await db.update(servers).set({updateValidationStatus:rollbackReadinessValidation?"rollback-failed":"readiness-failed",updatedAt:new Date()}).where(eq(servers.id,id));if(!rollbackReadinessValidation)await attemptAutomaticUpdateRollback(id);} return { ok: false, reason: "The server process exited during startup. Check Console for details." }; }
+    if (!ready) { await setHealth(id,"blocked",`Readiness timed out after ${server.readinessTimeoutSec} seconds`,probe,false); await incident(id,"error","readiness","Provider readiness timed out",readinessRemediation(server.gameId,probe));
+      entry.stopping = true;
+      killProcessTree(child.pid, true);
+      throw new Error(`Readiness probe timed out after ${server.readinessTimeoutSec} seconds on ${server.bindAddress}:${server.port}.`);
+    }
     await db.update(servers).set({ status: "online", lastStartedAt: new Date(), updatedAt: new Date() }).where(eq(servers.id, id));
+    await setHealth(id,"ready","Provider readiness probe passed",probe,true);
+    await logLine(id,"success","Readiness",`${probe} readiness passed after ${Math.max(1,Math.round((Date.now()-entry.startedAtMs)/1000))} seconds.`);
+    if(pendingUpdateValidation){await db.update(servers).set({updateValidationStatus:rollbackReadinessValidation?"rollback-validated":"validated",updatedAt:new Date()}).where(eq(servers.id,id));await logLine(id,"success","Updater",rollbackReadinessValidation?`Restored version ${server.updatePreviousVersion} passed readiness validation.`:`Update ${server.updatePreviousVersion} → ${server.updateTargetVersion} passed first-start readiness validation.`);}
+    if(server.gameId === "minecraft" || server.gameId === "minecraft-modded") await recordSuccessfulToolUse("java","Started a Minecraft server and passed its readiness probe");
     await logLine(id, "success", "Runtime", `Process started with PID ${child.pid}.`);
     await act(id, "power", `${server.name} started (PID ${child.pid})`);
     return { ok: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if(pendingUpdateValidation)await db.update(servers).set({updateValidationStatus:rollbackReadinessValidation?"rollback-failed":"readiness-failed",updatedAt:new Date()}).where(eq(servers.id,id));
     await setStatus(id, "crashed");
+    if(pendingUpdateValidation&&!rollbackReadinessValidation)await attemptAutomaticUpdateRollback(id);
     await logLine(id, "error", "Runtime", message);
     return { ok: false, reason: message };
   }
@@ -669,7 +1705,53 @@ async function handleExit(entry: RuntimeEntry, code: number | null, signal: Node
   await setStatus(id, expected ? "offline" : "crashed").catch(() => {});
   await logLine(id, expected ? "system" : "error", "Runtime", `Process exited (code ${code ?? "none"}, signal ${signal ?? "none"}).`).catch(() => {});
   await act(id, "power", `${entry.server.name} ${expected ? "stopped" : "crashed"}`).catch(() => {});
-  if (entry.restarting && !state.closing) setTimeout(() => void startFlow(id), 900);
+  if (entry.restarting && !state.closing) {
+    setTimeout(() => void startFlow(id), 900);
+  } else if (!expected && !state.closing) {
+    await scheduleCrashRestart(entry);
+  }
+}
+
+async function scheduleCrashRestart(entry: RuntimeEntry) {
+  // Read the latest settings so disabling the watchdog (or changing its limit)
+  // while a server is running takes effect on that process's next exit.
+  const [server] = await db.select().from(servers).where(eq(servers.id, entry.server.id));
+  if (!server?.autoRestart) return;
+  const id = server.id;
+  const now = Date.now();
+  const windowMs = Math.max(30, Math.min(3600, server.restartWindowSec)) * 1000;
+  let history = (state.crashHistory.get(id) ?? []).filter((timestamp) => now - timestamp <= windowMs);
+  if (now - entry.startedAtMs >= windowMs) history = [];
+  history.push(now);
+  state.crashHistory.set(id, history);
+  const limit = Math.max(0, Math.min(20, server.maxCrashRestarts));
+  if (history.length > limit) {
+    await setStatus(id, "crashed");
+    await logLine(id, "error", "Watchdog", `Automatic restart limit reached (${limit} within ${Math.round(windowMs / 1000)} seconds). Manual intervention is required.`);
+    await act(id, "power", `${server.name} restart limit reached`);
+    return;
+  }
+
+  const delaySeconds = Math.min(30, 2 ** (history.length - 1) * 2);
+  await setStatus(id, "restarting");
+  await logLine(id, "warn", "Watchdog", `Unexpected exit detected. Automatic restart ${history.length} of ${limit} begins in ${delaySeconds} seconds.`);
+  await act(id, "power", `${server.name} scheduled for automatic restart`);
+  const timer = setTimeout(() => {
+    if (state.restartTimers.get(id) !== timer) return;
+    state.restartTimers.delete(id);
+    void (async () => {
+      const [latest] = await db.select().from(servers).where(eq(servers.id, id));
+      if (!latest?.autoRestart) {
+        state.crashHistory.delete(id);
+        if (latest) await setStatus(id, "offline");
+        return;
+      }
+      const result = await startFlow(id, true);
+      if (!result.ok) await logLine(id, "error", "Watchdog", `Automatic restart failed: ${result.reason ?? "unknown error"}`);
+    })();
+  }, delaySeconds * 1000);
+  timer.unref?.();
+  state.restartTimers.set(id, timer);
 }
 
 function stopCommand(server: Server): string {
@@ -677,11 +1759,25 @@ function stopCommand(server: Server): string {
   if (server.gameId === "terraria") return "exit";
   if (server.gameId === "rust") return "quit";
   if (server.gameId === "ark") return "DoExit";
+  if (server.gameId === "hytale") return "/stop";
   return "stop";
+}
+
+export async function cancelPendingRestart(id: number, reason = "Panel") {
+  await ensureRuntimeInitialized();
+  const pendingRestart = state.restartTimers.get(id);
+  if (!pendingRestart) return false;
+  clearTimeout(pendingRestart);
+  state.restartTimers.delete(id);
+  state.crashHistory.delete(id);
+  await setStatus(id, "offline");
+  await logLine(id, "system", "Watchdog", `Pending automatic restart cancelled by ${reason}.`);
+  return true;
 }
 
 export async function stopFlow(id: number, reason = "Panel"): Promise<{ ok: boolean; reason?: string }> {
   await ensureRuntimeInitialized();
+  if (await cancelPendingRestart(id, reason)) return { ok: true };
   const entry = state.processes.get(id);
   if (!entry) {
     await setStatus(id, "offline");
@@ -712,6 +1808,12 @@ export async function restartFlow(id: number): Promise<{ ok: boolean; reason?: s
 
 export async function killFlow(id: number) {
   await ensureRuntimeInitialized();
+  const pendingRestart = state.restartTimers.get(id);
+  if (pendingRestart) {
+    clearTimeout(pendingRestart);
+    state.restartTimers.delete(id);
+    state.crashHistory.delete(id);
+  }
   const entry = state.processes.get(id);
   if (!entry) {
     await setStatus(id, "offline");
@@ -727,7 +1829,7 @@ export async function killFlow(id: number) {
 function killProcessTree(pid: number | undefined, force: boolean) {
   if (!pid) return;
   try {
-    if (process.platform === "win32") {
+    if (hostPlatform() === "win32") {
       spawn("taskkill", ["/pid", String(pid), "/t", ...(force ? ["/f"] : [])], { windowsHide: true, stdio: "ignore" }).unref();
     } else {
       process.kill(-pid, force ? "SIGKILL" : "SIGTERM");
@@ -762,7 +1864,7 @@ async function sampleEntry(entry: RuntimeEntry) {
 
 async function processUsage(pid: number, previous?: ProcSample): Promise<{ cpu: number; ram: number; sample?: ProcSample }> {
   try {
-    if (process.platform === "linux") {
+    if (hostPlatform() === "linux") {
       const stat = await fsp.readFile(`/proc/${pid}/stat`, "utf8");
       const end = stat.lastIndexOf(")");
       const fields = stat.slice(end + 2).split(" ");
@@ -773,7 +1875,7 @@ async function processUsage(pid: number, previous?: ProcSample): Promise<{ cpu: 
       return { cpu: +cpu.toFixed(1), ram: Math.max(0, Math.round((rssPages * 4096) / 1024 / 1024)), sample: { at: now, cpuTime: ticks } };
     }
     const result = await new Promise<string>((resolve, reject) => {
-      const child = process.platform === "win32"
+      const child = hostPlatform() === "win32"
         ? spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(Get-Process -Id ${pid}) | ForEach-Object { \"$($_.CPU)|$($_.WorkingSet64)\" }`], { windowsHide: true })
         : spawn("ps", ["-o", "%cpu=,rss=", "-p", String(pid)]);
       let out = "";
@@ -781,7 +1883,7 @@ async function processUsage(pid: number, previous?: ProcSample): Promise<{ cpu: 
       child.once("error", reject);
       child.once("exit", (code) => code === 0 ? resolve(out.trim()) : reject(new Error("process unavailable")));
     });
-    if (process.platform === "win32") {
+    if (hostPlatform() === "win32") {
       const [seconds, bytes] = result.split("|").map(Number);
       const now = Date.now();
       const cpuTime = seconds * 100;
@@ -846,6 +1948,20 @@ export async function createBackup(id: number, label?: string, by = "you") {
   return row;
 }
 
+export async function createBackupAndWait(id: number, label?: string, by = "you", timeoutMs = 30 * 60_000) {
+  const created = await createBackup(id, label, by);
+  if (!created) throw new Error("Server not found");
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const [current] = await db.select().from(backups).where(eq(backups.id, created.id));
+    if (!current) throw new Error("Backup record disappeared");
+    if (current.status === "complete") return current;
+    if (current.status === "failed") throw new Error(current.note || "Backup failed");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error("Safety backup timed out");
+}
+
 export function backupArchivePath(backup: Backup): string {
   return backup.archivePath || path.join(backupsDir(backup.serverId), `${String(backup.id).padStart(6, "0")}-${safeFileName(backup.name)}.tar.gz`);
 }
@@ -888,26 +2004,63 @@ export async function restoreBackup(serverId: number, backupId: number) {
 // Scheduler and logs
 // ---------------------------------------------------------------------------
 
+async function enforceExpiredModeration(){const now=new Date(),pending=await db.select().from(moderationActions).where(and(eq(moderationActions.status,"pending-expiration"),lte(moderationActions.expiresAt,now)));for(const record of pending){if(record.expirationAttempts>=3){await db.update(moderationActions).set({status:"expiration-failed"}).where(eq(moderationActions.id,record.id));continue}const [server]=await db.select().from(servers).where(eq(servers.id,record.serverId));const [player]=await db.select().from(players).where(eq(players.id,record.playerId));if(!server||!player){await db.update(moderationActions).set({status:"expiration-failed"}).where(eq(moderationActions.id,record.id));continue}const command=`pardon ${record.target}`,result=await runCommand(server,command);const attempts=record.expirationAttempts+1;await db.update(moderationActions).set({expirationAttempts:attempts,lastExpirationAttemptAt:now,status:result.ok?"expiration-enforced":attempts>=3?"expiration-failed":"pending-expiration"}).where(eq(moderationActions.id,record.id));await db.insert(moderationActions).values({serverId:server.id,playerId:player.id,action:"automatic-unban",target:record.target,command,reason:`Temporary ban #${record.id} expired`,status:result.ok?"sent":"failed"});if(result.ok)await db.update(players).set({isBanned:false}).where(eq(players.id,player.id));}}
+
 export async function sweepTasks(serverId?: number) {
   await ensureRuntimeInitialized();
   if (state.sweeping) return;
   state.sweeping = true;
   try {
+    await enforceExpiredModeration();
     const now = new Date();
     const enabled = await db.select().from(tasks).where(eq(tasks.enabled, true));
     for (const task of enabled) {
       if (serverId && task.serverId !== serverId) continue;
       if (!task.nextRunAt || task.nextRunAt > now) continue;
-      await db.update(tasks).set({ lastRunAt: now, nextRunAt: new Date(now.getTime() + Math.max(1, task.intervalMin) * 60_000) }).where(eq(tasks.id, task.id));
+      const overdue=now.getTime()-task.nextRunAt.getTime()>60_000;
+      if(overdue&&task.missedPolicy!=="run"){const next=task.scheduleKind==="once"?(task.missedPolicy==="reschedule"?new Date(now.getTime()+5*60_000):null):task.scheduleKind==="daily"||task.scheduleKind==="weekly"?nextCalendarRun(task.scheduleKind,task.scheduleTime,task.scheduleWeekday,now):new Date(now.getTime()+Math.max(1,task.intervalMin)*60_000);await db.update(tasks).set({enabled:next?task.enabled:false,nextRunAt:next,lastRunAt:task.missedPolicy==="skip"?now:task.lastRunAt}).where(eq(tasks.id,task.id));await db.insert(taskRuns).values({taskId:task.id,serverId:task.serverId,taskName:task.name,type:task.type,command:"",status:task.missedPolicy==="skip"?"skipped":"rescheduled",error:`Missed while Server Hub was offline; policy: ${task.missedPolicy}`});continue}
+      await db.update(tasks).set({ lastRunAt: now, enabled:task.scheduleKind==="once"?false:task.enabled, nextRunAt: task.scheduleKind==="once"?null:task.scheduleKind==="daily"||task.scheduleKind==="weekly"?nextCalendarRun(task.scheduleKind,task.scheduleTime,task.scheduleWeekday,now):new Date(now.getTime() + Math.max(1, task.intervalMin) * 60_000) }).where(eq(tasks.id, task.id));
       const [server] = await db.select().from(servers).where(eq(servers.id, task.serverId));
       if (!server) continue;
       if (task.type === "backup") await createBackup(server.id, `auto-${safeFileName(task.name)}`, "scheduler");
+      else if (task.type === "maintenance") {
+        let maintenanceStatus = "failed", maintenanceError = "";
+        try {
+          await logLine(server.id, "system", "Maintenance", `Scheduled maintenance "${task.name}" started.`);
+          if (state.processes.has(server.id)) { await runCommand(server, "say Scheduled maintenance is starting", "Scheduler"); await stopFlow(server.id, "Maintenance"); await new Promise((resolve) => setTimeout(resolve, 2000)); }
+          const safety = await createBackupAndWait(server.id, `maintenance-${safeFileName(task.name)}`, "scheduler");
+          await db.update(servers).set({updateValidationStatus:"installing",updatePreviousVersion:server.version,updateTargetVersion:"provider-current",updateSafetyBackupId:safety.id,updateRollbackAttempted:false,updateValidationStartedAt:new Date(),updatedAt:new Date()}).where(eq(servers.id,server.id));
+          const installed = await installFlow(server.id);
+          if (!installed.ok || !installed.jobId) throw new Error(`Update queue failed: ${installed.reason ?? "unknown error"}`);
+          const deadline = Date.now() + 2 * 60 * 60_000;
+          let outcome = "running";
+          while (Date.now() < deadline && ["queued","running","cancelling"].includes(outcome)) { await new Promise((resolve)=>setTimeout(resolve,1000)); const [job]=await db.select().from(installationJobs).where(eq(installationJobs.id,installed.jobId!)); outcome=job?.status ?? "failed"; }
+          if (outcome !== "succeeded") throw new Error(`Update ended with status ${outcome}`);
+          const started = await startFlow(server.id);
+          const [validated] = await db.select().from(servers).where(eq(servers.id,server.id));
+          if (!started.ok || validated?.updateValidationStatus !== "validated") {
+            if (validated?.updateValidationStatus === "rollback-validated") throw new Error("Updated version failed readiness; previous version was restored and validated");
+            throw new Error(`Update readiness failed: ${started.reason ?? validated?.updateValidationStatus ?? "unknown error"}`);
+          }
+          maintenanceStatus = "succeeded";
+          await logLine(server.id,"success","Maintenance",`Scheduled maintenance "${task.name}" completed and update readiness passed.`);
+        } catch (error) {
+          maintenanceError = error instanceof Error ? error.message : String(error);
+          await logLine(server.id,"error","Maintenance",maintenanceError);
+        }
+        await db.insert(taskRuns).values({taskId:task.id,serverId:server.id,taskName:task.name,type:task.type,command:"",status:maintenanceStatus,error:maintenanceError});
+      }
       else if (task.type === "restart") {
         if (state.processes.has(server.id)) await restartFlow(server.id);
         else await logLine(server.id, "warn", "Scheduler", `Skipped "${task.name}": server is offline.`);
-      } else if (task.type === "broadcast") await runCommand(server, `say ${task.payload}`, "Scheduler");
-      else if (task.type === "command") await runCommand(server, task.payload, "Scheduler");
+      } else if (task.type === "broadcast" || task.type === "command") {let command="";try{command=scheduledCommand(server.gameId,task.type,task.payload);const result=await runCommand(server,command,"Scheduler");await db.insert(taskRuns).values({taskId:task.id,serverId:server.id,taskName:task.name,type:task.type,command,status:result.ok?"succeeded":"failed",error:result.reason??""});if(!result.ok)throw new Error(result.reason??"Command failed")}catch(error){if(!command)await db.insert(taskRuns).values({taskId:task.id,serverId:server.id,taskName:task.name,type:task.type,command,status:"failed",error:error instanceof Error?error.message:String(error)});await logLine(server.id,"error","Scheduler",`Scheduled action failed: ${error instanceof Error?error.message:String(error)}`);continue}}
       await act(server.id, "task", `Scheduled task "${task.name}" executed`);
+    }
+    for (const entry of state.processes.values()) {
+      if (serverId && entry.server.id !== serverId) continue;
+      const result=await probeEntry(entry).catch(()=>({ok:false,method:"probe-error",detail:""}));
+      if(result.ok) await setHealth(entry.server.id,"ready",result.detail||"Recurring provider health probe passed",result.method,true);
+      else { const failures=await setHealth(entry.server.id,"degraded","Provider health probe failed",result.method,false); if(failures===3) await incident(entry.server.id,"warning","health","Server became degraded after three consecutive probe failures","Review Diagnostics, firewall, and provider output"); }
     }
   } finally {
     state.sweeping = false;

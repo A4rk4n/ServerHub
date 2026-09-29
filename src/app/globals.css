@@ -163,6 +163,11 @@ input[type="range"]::-webkit-slider-thumb:hover {
   background-size: 40px 40px;
 }
 
+*:focus-visible { outline: 2px solid #f43f92; outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
+}
+
 /* gradient text helper */
 .grad-text {
   background: linear-gradient(95deg, #ff5fa8 0%, #c77dff 48%, #6ec7ff 100%);

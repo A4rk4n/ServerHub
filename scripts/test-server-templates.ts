@@ -1,0 +1,6 @@
+import assert from "node:assert/strict";
+import { nextFreeServerPort, TEMPLATE_EXCLUDED_FIELDS, templateConfigFromServer } from "../src/lib/server-templates";
+const source={gameId:"minecraft",version:"1.21",loader:"vanilla",memoryMb:4096,maxPlayers:20,motd:"hello",difficulty:"normal",pvp:true,bindAddress:"192.168.1.210",publicAddress:"185.83.148.20",readinessTimeoutSec:60,autoRestart:true,maxCrashRestarts:3,restartWindowSec:300,autoBackupBeforeUpdate:true,updateBackupRetention:5,serverPassword:"secret",adminPassword:"admin",ownerId:"player",worldName:"private-world",seed:"seed",port:25565,launchCommand:"private.exe",launchArgs:"--token secret",workingDirectory:"C:\\Users\\Ahri\\server"};
+const config=templateConfigFromServer(source);const serialized=JSON.stringify(config);for(const field of TEMPLATE_EXCLUDED_FIELDS){assert.equal(Object.hasOwn(config,field),false,field)}for(const value of ["secret","admin","player","private-world","C:\\Users\\Ahri"]){assert.equal(serialized.includes(value),false,value)}
+assert.equal(nextFreeServerPort(25565,[]),25565);assert.equal(nextFreeServerPort(25565,[25565,25566]),25567);assert.equal(nextFreeServerPort(1,[]),1024);assert.throws(()=>nextFreeServerPort(65535,[65535]));
+console.log("SERVER_TEMPLATE_SECURITY_REGRESSION_OK");

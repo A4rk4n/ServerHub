@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { players, servers } from "@/db/schema";
+import { moderationActions, players, servers } from "@/db/schema";
+import { moderationCommand } from "@/lib/moderation";
 import { act, runCommand } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
@@ -12,16 +13,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string; pi
   if (!server) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const [player] = await db.select().from(players).where(and(eq(players.serverId, server.id), eq(players.id, Number(pid))));
   if (!player) return NextResponse.json({ error: "Player not found" }, { status: 404 });
-  const { action } = (await req.json()) as { action?: string };
-  const command: Record<string, string> = {
-    kick: `kick ${player.name}`,
-    ban: `ban ${player.name}`,
-    unban: `pardon ${player.name}`,
-    op: `op ${player.name}`,
-    deop: `deop ${player.name}`,
-  };
-  if (!action || !command[action]) return NextResponse.json({ error: "Unknown action" }, { status: 400 });
-  const result = await runCommand(server, command[action]);
+  const { action, reason, confirmedCommand, durationMinutes } = (await req.json()) as { action?: string; reason?: string; confirmedCommand?: string; durationMinutes?: number };
+  let command:string;try{command=moderationCommand(server.gameId,action??"",player.name,reason)}catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Unsupported moderation action"},{status:400})}
+  if(confirmedCommand!==command)return NextResponse.json({error:"Command confirmation does not match",command},{status:409});
+  const result = await runCommand(server, command);
+  await db.insert(moderationActions).values({serverId:server.id,playerId:player.id,action:action!,target:player.name,command,reason:(reason??"").slice(0,120),status:result.ok?(action==="ban"&&Number.isFinite(durationMinutes)&&durationMinutes!>0?"pending-expiration":"sent"):"failed",expiresAt:action==="ban"&&Number.isFinite(durationMinutes)&&durationMinutes!>0?new Date(Date.now()+Math.min(durationMinutes!,525600)*60000):null});
   if (!result.ok) return NextResponse.json({ error: result.reason }, { status: 409 });
 
   if (action === "kick") await db.update(players).set({ isOnline: false, lastSeen: new Date() }).where(eq(players.id, player.id));
@@ -33,3 +29,5 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string; pi
   const [fresh] = await db.select().from(players).where(eq(players.id, player.id));
   return NextResponse.json({ ok: true, player: fresh });
 }
+
+export async function PATCH(req:Request,ctx:{params:Promise<{id:string;pid:string}>}){const {id,pid}=await ctx.params;const [player]=await db.select().from(players).where(and(eq(players.serverId,Number(id)),eq(players.id,Number(pid))));if(!player)return NextResponse.json({error:"Player not found"},{status:404});const body=await req.json() as {trusted?:boolean;notes?:string;retryModerationId?:number};if(Number.isInteger(body.retryModerationId)){const [record]=await db.select().from(moderationActions).where(and(eq(moderationActions.id,body.retryModerationId!),eq(moderationActions.serverId,Number(id)),eq(moderationActions.playerId,player.id)));if(!record||record.status!=="expiration-failed")return NextResponse.json({error:"Failed expiration record not found"},{status:404});await db.update(moderationActions).set({status:"pending-expiration",expirationAttempts:0,lastExpirationAttemptAt:null,expiresAt:new Date()}).where(eq(moderationActions.id,record.id));return NextResponse.json({ok:true,retryQueued:true})}const notes=typeof body.notes==="string"?body.notes.trim().slice(0,1000):player.notes;const trusted=typeof body.trusted==="boolean"?body.trusted:player.trusted;await db.update(players).set({trusted,notes}).where(eq(players.id,player.id));const [fresh]=await db.select().from(players).where(eq(players.id,player.id));return NextResponse.json({ok:true,player:fresh})}

@@ -1,6 +1,6 @@
 "use client";
 
-import { DatabaseBackup, Download, History, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { DatabaseBackup, Download, History, Plus, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Backup } from "@/db/schema";
 import { cn, hexA, timeAgo } from "@/lib/format";
@@ -15,6 +15,7 @@ export function BackupsManager({ serverId, accent, status }: { serverId: number;
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<Backup | null>(null);
+  const [restorePreview, setRestorePreview] = useState<{checksumValid:boolean;archiveBytes:number;entries:number;sample:string[]} | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Backup | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -54,6 +55,10 @@ export function BackupsManager({ serverId, accent, status }: { serverId: number;
     }
   }
 
+  async function previewRestore(b: Backup) {
+    setBusy(true); setNotice(null); try { const r=await fetch(`/api/servers/${serverId}/backups/${b.id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"preview"})}); const j=await r.json(); if(!r.ok){setNotice(j.error??"Could not preview backup");return} setRestorePreview(j);setRestoreTarget(b); } finally {setBusy(false)}
+  }
+
   async function restore(b: Backup) {
     setBusy(true);
     try {
@@ -80,6 +85,10 @@ export function BackupsManager({ serverId, accent, status }: { serverId: number;
       setBusy(false);
       setDeleteTarget(null);
     }
+  }
+
+  async function verify(b: Backup) {
+    setBusy(true); try { const r=await fetch(`/api/servers/${serverId}/backups/${b.id}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"verify"})}); const j=await r.json(); setNotice(r.ok?`Verified ${j.entries} archive entries · SHA-256 matches`:j.error??"Backup verification failed"); } finally {setBusy(false)}
   }
 
   function downloadArchive(b: Backup) {
@@ -143,13 +152,16 @@ export function BackupsManager({ serverId, accent, status }: { serverId: number;
                 <span className="font-mono text-[12px] text-plum-500">{fmtSize(b.sizeMb)}</span>
               )}
               <div className="flex items-center gap-1">
+                <IconBtn title="Verify checksum and archive" onClick={() => void verify(b)} disabled={busy || b.status !== "complete"}>
+                  <ShieldCheck size={14} />
+                </IconBtn>
                 <IconBtn title="Download backup archive" onClick={() => downloadArchive(b)} disabled={b.status !== "complete"}>
                   <Download size={14} />
                 </IconBtn>
                 <span title={status !== "offline" ? "Stop the server to restore" : "Restore this snapshot"}>
                   <IconBtn
                     disabled={status !== "offline" || b.status !== "complete"}
-                    onClick={() => setRestoreTarget(b)}
+                    onClick={() => void previewRestore(b)}
                     title="Restore"
                   >
                     <RotateCcw size={14} />
@@ -164,14 +176,15 @@ export function BackupsManager({ serverId, accent, status }: { serverId: number;
         </div>
       )}
 
-      <Modal open={!!restoreTarget} onClose={() => setRestoreTarget(null)} title={`Restore "${restoreTarget?.name}"?`}>
+      <Modal open={!!restoreTarget} onClose={() => {setRestoreTarget(null);setRestorePreview(null)}} title={`Restore "${restoreTarget?.name}"?`}>
         <p className="text-[13.5px] leading-relaxed text-plum-500">
           The current world state will be <span className="text-red-500">overwritten</span> with this snapshot ({restoreTarget && fmtSize(restoreTarget.sizeMb)}).
           This cannot be undone.
         </p>
+        {restorePreview && <div className="mt-4 rounded-xl border border-candy-200 bg-candy-50 p-3 text-[12px] text-plum-600"><div className="grid grid-cols-2 gap-2"><span>Checksum</span><strong className={restorePreview.checksumValid?"text-emerald-600":"text-red-500"}>{restorePreview.checksumValid?"Verified":"Mismatch"}</strong><span>Archive entries</span><strong>{restorePreview.entries}</strong><span>Compressed size</span><strong>{fmtSize(Math.ceil(restorePreview.archiveBytes/1048576))}</strong></div>{restorePreview.sample.length>0&&<details className="mt-3"><summary className="cursor-pointer font-semibold">Preview included paths</summary><ul className="mt-2 max-h-32 overflow-auto font-mono text-[10px]">{restorePreview.sample.map(path=><li key={path} className="truncate">{path}</li>)}</ul></details>}</div>}
         <div className="mt-5 flex justify-end gap-2">
-          <Btn variant="ghost" onClick={() => setRestoreTarget(null)}>Cancel</Btn>
-          <Btn variant="primary" accent={accent} loading={busy} onClick={() => restoreTarget && restore(restoreTarget)}>
+          <Btn variant="ghost" onClick={() => {setRestoreTarget(null);setRestorePreview(null)}}>Cancel</Btn>
+          <Btn variant="primary" accent={accent} loading={busy} disabled={!restorePreview?.checksumValid} onClick={() => restoreTarget && restore(restoreTarget)}>
             <RotateCcw size={14} /> Restore snapshot
           </Btn>
         </div>

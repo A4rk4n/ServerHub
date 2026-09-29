@@ -8,8 +8,8 @@ There are no sample servers, simulated players, generated console lines, fake me
 
 Use one of the Windows artifacts from a release or from `release/` when it is present:
 
-- **`ServerHub-1.0.0-Windows-x64-Portable.zip`** — extract the complete `ServerHub` folder, then double-click `ServerHub.exe`. It opens the local UI in your default browser; keep its console window open.
-- **`ServerHub-Setup-1.0.0-x64.exe`** — Electron/NSIS installer target with desktop and Start Menu shortcuts (produced by `npm run dist:win` when Electron's packaging CDN is reachable).
+- **`ServerHub-1.0.2-Windows-x64-Portable.zip`** — extract the complete `ServerHub` folder into a new location, then double-click `ServerHub.exe`. It starts without a Command Prompt and opens Server Hub in a dedicated desktop-style Edge/Chrome window.
+- **`ServerHub-Setup-1.0.2-x64.exe`** — Electron/NSIS installer target with desktop and Start Menu shortcuts (produced by `npm run dist:win` when Electron's packaging CDN is reachable).
 
 The executables are not code-signed. Windows SmartScreen can therefore display an “unknown publisher” warning. Review the source and build it yourself if preferred.
 
@@ -33,7 +33,12 @@ Publisher availability and anonymous SteamCMD access can change. If a publisher 
 
 ## Features
 
+- **Recoverable installation jobs:** installation state, phases, progress, byte counts, attempts and events are persisted in SQLite. Interrupted jobs automatically return to the queue after Server Hub restarts.
+- **Safe installation activation:** managed downloads are prepared and validated in a sibling staging directory, then atomically activated so a failed installer cannot replace the current server directory.
+- **Installer controls and preflight:** cancel/retry controls, resumable HTTP downloads, disk-space checks and real TCP/UDP port-conflict checks are shown directly on the server page.
 - **Real lifecycle management:** start, graceful stop, restart, force-kill, crash detection, PID reporting, and process-tree cleanup.
+- **Bounded crash recovery:** optional automatic restart with exponential backoff, a configurable attempt/window limit, crash-loop protection, and a cancel-restart control.
+- **Launch preflight:** the configured TCP/UDP game port is checked again immediately before every process launch, not only during installation.
 - **Live console:** persisted stdout/stderr, severity detection, command history, and direct stdin commands.
 - **Real process metrics:** resident memory and CPU usage from the operating system.
 - **Player observation:** Minecraft/Bedrock join and leave messages are parsed from actual console output. Player actions issue actual server commands.
@@ -82,6 +87,7 @@ npm ci
 npm run typecheck
 npm run lint
 npm run build:server
+npm run test:installation-jobs
 ```
 
 Run the local web build:
@@ -146,8 +152,9 @@ build-resources/          desktop icons
 ```bash
 npm audit             # 0 known vulnerabilities
 npm run typecheck     # strict TypeScript
-npm run lint          # Next.js/React ESLint
-npm run build:server  # production standalone build
+npm run lint                    # Next.js/React ESLint
+npm run build:server            # production standalone build
+npm run test:installation-jobs  # persistence, preflight, retry, cancel and restart recovery
 ```
 
 An end-to-end runtime test also registers a custom shell process, starts it, sends stdin, captures real stdout, browses its files, creates a checksum-backed archive, stops it gracefully, restores the archive, and removes the Server Hub entry while confirming the external folder remains intact.

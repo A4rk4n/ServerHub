@@ -1,10 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
+import { protectAndVerify } from "@/lib/credential-vault";
 import { NextResponse } from "next/server";
 import { asc } from "drizzle-orm";
 import { db } from "@/db";
 import { servers } from "@/db/schema";
 import { getGame, hasGame } from "@/lib/games";
+import { validCatalogVersion } from "@/lib/catalog";
 import { ensureRuntimeInitialized, installFlow, metricsFor } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +22,7 @@ export async function GET() {
         ...server,
         // Passwords never leave the server process.
         serverPassword: server.serverPassword ? "••••••••" : "",
+        adminPassword: server.adminPassword ? "••••••••" : "",
         game: summarize(server.gameId),
         live: metric ? { cpu: metric.cpu, ram: metric.ram, players: metric.players, tps: metric.tps } : null,
       });
@@ -41,6 +44,9 @@ type CreateBody = Partial<{
   version: string;
   loader: string;
   port: number;
+  bindAddress: string;
+  publicAddress: string;
+  readinessTimeoutSec: number;
   memoryMb: number;
   maxPlayers: number;
   motd: string;
@@ -52,6 +58,8 @@ type CreateBody = Partial<{
   launchArgs: string;
   workingDirectory: string;
   serverPassword: string;
+  adminPassword: string;
+  ownerId: string;
   eulaAccepted: boolean;
 }>;
 
@@ -74,6 +82,12 @@ export async function POST(req: Request) {
     if (game.requiresPassword && (!body.serverPassword || body.serverPassword.length < 5)) {
       return NextResponse.json({ error: `${game.name} requires a password of at least five characters` }, { status: 400 });
     }
+    if (game.id === "dragonwilds") {
+      if (name.length > 16) return NextResponse.json({ error: "Dragonwilds server names are limited to 16 characters" }, { status: 400 });
+      if (!(body.ownerId ?? "").trim()) return NextResponse.json({ error: "Dragonwilds requires your in-game Player ID" }, { status: 400 });
+      if ((body.adminPassword ?? "").length < 5) return NextResponse.json({ error: "Dragonwilds requires an admin password of at least five characters" }, { status: 400 });
+      if ((body.worldName ?? "world").trim().length > 16) return NextResponse.json({ error: "Dragonwilds world names are limited to 16 characters" }, { status: 400 });
+    }
 
     const launchCommand = (body.launchCommand ?? "").trim();
     const launchArgs = (body.launchArgs ?? "").trim();
@@ -86,7 +100,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Working directory must be an existing absolute folder" }, { status: 400 });
     }
 
-    const version = body.version && game.versions.includes(body.version) ? body.version : game.versions[0];
+    const requestedVersion = (body.version ?? "").trim();
+    const version = requestedVersion && validCatalogVersion(game.id, requestedVersion) ? requestedVersion : game.versions[0];
     const loader = body.loader && game.loaders?.some((item) => item.id === body.loader) ? body.loader : "vanilla";
     const memoryMb = Math.min(game.maxMemory, Math.max(game.minMemory, Math.round(Number(body.memoryMb ?? game.defaultMemory))));
     const maxPlayers = Math.min(game.maxPlayersCap, Math.max(1, Math.round(Number(body.maxPlayers ?? game.defaultMaxPlayers))));
@@ -97,6 +112,9 @@ export async function POST(req: Request) {
       loader,
       status: "installing",
       port,
+      bindAddress: (body.bindAddress ?? "192.168.1.210").trim(),
+      publicAddress: (body.publicAddress ?? "185.83.148.20").trim().slice(0, 253),
+      readinessTimeoutSec: Math.min(300, Math.max(10, Math.round(body.readinessTimeoutSec ?? 60))),
       memoryMb,
       maxPlayers,
       motd: (body.motd ?? "A Server Hub server").slice(0, 140),
@@ -108,11 +126,19 @@ export async function POST(req: Request) {
       launchArgs,
       workingDirectory,
       managedDirectory: !workingDirectory,
-      serverPassword: (body.serverPassword ?? "").slice(0, 200),
+      serverPassword: await protectAndVerify((body.serverPassword ?? "").slice(0, 200)),
+      adminPassword: await protectAndVerify((body.adminPassword ?? "").slice(0, 200)),
+      ownerId: await protectAndVerify((body.ownerId ?? "").trim().slice(0, 200)),
       eulaAccepted: body.eulaAccepted === true,
     }).returning();
     await installFlow(server.id);
-    return NextResponse.json({ server: { ...server, serverPassword: server.serverPassword ? "••••••••" : "" } }, { status: 201 });
+    return NextResponse.json({
+      server: {
+        ...server,
+        serverPassword: server.serverPassword ? "••••••••" : "",
+        adminPassword: server.adminPassword ? "••••••••" : "",
+      },
+    }, { status: 201 });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }

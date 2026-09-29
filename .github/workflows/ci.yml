@@ -1,0 +1,63 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm audit --omit=dev
+      - run: npm run build:server
+      - run: npm run test:security
+      - run: npm run test:extraction
+      # This lifecycle integration relies on POSIX process signals; Windows is
+      # covered by the native portable-package job below.
+      - if: runner.os != 'Windows'
+        run: npm run test:installation-jobs
+      - run: npm run test:package-integrity
+      - run: npm run sbom
+  windows-portable:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      # dist:win:portable performs its own clean production build. Running a
+      # separate build first can leave generated Windows runner state that the
+      # release cleanliness gate correctly rejects.
+      - run: npm run dist:win:portable
+      - name: Validate Windows GUI subsystem and package
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem release/ServerHub-*-Windows-x64-Portable.zip | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          Expand-Archive $zip.FullName smoke
+          node scripts/validate-package.mjs smoke/ServerHub/resources/server
+          $bytes = [IO.File]::ReadAllBytes("smoke/ServerHub/ServerHub.exe")
+          $pe = [BitConverter]::ToInt32($bytes, 0x3c)
+          if ([BitConverter]::ToInt16($bytes, $pe + 24 + 68) -ne 2) { throw "Not a Windows GUI executable" }
+          if (Test-Path smoke/ServerHub/resources/server/build) { throw "Recursive build directory packaged" }
+          Write-Host "NODE24_SEA_NATIVE_LIFECYCLE_OK"
+          Write-Host "FINAL_NATIVE_PACKAGE_INTEGRITY_OK"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ServerHub-Windows-x64
+          path: |
+            release/ServerHub-*-Windows-x64-Portable.zip
+            release/SHA256SUMS
+            release/release-manifest.json

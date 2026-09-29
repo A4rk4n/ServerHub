@@ -31,8 +31,14 @@ if (!(await exists(path.join(standalone, "server.js")))) {
 await rm(out, { recursive: true, force: true });
 await mkdir(out, { recursive: true });
 
-// server bundle
-await cp(standalone, out, { recursive: true });
+// Copy an explicit allowlist. Never copy the standalone root wholesale: Next's
+// tracing root can contain the repository itself, which caused v1.3's recursive
+// portable-package defect.
+for (const name of ["server.js", "package.json", ".next", "node_modules"]) {
+  const source = path.join(standalone, name);
+  if (!(await exists(source))) throw new Error(`[prepare] standalone output is missing ${name}`);
+  await cp(source, path.join(out, name), { recursive: true });
+}
 // static assets (Next does not emit these into standalone)
 const staticSrc = path.join(root, ".next", "static");
 if (await exists(staticSrc)) await cp(staticSrc, path.join(out, ".next", "static"), { recursive: true });

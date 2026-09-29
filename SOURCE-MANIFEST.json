@@ -1,0 +1,466 @@
+{
+  "schemaVersion": 1,
+  "createdDate": "2026-09-28",
+  "gitBase": "f96553443cd635d6a44960db46c46b8d13485243",
+  "cachedOriginMain": "5b1afd83f29eb4270b25056deb3d92f61ec800e1",
+  "workingPackageVersion": "1.0.2",
+  "releaseReferenceVersion": "1.3.0",
+  "v1.3ArtifactSha256": "dbd4accf9b20006c82368d163c76bb8d4ce26d1253af3b4e0a2534bde88d8e5f",
+  "files": [
+    {
+      "path": ".gitignore",
+      "size": 317,
+      "sha256": "0789b67aaa26fd5848a334c740e9df51962d1b51b811eec709a976545e287200"
+    },
+    {
+      "path": "HANDOFF.md",
+      "size": 5190,
+      "sha256": "0d633f3b0d5890719607a69631b9dcbc478480b85966c50b84f8838220382e09"
+    },
+    {
+      "path": "README.md",
+      "size": 9505,
+      "sha256": "7016657f20596c08c5d7a689782cfa0ceb407830304317e45803822555c29e5f"
+    },
+    {
+      "path": "electron/main.cjs",
+      "size": 6740,
+      "sha256": "88a81d5ac23de5b671ccdbfa02924c5aa5823e0bced1d24c7f1a7d956d467db6"
+    },
+    {
+      "path": "electron/preload.cjs",
+      "size": 492,
+      "sha256": "91f3704459f3a983e9085e9eee63f6e9f7dc83e675bef64fce306ae43dffcd4a"
+    },
+    {
+      "path": "electron-builder.yml",
+      "size": 1189,
+      "sha256": "4c85d2b08f709359ca050adf86deaf3ed16196b872a7cdcede88a87d7898ac63"
+    },
+    {
+      "path": "eslint.config.mjs",
+      "size": 514,
+      "sha256": "10d4f9ededd84039cce192983c3e2907a164beb34c625cb0d87a5b8e9befec11"
+    },
+    {
+      "path": "next-env.d.ts",
+      "size": 288,
+      "sha256": "1862ac4bbbc5192d4bf562161df66ea547ed3e67173100656ab606ae9797db2b"
+    },
+    {
+      "path": "next.config.ts",
+      "size": 671,
+      "sha256": "15ab33e0a0576696c258c98b558ebd60d0214d37c52ac3cff47a1afbf43aa09d"
+    },
+    {
+      "path": "package-lock.json",
+      "size": 387659,
+      "sha256": "56d0b8a94ec41b243c023632161bcc366fbcf7f0c1c84badaaf0c46e103190fa"
+    },
+    {
+      "path": "package.json",
+      "size": 1657,
+      "sha256": "fc7307d2f8dcedd5d0c0d7f65f956edc2914d1bff11ac6758829028dde3e7c9b"
+    },
+    {
+      "path": "postcss.config.mjs",
+      "size": 108,
+      "sha256": "b8cd36495468ea54e029eb4b2e0e98f0feff6f95d6513e70db37a71c0e3bfba4"
+    },
+    {
+      "path": "recovery/v1.3-reference/README.txt",
+      "size": 779,
+      "sha256": "7616512339f5723e2e21770f782cc60118ca77666c41e80f5618680f1df48bd3"
+    },
+    {
+      "path": "recovery/v1.3-reference/RECOVERY-NOTES.md",
+      "size": 583,
+      "sha256": "69100ae6d314b35bdb4b119913da7b477d161fb78b982cc564fd80bfa06ea7b2"
+    },
+    {
+      "path": "recovery/v1.3-reference/entry.cjs",
+      "size": 59,
+      "sha256": "dae8aa10700ceed3ba60c5fc4b6846df5b3c9717c5c1e117500a21ca3c4e2e1c"
+    },
+    {
+      "path": "recovery/v1.3-reference/package.json",
+      "size": 1654,
+      "sha256": "36b2f05c47ff281b763436d86b177af561c803425f7b121acd89e85e636a9fae"
+    },
+    {
+      "path": "recovery/v1.3-reference/resources/server/server.js",
+      "size": 7312,
+      "sha256": "866bf3d17f0e7c20f56c32ae90e9a461bbbab1d010aa3e92fee172af7e573817"
+    },
+    {
+      "path": "recovery/v1.3-reference/resources/server/start.mjs",
+      "size": 600,
+      "sha256": "abc137ea50b2adb582495418391f9e9f181e2f00bc8dd43877fa78542872dca2"
+    },
+    {
+      "path": "recovery/v1.3-reference/src/app/api/servers/id/route.ts",
+      "size": 8641,
+      "sha256": "f46b1a7706aef9275301f394ff0d0be4f8ad17bb7bc5e5eb8c4bc3100070e8ca"
+    },
+    {
+      "path": "recovery/v1.3-reference/src/app/api/servers/route.ts",
+      "size": 6517,
+      "sha256": "5c0fd965ebfc9e07bcad32b585b4815ddf99b2a6def4ca059560725e1c46b4ce"
+    },
+    {
+      "path": "recovery/v1.3-reference/src/components/backups-manager.tsx",
+      "size": 8325,
+      "sha256": "24f22969320b3aa16927865c14f173fc6a2aa2a5e87e921a49be0143f049dea8"
+    },
+    {
+      "path": "recovery/v1.3-reference/src/components/servers-view.tsx",
+      "size": 3719,
+      "sha256": "bd56d1c39ef9d50116941f44f7bb11d6dd401607595226720b6d8536cb929d59"
+    },
+    {
+      "path": "recovery/v1.3-reference/src/lib/filesys.ts",
+      "size": 4370,
+      "sha256": "6a35733a16456667a3aad31c915414cc1a22fc09a218e46c51b5ffe32aac5c57"
+    },
+    {
+      "path": "recovery/v1.3-reference/src/lib/games.ts",
+      "size": 7698,
+      "sha256": "4734085ecb81d750068706846e1eef007aec3b3901a6731f06b129d677d4601f"
+    },
+    {
+      "path": "recovery/v1.3-reference/src/lib/runtime.ts",
+      "size": 78628,
+      "sha256": "65f3966f26cf3c481ade21a8382f8d4b2fa92bd991e528d8fd53e1988441cfaf"
+    },
+    {
+      "path": "run.bat",
+      "size": 1095,
+      "sha256": "d93b8ba4a930cf3bb1fa0efe98e11d44051a41a52f9f223fc1a71dbcb028a724"
+    },
+    {
+      "path": "run.sh",
+      "size": 1036,
+      "sha256": "0af3a0948caf7711869f332f7fa544ddb1baef6696f4f14cf52c7ec1f44e4f58"
+    },
+    {
+      "path": "scripts/build-desktop.sh",
+      "size": 1204,
+      "sha256": "d161f1139c8ddf756250dc7c0be1314e18cb333b770e5b9155dc50c31a7a284d"
+    },
+    {
+      "path": "scripts/build-windows-portable.mjs",
+      "size": 5936,
+      "sha256": "6389db171a935c30218e8dded4d7442d8f1dfbf8220e68229bf80578f712c4d2"
+    },
+    {
+      "path": "scripts/portable-launcher.cjs",
+      "size": 6157,
+      "sha256": "4dba5a83567334cad5094f870b74e1ca613def48ff77865a911f3cac5486be59"
+    },
+    {
+      "path": "scripts/prepare-standalone.mjs",
+      "size": 2723,
+      "sha256": "a46bd32189baa74d2856854b13b49a51f032ff85f4c625928ce6ceccb4c23056"
+    },
+    {
+      "path": "scripts/test-installation-jobs.mjs",
+      "size": 12106,
+      "sha256": "af0316f51375937b03263d0112169e3af892565010edabcafb02c543514a4ea5"
+    },
+    {
+      "path": "src/app/api/health/route.ts",
+      "size": 422,
+      "sha256": "abb2f6a2812d0a9d35bbeaf3ee53628a06851168576469c54197ed2371d6ca0a"
+    },
+    {
+      "path": "src/app/api/overview/route.ts",
+      "size": 317,
+      "sha256": "6e467ceb72155c2422813a797ddd359a30171b1f86863e96a866a55908719e73"
+    },
+    {
+      "path": "src/app/api/servers/[id]/addons/[aid]/route.ts",
+      "size": 2674,
+      "sha256": "b77b28a4de0909b809b5580ae93c49e6d432c1c0d9607ffd704f3df3c1ddeb0b"
+    },
+    {
+      "path": "src/app/api/servers/[id]/addons/route.ts",
+      "size": 8469,
+      "sha256": "6f947cbb2cf8960a9e8533514a3b8006e6cd6ede4948136cef2d88940ecc71ab"
+    },
+    {
+      "path": "src/app/api/servers/[id]/backups/[bid]/route.ts",
+      "size": 2997,
+      "sha256": "e54dac093ed1e584d88e367df871a3b9967e2b58a2c27f35b5e46bf77f878802"
+    },
+    {
+      "path": "src/app/api/servers/[id]/backups/route.ts",
+      "size": 1150,
+      "sha256": "d8490b9d96f6d394594bc3918772113680a1dbe37765d6d2f3e3f1e040e7a950"
+    },
+    {
+      "path": "src/app/api/servers/[id]/command/route.ts",
+      "size": 854,
+      "sha256": "70c89f77363ae44cc39fa282500ea7642481ce0e917ac36cbe11284ea463318e"
+    },
+    {
+      "path": "src/app/api/servers/[id]/console/route.ts",
+      "size": 1529,
+      "sha256": "e2e222026530851877bf7a7317c4de9d1f5f7f277e743e74969d87e1d2e00383"
+    },
+    {
+      "path": "src/app/api/servers/[id]/files/route.ts",
+      "size": 2078,
+      "sha256": "b75b0cdfcd015480ea0b127b4bcc118a595fb71ce13af4d012158c2412433c79"
+    },
+    {
+      "path": "src/app/api/servers/[id]/installation/route.ts",
+      "size": 2352,
+      "sha256": "c3bf1af1b58c956bb57495e164e32a4c93ecea91d1074d7c055a743be25b67ad"
+    },
+    {
+      "path": "src/app/api/servers/[id]/players/[pid]/route.ts",
+      "size": 2124,
+      "sha256": "316da7d138337416faca4ead421a991c88b78e6ecca4eddb6d973335fba2eb70"
+    },
+    {
+      "path": "src/app/api/servers/[id]/players/route.ts",
+      "size": 666,
+      "sha256": "46780dbbf5e2a6dbf89ad519b224f5780c648a08f443ec8a0752ed38d3202579"
+    },
+    {
+      "path": "src/app/api/servers/[id]/power/route.ts",
+      "size": 1117,
+      "sha256": "bd12178931b6e0a36d8c664adc82e3a2d35e20448fdc0b9b4cce259aeaed5af1"
+    },
+    {
+      "path": "src/app/api/servers/[id]/route.ts",
+      "size": 8102,
+      "sha256": "e075161f0d93a3beb6c105581f584e57abd22b3e63e9297556f1f9fe3b8e44dc"
+    },
+    {
+      "path": "src/app/api/servers/[id]/stats/route.ts",
+      "size": 792,
+      "sha256": "9c116a73a18d3d8d8dc29459d40632338e574cb140037661a0bb9f380d13a3c3"
+    },
+    {
+      "path": "src/app/api/servers/[id]/tasks/[tid]/route.ts",
+      "size": 2289,
+      "sha256": "6d9da7281cfea742913bf526f3ca0b7f5d1b07ce311e8943a89dd3be28d2f9d9"
+    },
+    {
+      "path": "src/app/api/servers/[id]/tasks/route.ts",
+      "size": 1867,
+      "sha256": "5e19cc1524cb513cb2494685b0b9c72f3979a5c6ce8a1176e9a6965273acca3f"
+    },
+    {
+      "path": "src/app/api/servers/route.ts",
+      "size": 5825,
+      "sha256": "50544c795128888fafd8001d4b01e3e9bf6ec45b9fc4da02c9ffe77d3d72a363"
+    },
+    {
+      "path": "src/app/globals.css",
+      "size": 4769,
+      "sha256": "090f3a7569ec604df2b3968179a407891077f25501398a194d5beacc33b1af35"
+    },
+    {
+      "path": "src/app/layout.tsx",
+      "size": 618,
+      "sha256": "c1313e71ff911a5a2ec8db26df3367435cd937c79a23fd1f93270cd0abe1faf3"
+    },
+    {
+      "path": "src/app/not-found.tsx",
+      "size": 1010,
+      "sha256": "f159380cbfeeff937f10f84ced709ef9038d41a404bbaf12d511b8b1e496e085"
+    },
+    {
+      "path": "src/app/page.tsx",
+      "size": 274,
+      "sha256": "c0ac37885b15c9bba3b96be1f1f854018b664514dc88d5b3ea95206da8617756"
+    },
+    {
+      "path": "src/app/servers/[id]/backups/page.tsx",
+      "size": 629,
+      "sha256": "7ab264ca20ffba9550c393e9bdece5f8eb40f71e1e289671febd47370e037021"
+    },
+    {
+      "path": "src/app/servers/[id]/files/page.tsx",
+      "size": 621,
+      "sha256": "a63743617c603efc6b8c7a9fa818754352c8fc53ab12c20eaa9d9248b6da900c"
+    },
+    {
+      "path": "src/app/servers/[id]/layout.tsx",
+      "size": 967,
+      "sha256": "417309fc6d9a3c4e275e662188f59ce06cb8a164f099dbcb0f7dac8d584745bb"
+    },
+    {
+      "path": "src/app/servers/[id]/mods/page.tsx",
+      "size": 827,
+      "sha256": "89ddc51bae4d0dd6a364e493f54a52c419604b7158a16d1c24bc43f65c697f38"
+    },
+    {
+      "path": "src/app/servers/[id]/page.tsx",
+      "size": 793,
+      "sha256": "12540de553dfa259ace377c6f471f07266b60931905ff39132a4bf25bd3842b2"
+    },
+    {
+      "path": "src/app/servers/[id]/players/page.tsx",
+      "size": 611,
+      "sha256": "252521e662a288bc37ec1a58a7297de49e2183f08dd98a52862da2ee8900936b"
+    },
+    {
+      "path": "src/app/servers/[id]/settings/page.tsx",
+      "size": 1079,
+      "sha256": "62959f152bfb9a1e5c076b3817bd2a3feead37e6973c81aa17bffcdb1d5f589e"
+    },
+    {
+      "path": "src/app/servers/[id]/tasks/page.tsx",
+      "size": 603,
+      "sha256": "2bbce32512a2bd85ad5a50a7c1775abfe1fdfaecec41ad4a70509e116f5b1711"
+    },
+    {
+      "path": "src/app/servers/new/page.tsx",
+      "size": 252,
+      "sha256": "e24e4c47e481d353625690e18e4dc543c1541900c12d1d8c2318a424ac8f4fc7"
+    },
+    {
+      "path": "src/app/servers/page.tsx",
+      "size": 345,
+      "sha256": "e252c1a9e54f39963e2cdc08e09440e4a08a87cb36c0b1c6fd3f1b0caac930a5"
+    },
+    {
+      "path": "src/components/addons-manager.tsx",
+      "size": 8536,
+      "sha256": "4e699846c36c24bb4438b6b7b38bb5b98875c90d68eacb4ba35565e702e8febd"
+    },
+    {
+      "path": "src/components/backups-manager.tsx",
+      "size": 8325,
+      "sha256": "24f22969320b3aa16927865c14f173fc6a2aa2a5e87e921a49be0143f049dea8"
+    },
+    {
+      "path": "src/components/charts.tsx",
+      "size": 4439,
+      "sha256": "b6d297c9238ad008a2a36b66415211dcdbaad5fb2deecbe959ff7541053420c6"
+    },
+    {
+      "path": "src/components/console-view.tsx",
+      "size": 16532,
+      "sha256": "7a1f6393c2c3305450afd157ffbdcf01badfe6a42d491536291b7e5dea209caa"
+    },
+    {
+      "path": "src/components/dashboard-view.tsx",
+      "size": 13737,
+      "sha256": "416c7c6b9743d735f85c9c58b86fda7158d1fadf233acc3952159c742ffe1b02"
+    },
+    {
+      "path": "src/components/files-manager.tsx",
+      "size": 8209,
+      "sha256": "d3d642c2c94cecb5bbd34d36e345e92f02ce3a669efbfeaa10251f3439929213"
+    },
+    {
+      "path": "src/components/installation-progress.tsx",
+      "size": 6650,
+      "sha256": "5f9844273dc580af0a756e6dabaea25211a388c35802f5e74dad59e713d4d32c"
+    },
+    {
+      "path": "src/components/new-server-wizard.tsx",
+      "size": 22292,
+      "sha256": "c7bc88eea086a963c6ace3a6b2cd8d002a1362c07248ae7535a947863b4eed36"
+    },
+    {
+      "path": "src/components/players-manager.tsx",
+      "size": 8127,
+      "sha256": "267c9c1cd525fda575ff00cac2d86804a9c9badb6d5a18abcd976da6a11ca030"
+    },
+    {
+      "path": "src/components/server-card.tsx",
+      "size": 7484,
+      "sha256": "6b2c9dd2a2806badde21270aabcf6fed9cb9f24d0ffe60048aac46e4ac88a664"
+    },
+    {
+      "path": "src/components/server-frame.tsx",
+      "size": 7304,
+      "sha256": "41f6e9366598e35710e68ba438aa88c07245c68b229eb7be505837c1b48cb7b5"
+    },
+    {
+      "path": "src/components/servers-view.tsx",
+      "size": 3719,
+      "sha256": "bd56d1c39ef9d50116941f44f7bb11d6dd401607595226720b6d8536cb929d59"
+    },
+    {
+      "path": "src/components/settings-manager.tsx",
+      "size": 15312,
+      "sha256": "c2ebf74c027e47dadf1e212688303e49e15a2650c5d3f5da1c170e5801307183"
+    },
+    {
+      "path": "src/components/shell.tsx",
+      "size": 9059,
+      "sha256": "f07953a1ce95912ce52687f5f91645a08c4de02937e1f91d506a9308dcaa62bd"
+    },
+    {
+      "path": "src/components/tasks-manager.tsx",
+      "size": 10051,
+      "sha256": "8e47f8a68efc31a8485d3d89773ffee5776bec6e4b0dd8855dda38ec8a73f29d"
+    },
+    {
+      "path": "src/components/ui.tsx",
+      "size": 7207,
+      "sha256": "54d652dc31ab3a2bf58c6b8f1e1432aa81e916e884f9c818b602acb031b43e49"
+    },
+    {
+      "path": "src/db/better-sqlite3-stub.ts",
+      "size": 550,
+      "sha256": "2582c7e40d2cd0f27a9e8bd8fdfdf9742f08bb74ca1d08d7bcceb317e2f46181"
+    },
+    {
+      "path": "src/db/index.ts",
+      "size": 10781,
+      "sha256": "f7d76b2fa6aba69e010e3f3b4204a5fcab0a46a4a13f9a27f52b7e06864e1598"
+    },
+    {
+      "path": "src/db/schema.ts",
+      "size": 8151,
+      "sha256": "78ae318cdc7c655c5d64949858941fc2fb8d367d89794aea60fc67ff28c91d53"
+    },
+    {
+      "path": "src/lib/filesys.ts",
+      "size": 4370,
+      "sha256": "6a35733a16456667a3aad31c915414cc1a22fc09a218e46c51b5ffe32aac5c57"
+    },
+    {
+      "path": "src/lib/format.ts",
+      "size": 2800,
+      "sha256": "77cd0536429a26c4ae3a707645444b5a150c34dc9893c5e66ffde1cfa0a0d1bd"
+    },
+    {
+      "path": "src/lib/games.ts",
+      "size": 7686,
+      "sha256": "e0f74230ad0a8818233763229dc9bd7bd9e265b073acd354ed4fb74c888b785e"
+    },
+    {
+      "path": "src/lib/overview-data.ts",
+      "size": 2568,
+      "sha256": "ff0d5608a29a03154e997bc567aa30d1eaaf317df5e76ce969e52396e14e27f0"
+    },
+    {
+      "path": "src/lib/runtime.ts",
+      "size": 72609,
+      "sha256": "726dd1443e96bbbc4478f81d054736906de8b63868313afebaf9f04aa0ea33fe"
+    },
+    {
+      "path": "src/lib/seed.ts",
+      "size": 310,
+      "sha256": "0c1971cbcd8beb383d648edbf83b461feaa48e267248428adcb42ef9c2965857"
+    },
+    {
+      "path": "src/lib/storage.ts",
+      "size": 2102,
+      "sha256": "d566952efab20a368c5f317f4a1b1dabdf98d57f2d08b544750a7cfb5e4d8672"
+    },
+    {
+      "path": "tsconfig.json",
+      "size": 763,
+      "sha256": "a30f82148958f7ed8eaccbeefe426d03d4a41001cd7bca931b8ef80027c22f5f"
+    }
+  ]
+}

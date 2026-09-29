@@ -1,21 +1,33 @@
 "use client";
 
-import { Ban, Clock3, Crown, LogOut, ShieldCheck, ShieldOff, Undo2, Users } from "lucide-react";
+import { Ban, Clock3, Crown, LogOut, ShieldCheck, Search, ShieldOff, Star, Undo2, Users } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { Player } from "@/db/schema";
+import type { ModerationActionRecord, Player, PlayerSession } from "@/db/schema";
+type PlayerView=Player&{observedIdentity:boolean;sessionCount:number;totalObservedSeconds:number;currentSessionSeconds:number;firstObservedAt:Date};
 import { cn, hexA, initialAvatarHue, timeAgo } from "@/lib/format";
-import { Btn, Empty, Modal, Spin } from "./ui";
+import { Btn, Empty, Modal, Spin, inputCls } from "./ui";
 
 export function PlayersManager({ serverId, accent }: { serverId: number; accent: string }) {
-  const [players, setPlayers] = useState<Player[] | null>(null);
-  const [banTarget, setBanTarget] = useState<Player | null>(null);
+  const [players, setPlayers] = useState<PlayerView[] | null>(null);
+  const [sessions, setSessions] = useState<PlayerSession[]>([]);
+  const [moderation,setModeration]=useState<ModerationActionRecord[]>([]);
+  const [reason,setReason]=useState("");
+  const [durationMinutes,setDurationMinutes]=useState(0);
+  const [moderationFilter,setModerationFilter]=useState<"all"|"pending"|"failed">("all");
+  const [banTarget, setBanTarget] = useState<PlayerView | null>(null);
   const [busy, setBusy] = useState(false);
+  const [query,setQuery]=useState("");
+  const [onlyTrusted,setOnlyTrusted]=useState(false);
+  const [noteTarget,setNoteTarget]=useState<PlayerView|null>(null);
+  const [note,setNote]=useState("");
 
   async function load() {
     try {
       const r = await fetch(`/api/servers/${serverId}/players`, { cache: "no-store" });
       const j = await r.json();
       if (j.players) setPlayers(j.players);
+      if (j.sessions) setSessions(j.sessions);
+      if (j.moderation) setModeration(j.moderation);
     } catch {}
   }
   useEffect(() => {
@@ -25,13 +37,15 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverId]);
 
-  async function act(player: Player, action: string) {
+  async function act(player: PlayerView, action: string, moderationReason="", duration=0) {
+    const verb=action==="unban"?"pardon":action; const command=`${verb} ${player.name}${moderationReason.trim()&&["kick","ban"].includes(action)?` ${moderationReason.trim()}`:""}`;
+    if(!window.confirm(`Send this exact moderation command?\n\n${command}`))return;
     setBusy(true);
     try {
       await fetch(`/api/servers/${serverId}/players/${player.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, reason:moderationReason, durationMinutes:duration, confirmedCommand: command }),
       });
       await load();
     } finally {
@@ -41,10 +55,13 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
   }
 
   if (!players) return <Spin label="Loading players…" />;
+  const shown=players.filter(player=>(!onlyTrusted||player.trusted)&&(!query||player.name.toLowerCase().includes(query.toLowerCase())));
+  async function retryExpiration(item:ModerationActionRecord){setBusy(true);try{await fetch(`/api/servers/${serverId}/players/${item.playerId}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({retryModerationId:item.id})});await load()}finally{setBusy(false)}}
+  async function saveProfile(player:PlayerView,patch:{trusted?:boolean;notes?:string}){setBusy(true);try{await fetch(`/api/servers/${serverId}/players/${player.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)});await load()}finally{setBusy(false);setNoteTarget(null)}}
 
   const online = players.filter((p) => p.isOnline);
   const banned = players.filter((p) => p.isBanned);
-  const totalHours = Math.round(players.reduce((a, p) => a + p.playMinutes, 0) / 60);
+  const totalHours = Math.round(players.reduce((a, p) => a + Math.max(p.playMinutes*60,p.totalObservedSeconds), 0) / 3600);
 
   return (
     <div className="space-y-5">
@@ -67,6 +84,7 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
         ))}
       </div>
 
+      <div className="panel flex flex-wrap gap-2 p-3"><label className="relative flex-1"><Search size={14} className="absolute left-3 top-3 text-plum-400"/><input className={`${inputCls} w-full pl-9`} value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search players"/></label><Btn variant={onlyTrusted?"primary":"subtle"} onClick={()=>setOnlyTrusted(value=>!value)}><Star size={14}/> Trusted</Btn></div>
       {players.length === 0 ? (
         <Empty icon={<Users size={22} />} title="No players yet" hint="Players appear here the first time they join your server." />
       ) : (
@@ -78,7 +96,7 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
             <span>Playtime</span>
             <span className="text-right">Actions</span>
           </div>
-          {players.map((p) => {
+          {shown.map((p) => {
             const hue = initialAvatarHue(p.name);
             return (
               <div
@@ -104,7 +122,7 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
                       {p.isOp && <ShieldCheck size={13} className="shrink-0 text-amber-500" />}
                       {p.isBanned && <Ban size={12} className="shrink-0 text-red-500" />}
                     </p>
-                    <p className="truncate font-mono text-[10px] text-plum-400">{p.externalId}</p>
+                    <p className="truncate font-mono text-[10px] text-plum-400">{p.observedIdentity?"Observed A2S name · unverified identity":p.externalId}</p>
                   </div>
                 </div>
                 <span className="hidden text-[12px] md:block">
@@ -115,7 +133,7 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
                   )}
                 </span>
                 <span className="hidden font-mono text-[12px] text-plum-500 md:block">{p.isOnline ? `${p.ping}ms` : "—"}</span>
-                <span className="hidden font-mono text-[12px] text-plum-500 md:block">{p.playMinutes >= 60 ? `${(p.playMinutes / 60).toFixed(1)}h` : `${p.playMinutes}m`}</span>
+                <span className="hidden font-mono text-[12px] text-plum-500 md:block">{p.isOnline&&p.currentSessionSeconds?`${Math.max(1,Math.round(p.currentSessionSeconds/60))}m now`:p.totalObservedSeconds>=3600?`${(p.totalObservedSeconds/3600).toFixed(1)}h`:`${Math.round(p.totalObservedSeconds/60)}m`}</span>
                 <div className="flex items-center justify-end gap-1">
                   {p.isBanned ? (
                     <ActionBtn title="Unban" onClick={() => act(p, "unban")} disabled={busy}>
@@ -131,6 +149,8 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
                       <ActionBtn title={p.isOp ? "Remove operator" : "Make operator"} onClick={() => act(p, p.isOp ? "deop" : "op")} disabled={busy}>
                         {p.isOp ? <ShieldOff size={14} /> : <ShieldCheck size={14} />}
                       </ActionBtn>
+                      <ActionBtn title={p.trusted?"Remove trusted label":"Mark trusted"} onClick={() => void saveProfile(p,{trusted:!p.trusted})} disabled={busy}><Star size={14} fill={p.trusted?"currentColor":"none"}/></ActionBtn>
+                      <ActionBtn title="Edit local notes" onClick={() => {setNoteTarget(p);setNote(p.notes)}} disabled={busy}><Clock3 size={14}/></ActionBtn>
                       <ActionBtn title="Ban" danger onClick={() => setBanTarget(p)} disabled={busy}>
                         <Ban size={14} />
                       </ActionBtn>
@@ -142,20 +162,23 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
           })}
         </div>
       )}
+      {sessions.length>0&&<section className="panel p-5"><h3 className="font-display mb-3 text-sm font-semibold text-plum-900">Recent join and leave history</h3><div className="max-h-72 space-y-2 overflow-auto">{sessions.slice(0,30).map(session=><div key={session.id} className="flex items-center justify-between rounded-xl border border-candy-100 px-3 py-2 text-xs"><div><p className="font-semibold text-plum-800">{session.displayName}</p><p className="text-[10px] text-plum-400">Observed A2S name · unverified identity</p></div><div className="text-right text-plum-500"><p>{session.leftAt?`${Math.max(1,Math.round(session.durationSec/60))} min session`:"Online now"}</p><p className="text-[10px]">joined {timeAgo(session.joinedAt)}</p></div></div>)}</div></section>}
       {banned.length > 0 && (
         <p className="text-[11.5px] text-plum-400">
           {banned.length} player{banned.length > 1 ? "s are" : " is"} banned — unban from the actions column.
         </p>
       )}
 
+      {moderation.length>0&&<section className="panel p-5"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="font-display text-sm font-semibold text-plum-900">Moderation audit</h3><div className="flex gap-1">{(["all","pending","failed"] as const).map(filter=><button key={filter} onClick={()=>setModerationFilter(filter)} className={cn("rounded-lg px-2 py-1 text-[10px] font-bold uppercase",moderationFilter===filter?"bg-candy-100 text-plum-800":"text-plum-400")}>{filter}</button>)}</div></div><div className="max-h-72 space-y-2 overflow-auto">{moderation.filter(item=>moderationFilter==="all"||(moderationFilter==="pending"&&item.status==="pending-expiration")||(moderationFilter==="failed"&&item.status==="expiration-failed")).slice(0,30).map(item=><div key={item.id} className="rounded-xl border border-candy-100 px-3 py-2 text-xs"><div className="flex items-center justify-between gap-2"><strong>{item.action} · {item.target}</strong><span className={cn("rounded-full px-2 py-0.5 text-[10px]",["sent","expiration-enforced"].includes(item.status)?"bg-emerald-50 text-emerald-600":item.status==="pending-expiration"?"bg-amber-50 text-amber-600":"bg-red-50 text-red-500")}>{item.status.replaceAll("-"," ")}</span></div><code className="mt-1 block text-[10px] text-plum-500">{item.command}</code>{item.expiresAt&&<p className="mt-1 text-[10px] text-plum-500">Expires: {new Date(item.expiresAt).toLocaleString()} · attempts {item.expirationAttempts}/3</p>}{item.status==="expiration-failed"&&<Btn className="mt-2" size="sm" variant="subtle" loading={busy} onClick={()=>void retryExpiration(item)}>Retry automatic unban</Btn>}</div>)}</div></section>}
+      <Modal open={!!noteTarget} onClose={()=>setNoteTarget(null)} title={`Notes for ${noteTarget?.name}`}><textarea className={`${inputCls} min-h-28 w-full`} value={note} maxLength={1000} onChange={event=>setNote(event.target.value)} placeholder="Local administrator notes…"/><p className="mt-2 text-[11px] text-plum-400">Stored locally and excluded from support bundles.</p><div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={()=>setNoteTarget(null)}>Cancel</Btn><Btn variant="primary" loading={busy} onClick={()=>noteTarget&&saveProfile(noteTarget,{notes:note})}>Save notes</Btn></div></Modal>
       <Modal open={!!banTarget} onClose={() => setBanTarget(null)} title={`Ban ${banTarget?.name}?`}>
         <p className="text-[13.5px] leading-relaxed text-plum-500">
-          The Ban Hammer will speak. <span className="text-plum-800">{banTarget?.name}</span> will be disconnected immediately and cannot rejoin until
-          pardoned.
-        </p>
+          The exact command below will be sent after confirmation. <span className="text-plum-800">{banTarget?.name}</span> will be disconnected and cannot rejoin until pardoned.
+          <code className="mt-3 block rounded-lg bg-plum-900 p-3 text-xs text-white">ban {banTarget?.name}{reason.trim()?` ${reason.trim()}`:""}</code>
+        </p><input className={`${inputCls} mt-4 w-full`} value={reason} maxLength={120} onChange={event=>setReason(event.target.value)} placeholder="Reason (optional)"/><input className={`${inputCls} mt-2 w-full`} type="number" min="0" max="525600" value={durationMinutes} onChange={event=>setDurationMinutes(Number(event.target.value))} placeholder="Expiration minutes (metadata only)"/><p className="mt-2 text-[11px] text-amber-600">Expiration is recorded for administrators; automatic unban is not enabled.</p>
         <div className="mt-5 flex justify-end gap-2">
           <Btn variant="ghost" onClick={() => setBanTarget(null)}>Cancel</Btn>
-          <Btn variant="danger" loading={busy} onClick={() => banTarget && act(banTarget, "ban")}>
+          <Btn variant="danger" loading={busy} onClick={() => banTarget && act(banTarget, "ban", reason, durationMinutes)}>
             <Ban size={14} /> Ban player
           </Btn>
         </div>
