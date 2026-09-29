@@ -1,0 +1,2 @@
+import assert from "node:assert/strict";import { scheduledCommand } from "../src/lib/scheduled-actions";
+assert.equal(scheduledCommand("minecraft","broadcast","Hello players!"),"say Hello players!");assert.equal(scheduledCommand("custom","command","save-all"),"save-all");for(const value of ["hello\nstop","hello; stop",""])assert.throws(()=>scheduledCommand("minecraft","broadcast",value));assert.throws(()=>scheduledCommand("ark","broadcast","hello"));assert.throws(()=>scheduledCommand("custom","command","save\nstop"));console.log("SCHEDULED_ACTION_COMMAND_SAFETY_OK");

@@ -68,7 +68,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
       const r = await fetch(`/api/servers/${serverId}/tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({...form,confirmedCommand:form.type==="broadcast"?`say ${form.payload.trim()}`:form.type==="command"?form.payload.trim():""}),
       });
       const j = await r.json();
       if (!r.ok) return setErr(j.error ?? "Failed");
@@ -207,6 +207,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
               />
             </Field>
           )}
+          {needsPayload&&form.payload.trim()&&<div className="rounded-xl border border-candy-200 bg-plum-900 p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-candy-200">Exact command preview</p><code className="mt-1 block break-all text-xs text-white">{form.type==="broadcast"?`say ${form.payload.trim()}`:form.payload.trim()}</code></div>}
           <Field label="Repeat every">
             <select className={inputCls} value={form.intervalMin} onChange={(e) => setForm({ ...form, intervalMin: Number(e.target.value) })}>
               {INTERVALS.map((i) => (

@@ -16,6 +16,7 @@ import { activity, backups, consoleLogs, incidents, installationEvents, installa
 import type { Backup, InstallationJob, Server } from "@/db/schema";
 import { getGame, type InstallerKind } from "./games";
 import { observationKey, reconcileObservationKeys } from "./player-observations";
+import { scheduledCommand } from "./scheduled-actions";
 import { queryA2sInfo, queryA2sPlayers, queryMinecraftStatus } from "./query-protocols";
 import { isProtectedSecret, protectAndVerify, revealSecret } from "./credential-vault";
 import { appDataDir, backupsDir, ensureDataDirs, safeFileName, serverDir, toolsDir } from "./storage";
@@ -1941,8 +1942,7 @@ export async function sweepTasks(serverId?: number) {
       else if (task.type === "restart") {
         if (state.processes.has(server.id)) await restartFlow(server.id);
         else await logLine(server.id, "warn", "Scheduler", `Skipped "${task.name}": server is offline.`);
-      } else if (task.type === "broadcast") await runCommand(server, `say ${task.payload}`, "Scheduler");
-      else if (task.type === "command") await runCommand(server, task.payload, "Scheduler");
+      } else if (task.type === "broadcast" || task.type === "command") await runCommand(server, scheduledCommand(server.gameId, task.type, task.payload), "Scheduler");
       await act(server.id, "task", `Scheduled task "${task.name}" executed`);
     }
     for (const entry of state.processes.values()) {
