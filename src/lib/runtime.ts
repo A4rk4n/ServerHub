@@ -1472,17 +1472,15 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
 // Real process lifecycle and metrics
 // ---------------------------------------------------------------------------
 
+function varInt(value:number){const out:number[]=[];do{let byte=value&127;value>>>=7;if(value)byte|=128;out.push(byte)}while(value);return Buffer.from(out)}
+async function minecraftReady(host:string,port:number){return new Promise<boolean>((resolve)=>{const socket=net.createConnection({host,port});let settled=false;const done=(ok:boolean)=>{if(settled)return;settled=true;socket.destroy();resolve(ok)};socket.setTimeout(1500);socket.once("connect",()=>{const address=Buffer.from(host);const body=Buffer.concat([Buffer.from([0]),varInt(0),varInt(address.length),address,Buffer.from([port>>8,port&255]),Buffer.from([1])]);socket.write(Buffer.concat([varInt(body.length),body,Buffer.from([1,0])]));});socket.once("data",data=>done(data.length>3&&data.includes(Buffer.from("version"))));socket.once("timeout",()=>done(false));socket.once("error",()=>done(false));})}
+async function a2sReady(host:string,port:number){return new Promise<boolean>((resolve)=>{const socket=dgram.createSocket("udp4");let settled=false;const done=(ok:boolean)=>{if(settled)return;settled=true;socket.close();resolve(ok)};const timer=setTimeout(()=>done(false),1500);socket.once("message",data=>{clearTimeout(timer);done(data.length>5&&data.readInt32LE(0)===-1&&(data[4]===0x49||data[4]===0x41))});socket.once("error",()=>done(false));socket.send(Buffer.concat([Buffer.from([255,255,255,255,0x54]),Buffer.from("Source Engine Query\0")]),port,host);})}
 async function waitUntilReady(entry: RuntimeEntry) {
-  const server = entry.server;
-  const game = getGame(server.gameId);
-  const deadline = Date.now() + Math.max(10, Math.min(300, server.readinessTimeoutSec)) * 1000;
-  if (game.protocol === "UDP") { await new Promise((resolve) => setTimeout(resolve, 1200)); return state.processes.has(server.id); }
-  while (Date.now() < deadline && state.processes.has(server.id)) {
-    const ready = await new Promise<boolean>((resolve) => { const socket = net.createConnection({ host: server.bindAddress, port: server.port }); const done=(value:boolean)=>{socket.destroy();resolve(value)}; socket.setTimeout(750); socket.once("connect",()=>done(true)); socket.once("timeout",()=>done(false)); socket.once("error",()=>done(false)); });
-    if (ready) return true;
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  return false;
+  const server = entry.server; const game = getGame(server.gameId); const deadline = Date.now()+Math.max(10,Math.min(300,server.readinessTimeoutSec))*1000;
+  while(Date.now()<deadline&&state.processes.has(server.id)){
+    const ready=server.gameId.startsWith("minecraft")?await minecraftReady(server.bindAddress,server.port):["ark","rust","valheim"].includes(server.gameId)&&game.queryPort?await a2sReady(server.bindAddress,game.queryPort):game.protocol==="UDP"?true:await new Promise<boolean>(resolve=>{const socket=net.createConnection({host:server.bindAddress,port:server.port});const done=(v:boolean)=>{socket.destroy();resolve(v)};socket.setTimeout(750);socket.once("connect",()=>done(true));socket.once("timeout",()=>done(false));socket.once("error",()=>done(false))});
+    if(ready)return true;await new Promise(resolve=>setTimeout(resolve,500));
+  } return false;
 }
 
 export async function startFlow(id: number, automatic = false): Promise<{ ok: boolean; reason?: string }> {
