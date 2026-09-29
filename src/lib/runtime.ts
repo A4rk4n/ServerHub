@@ -1919,6 +1919,8 @@ export async function sweepTasks(serverId?: number) {
     for (const task of enabled) {
       if (serverId && task.serverId !== serverId) continue;
       if (!task.nextRunAt || task.nextRunAt > now) continue;
+      const overdue=now.getTime()-task.nextRunAt.getTime()>60_000;
+      if(overdue&&task.missedPolicy!=="run"){const next=task.scheduleKind==="once"?(task.missedPolicy==="reschedule"?new Date(now.getTime()+5*60_000):null):task.scheduleKind==="daily"||task.scheduleKind==="weekly"?nextCalendarRun(task.scheduleKind,task.scheduleTime,task.scheduleWeekday,now):new Date(now.getTime()+Math.max(1,task.intervalMin)*60_000);await db.update(tasks).set({enabled:next?task.enabled:false,nextRunAt:next,lastRunAt:task.missedPolicy==="skip"?now:task.lastRunAt}).where(eq(tasks.id,task.id));await db.insert(taskRuns).values({taskId:task.id,serverId:task.serverId,taskName:task.name,type:task.type,command:"",status:task.missedPolicy==="skip"?"skipped":"rescheduled",error:`Missed while Server Hub was offline; policy: ${task.missedPolicy}`});continue}
       await db.update(tasks).set({ lastRunAt: now, enabled:task.scheduleKind==="once"?false:task.enabled, nextRunAt: task.scheduleKind==="once"?null:task.scheduleKind==="daily"||task.scheduleKind==="weekly"?nextCalendarRun(task.scheduleKind,task.scheduleTime,task.scheduleWeekday,now):new Date(now.getTime() + Math.max(1, task.intervalMin) * 60_000) }).where(eq(tasks.id, task.id));
       const [server] = await db.select().from(servers).where(eq(servers.id, task.serverId));
       if (!server) continue;

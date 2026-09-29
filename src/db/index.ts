@@ -132,6 +132,7 @@ const DDL = [
     schedule_kind TEXT NOT NULL DEFAULT 'interval',
     schedule_time TEXT NOT NULL DEFAULT '09:00',
     schedule_weekday INTEGER NOT NULL DEFAULT 1,
+    missed_policy TEXT NOT NULL DEFAULT 'run',
     enabled INTEGER NOT NULL DEFAULT 1,
     last_run_at INTEGER,
     next_run_at INTEGER,
@@ -244,7 +245,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
     owner_id: "TEXT NOT NULL DEFAULT ''",
     eula_accepted: "INTEGER NOT NULL DEFAULT 0",
   },
-  tasks: { schedule_time: "TEXT NOT NULL DEFAULT '09:00'", schedule_weekday: "INTEGER NOT NULL DEFAULT 1", schedule_kind: "TEXT NOT NULL DEFAULT 'interval'" },
+  tasks: { missed_policy: "TEXT NOT NULL DEFAULT 'run'", schedule_time: "TEXT NOT NULL DEFAULT '09:00'", schedule_weekday: "INTEGER NOT NULL DEFAULT 1", schedule_kind: "TEXT NOT NULL DEFAULT 'interval'" },
   task_runs: { retry_of_run_id: "INTEGER" },
   moderation_actions: { expires_at: "INTEGER", expiration_attempts: "INTEGER NOT NULL DEFAULT 0", last_expiration_attempt_at: "INTEGER" },
   players: { trusted: "INTEGER NOT NULL DEFAULT 0", notes: "TEXT NOT NULL DEFAULT ''" },
@@ -258,7 +259,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
   },
 };
 
-export const SCHEMA_VERSION = 2990;
+export const SCHEMA_VERSION = 2991;
 
 function migrate(db: DatabaseSync) {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -283,7 +284,7 @@ function migrate(db: DatabaseSync) {
     db.prepare("UPDATE servers SET bind_address = ? WHERE bind_address = ?")
       .run("192.168.1.210", "185.83.148.20");
     db.prepare("INSERT INTO schema_migrations (version, applied_at, description) VALUES (?, ?, ?)")
-      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add local daily and weekly calendar recurrence");
+      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add explicit missed-run policies");
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");

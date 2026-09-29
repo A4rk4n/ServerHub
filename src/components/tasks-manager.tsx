@@ -46,7 +46,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", type: "backup", payload: "", intervalMin: 360, scheduleKind: "interval", scheduledFor: "", scheduleTime: "09:00", scheduleWeekday: 1 });
+  const [form, setForm] = useState({ name: "", type: "backup", payload: "", intervalMin: 360, scheduleKind: "interval", scheduledFor: "", scheduleTime: "09:00", scheduleWeekday: 1, missedPolicy: "run" });
 
   async function load() {
     try {
@@ -75,7 +75,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
       const j = await r.json();
       if (!r.ok) return setErr(j.error ?? "Failed");
       setOpen(false);
-      setForm({ name: "", type: "backup", payload: "", intervalMin: 360, scheduleKind: "interval", scheduledFor: "", scheduleTime: "09:00", scheduleWeekday: 1 });
+      setForm({ name: "", type: "backup", payload: "", intervalMin: 360, scheduleKind: "interval", scheduledFor: "", scheduleTime: "09:00", scheduleWeekday: 1, missedPolicy: "run" });
       await load();
     } finally {
       setBusy(false);
@@ -221,6 +221,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
               ))}
             </select>
           </Field>}
+          <Field label="If a run was missed while offline"><select className={inputCls} value={form.missedPolicy} onChange={event=>setForm({...form,missedPolicy:event.target.value})}><option value="run">Run immediately</option><option value="skip">Skip and record it</option><option value="reschedule">Reschedule without running</option></select></Field>
           {err && <p className="text-[12px] text-red-500">{err}</p>}
           <div className="flex justify-end gap-2 pt-1">
             <Btn variant="ghost" onClick={() => setOpen(false)}>Cancel</Btn>
