@@ -14,6 +14,7 @@ import { isProtectedSecret } from "@/lib/credential-vault";
 import { getGame } from "@/lib/games";
 import { portAvailable } from "@/lib/runtime";
 import { redactLogSecrets, sanitizeSupportText } from "@/lib/support-redaction";
+import { assertSupportBundleEntries } from "@/lib/support-bundle-policy";
 import { appDataDir, serverDir, toolsDir } from "@/lib/storage";
 export const dynamic="force-dynamic";
 async function supportZip(entries:Record<string,string>){const zip=archiver("zip",{zlib:{level:9}});const chunks:Buffer[]=[];zip.on("data",(chunk:Buffer)=>chunks.push(Buffer.from(chunk)));const complete=new Promise<Buffer>((resolve,reject)=>{zip.once("end",()=>resolve(Buffer.concat(chunks)));zip.once("error",reject)});for(const [name,content] of Object.entries(entries))zip.append(content,{name});await zip.finalize();return complete;}
@@ -54,6 +55,7 @@ export async function GET(request:Request,context:{params:Promise<{id:string}>})
    "build-info.json":sanitize({node:process.version,platform:process.platform,arch:process.arch})
   };
   entries["SHA256SUMS"]=Object.entries(entries).map(([name,content])=>`${crypto.createHash("sha256").update(content).digest("hex")}  ${name}`).join("\n")+"\n";
+  assertSupportBundleEntries(Object.keys(entries));
   const zip=await supportZip(entries);return new Response(new Uint8Array(zip),{headers:{"content-type":"application/zip","content-disposition":`attachment; filename="serverhub-support-${server.id}.zip"`,"content-length":String(zip.length)}});
  }
  if(params.get("download")==="1")return new Response(JSON.stringify(report,null,2),{headers:{"content-type":"application/json","content-disposition":`attachment; filename="serverhub-diagnostics-${server.id}.json"`}});
