@@ -275,6 +275,7 @@ type InstallPhase =
   | "preparing"
   | "downloading"
   | "installing"
+  | "recovering"
   | "validating"
   | "configuring"
   | "activating"
@@ -911,16 +912,23 @@ async function runLogged(context: InstallContext, executable: string, args: stri
 }
 
 async function runSteamCmdLogged(context: InstallContext, executable: string, args: string[], cwd: string) {
+  let recoveryStartedAt = 0;
   for (let attempt = 1; attempt <= 3; attempt++) {
-    try { await runLogged(context, executable, args, cwd); return; }
+    try {
+      await runLogged(context, executable, args, cwd);
+      if (attempt > 1) await context.report("installing", 25, `SteamCMD recovery succeeded on attempt ${attempt} after ${Math.max(1, Math.round((Date.now() - recoveryStartedAt) / 1000))} seconds`, "success");
+      return;
+    }
     catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const bootstrapRestart = /exited with code 7/i.test(message) && /(?:Downloading update|Installing update|Update complete, launching Steamcmd)/i.test(message);
       const diagnosis = diagnoseInstallationFailure(message);
       const transientProviderFailure = diagnosis?.transient === true;
       if ((!bootstrapRestart && !transientProviderFailure) || attempt === 3) throw error;
-      const reason = bootstrapRestart ? "updated its bootstrap files" : `reported ${diagnosis?.code ?? "a temporary failure"}`;
-      await context.report("installing", 25, `SteamCMD ${reason}; retrying safely (${attempt}/3)`);
+      const reason = bootstrapRestart ? "bootstrap-self-update" : (diagnosis?.code ?? "temporary-provider-failure");
+      if (!recoveryStartedAt) recoveryStartedAt = Date.now();
+      const delaySeconds = bootstrapRestart ? 8 : attempt * 5;
+      await context.report("recovering", 25, `Recovery attempt ${attempt + 1}/3 scheduled in ${delaySeconds} seconds: ${reason}`, "warn");
       await new Promise<void>((resolve, reject) => {
         const done = () => { context.signal.removeEventListener("abort", cancel); resolve(); };
         const timer = setTimeout(done, bootstrapRestart ? 8_000 : attempt * 5_000);
@@ -929,7 +937,7 @@ async function runSteamCmdLogged(context: InstallContext, executable: string, ar
         timer.unref?.();
       });
       if (hostPlatform() === "win32") {
-        await context.report("installing", 25, "Waiting for the managed SteamCMD bootstrap process to exit safely");
+        await context.report("recovering", 25, "Recovery waiting for the managed SteamCMD bootstrap process to exit safely", "warn");
         await waitForManagedExecutableExit(path.join(cwd, "steamcmd.exe"), context.signal);
       }
     }

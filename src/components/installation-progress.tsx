@@ -170,6 +170,12 @@ export function InstallationProgress({ serverId, accent }: { serverId: number; a
           />
         </div>
 
+        {events.some((event) => event.phase === "recovering" || /recovery succeeded/i.test(event.message)) && (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-amber-700">Automatic recovery history</p>
+            {events.filter((event) => event.phase === "recovering" || /recovery succeeded/i.test(event.message)).map((event) => <div key={`recovery-${event.id}`} className="flex gap-2 py-1 text-[11px] text-amber-900"><RotateCw size={11} className="mt-0.5 shrink-0"/><span>{event.message}</span></div>)}
+          </div>
+        )}
         {events.length > 0 && (
           <div className="mt-4 grid gap-1.5 sm:grid-cols-2">
             {events.slice(-4).map((event) => (
