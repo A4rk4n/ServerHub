@@ -95,6 +95,8 @@ const DDL = [
     is_banned INTEGER NOT NULL DEFAULT 0,
     play_minutes INTEGER NOT NULL DEFAULT 0,
     ping INTEGER NOT NULL DEFAULT 0,
+    trusted INTEGER NOT NULL DEFAULT 0,
+    notes TEXT NOT NULL DEFAULT '',
     first_seen INTEGER NOT NULL,
     last_seen INTEGER NOT NULL
   )`,
@@ -233,6 +235,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
     owner_id: "TEXT NOT NULL DEFAULT ''",
     eula_accepted: "INTEGER NOT NULL DEFAULT 0",
   },
+  players: { trusted: "INTEGER NOT NULL DEFAULT 0", notes: "TEXT NOT NULL DEFAULT ''" },
   backups: {
     archive_path: "TEXT NOT NULL DEFAULT ''",
     checksum: "TEXT NOT NULL DEFAULT ''",
@@ -243,7 +246,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
   },
 };
 
-export const SCHEMA_VERSION = 2910;
+export const SCHEMA_VERSION = 2920;
 
 function migrate(db: DatabaseSync) {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -268,7 +271,7 @@ function migrate(db: DatabaseSync) {
     db.prepare("UPDATE servers SET bind_address = ? WHERE bind_address = ?")
       .run("192.168.1.210", "185.83.148.20");
     db.prepare("INSERT INTO schema_migrations (version, applied_at, description) VALUES (?, ?, ?)")
-      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add persistent observed player sessions");
+      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add trusted player labels and local notes");
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");

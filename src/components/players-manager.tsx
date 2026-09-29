@@ -1,17 +1,21 @@
 "use client";
 
-import { Ban, Clock3, Crown, LogOut, ShieldCheck, ShieldOff, Undo2, Users } from "lucide-react";
+import { Ban, Clock3, Crown, LogOut, ShieldCheck, Search, ShieldOff, Star, Undo2, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Player, PlayerSession } from "@/db/schema";
 type PlayerView=Player&{observedIdentity:boolean;sessionCount:number;totalObservedSeconds:number;currentSessionSeconds:number;firstObservedAt:Date};
 import { cn, hexA, initialAvatarHue, timeAgo } from "@/lib/format";
-import { Btn, Empty, Modal, Spin } from "./ui";
+import { Btn, Empty, Modal, Spin, inputCls } from "./ui";
 
 export function PlayersManager({ serverId, accent }: { serverId: number; accent: string }) {
   const [players, setPlayers] = useState<PlayerView[] | null>(null);
   const [sessions, setSessions] = useState<PlayerSession[]>([]);
   const [banTarget, setBanTarget] = useState<PlayerView | null>(null);
   const [busy, setBusy] = useState(false);
+  const [query,setQuery]=useState("");
+  const [onlyTrusted,setOnlyTrusted]=useState(false);
+  const [noteTarget,setNoteTarget]=useState<PlayerView|null>(null);
+  const [note,setNote]=useState("");
 
   async function load() {
     try {
@@ -44,6 +48,8 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
   }
 
   if (!players) return <Spin label="Loading players…" />;
+  const shown=players.filter(player=>(!onlyTrusted||player.trusted)&&(!query||player.name.toLowerCase().includes(query.toLowerCase())));
+  async function saveProfile(player:PlayerView,patch:{trusted?:boolean;notes?:string}){setBusy(true);try{await fetch(`/api/servers/${serverId}/players/${player.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)});await load()}finally{setBusy(false);setNoteTarget(null)}}
 
   const online = players.filter((p) => p.isOnline);
   const banned = players.filter((p) => p.isBanned);
@@ -70,6 +76,7 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
         ))}
       </div>
 
+      <div className="panel flex flex-wrap gap-2 p-3"><label className="relative flex-1"><Search size={14} className="absolute left-3 top-3 text-plum-400"/><input className={`${inputCls} w-full pl-9`} value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search players"/></label><Btn variant={onlyTrusted?"primary":"subtle"} onClick={()=>setOnlyTrusted(value=>!value)}><Star size={14}/> Trusted</Btn></div>
       {players.length === 0 ? (
         <Empty icon={<Users size={22} />} title="No players yet" hint="Players appear here the first time they join your server." />
       ) : (
@@ -81,7 +88,7 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
             <span>Playtime</span>
             <span className="text-right">Actions</span>
           </div>
-          {players.map((p) => {
+          {shown.map((p) => {
             const hue = initialAvatarHue(p.name);
             return (
               <div
@@ -134,6 +141,8 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
                       <ActionBtn title={p.isOp ? "Remove operator" : "Make operator"} onClick={() => act(p, p.isOp ? "deop" : "op")} disabled={busy}>
                         {p.isOp ? <ShieldOff size={14} /> : <ShieldCheck size={14} />}
                       </ActionBtn>
+                      <ActionBtn title={p.trusted?"Remove trusted label":"Mark trusted"} onClick={() => void saveProfile(p,{trusted:!p.trusted})} disabled={busy}><Star size={14} fill={p.trusted?"currentColor":"none"}/></ActionBtn>
+                      <ActionBtn title="Edit local notes" onClick={() => {setNoteTarget(p);setNote(p.notes)}} disabled={busy}><Clock3 size={14}/></ActionBtn>
                       <ActionBtn title="Ban" danger onClick={() => setBanTarget(p)} disabled={busy}>
                         <Ban size={14} />
                       </ActionBtn>
@@ -152,6 +161,7 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
         </p>
       )}
 
+      <Modal open={!!noteTarget} onClose={()=>setNoteTarget(null)} title={`Notes for ${noteTarget?.name}`}><textarea className={`${inputCls} min-h-28 w-full`} value={note} maxLength={1000} onChange={event=>setNote(event.target.value)} placeholder="Local administrator notes…"/><p className="mt-2 text-[11px] text-plum-400">Stored locally and excluded from support bundles.</p><div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={()=>setNoteTarget(null)}>Cancel</Btn><Btn variant="primary" loading={busy} onClick={()=>noteTarget&&saveProfile(noteTarget,{notes:note})}>Save notes</Btn></div></Modal>
       <Modal open={!!banTarget} onClose={() => setBanTarget(null)} title={`Ban ${banTarget?.name}?`}>
         <p className="text-[13.5px] leading-relaxed text-plum-500">
           The Ban Hammer will speak. <span className="text-plum-800">{banTarget?.name}</span> will be disconnected immediately and cannot rejoin until

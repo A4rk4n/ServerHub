@@ -33,3 +33,5 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string; pi
   const [fresh] = await db.select().from(players).where(eq(players.id, player.id));
   return NextResponse.json({ ok: true, player: fresh });
 }
+
+export async function PATCH(req:Request,ctx:{params:Promise<{id:string;pid:string}>}){const {id,pid}=await ctx.params;const [player]=await db.select().from(players).where(and(eq(players.serverId,Number(id)),eq(players.id,Number(pid))));if(!player)return NextResponse.json({error:"Player not found"},{status:404});const body=await req.json() as {trusted?:boolean;notes?:string};const notes=typeof body.notes==="string"?body.notes.trim().slice(0,1000):player.notes;const trusted=typeof body.trusted==="boolean"?body.trusted:player.trusted;await db.update(players).set({trusted,notes}).where(eq(players.id,player.id));const [fresh]=await db.select().from(players).where(eq(players.id,player.id));return NextResponse.json({ok:true,player:fresh})}

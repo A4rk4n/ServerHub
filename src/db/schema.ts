@@ -88,6 +88,8 @@ export const players = sqliteTable(
     isBanned: integer("is_banned", { mode: "boolean" }).notNull().default(false),
     playMinutes: integer("play_minutes").notNull().default(0),
     ping: integer("ping").notNull().default(0),
+    trusted: integer("trusted", { mode: "boolean" }).notNull().default(false),
+    notes: text("notes").notNull().default(""),
     firstSeen: tsNow("first_seen"),
     lastSeen: tsNow("last_seen"),
   },
