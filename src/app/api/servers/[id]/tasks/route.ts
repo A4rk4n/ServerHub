@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, lt } from "drizzle-orm";
 import { db } from "@/db";
 import { servers, taskRuns, tasks } from "@/db/schema";
 import { nextCalendarRun } from "@/lib/calendar-schedule";
@@ -46,3 +46,5 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     .returning();
   return NextResponse.json({ task: row }, { status: 201 });
 }
+
+export async function DELETE(req:Request,ctx:{params:Promise<{id:string}>}){const {id}=await ctx.params;const serverId=Number(id);const [server]=await db.select().from(servers).where(eq(servers.id,serverId));if(!server)return NextResponse.json({error:"Not found"},{status:404});const days=Math.min(3650,Math.max(1,Math.round(Number(new URL(req.url).searchParams.get("olderThanDays")??30))));const cutoff=new Date(Date.now()-days*86400000);const removed=await db.delete(taskRuns).where(and(eq(taskRuns.serverId,serverId),lt(taskRuns.createdAt,cutoff))).returning({id:taskRuns.id});return NextResponse.json({ok:true,removed:removed.length,cutoff})}

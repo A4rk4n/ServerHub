@@ -45,6 +45,7 @@ function fmtInterval(min: number) {
 export function TasksManager({ serverId, accent }: { serverId: number; accent: string }) {
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [runs,setRuns]=useState<TaskRun[]>([]);
+  const [historyFilter,setHistoryFilter]=useState<"all"|"succeeded"|"failed"|"skipped">("all");
   const [editing,setEditing]=useState<Task|null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -86,6 +87,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
     }
   }
 
+  async function pruneHistory(){if(!window.confirm("Delete scheduled action history older than 30 days?"))return;setBusy(true);try{await fetch(`/api/servers/${serverId}/tasks?olderThanDays=30`,{method:"DELETE"});await load()}finally{setBusy(false)}}
   async function retryRun(run:TaskRun){setBusy(true);try{const response=await fetch(`/api/servers/${serverId}/tasks/runs/${run.id}`,{method:"POST"});const body=await response.json();if(!response.ok)setErr(body.error??"Retry failed");await load()}finally{setBusy(false)}}
 
   async function toggle(t: Task) {
@@ -179,7 +181,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
         </div>
       )}
 
-      {runs.length>0&&<section className="panel p-5"><h3 className="font-display mb-3 text-sm font-semibold text-plum-900">Scheduled action history</h3><div className="max-h-72 space-y-2 overflow-auto">{runs.slice(0,30).map(run=><div key={run.id} className="rounded-xl border border-candy-100 px-3 py-2 text-xs"><div className="flex justify-between gap-2"><strong>{run.taskName}</strong><span className={run.status==="succeeded"?"text-emerald-600":"text-red-500"}>{run.status}</span></div>{run.command&&<code className="mt-1 block text-[10px] text-plum-500">{run.command}</code>}{run.error&&<p className="mt-1 text-[10px] text-red-500">{run.error}</p>}<div className="mt-1 flex items-center justify-between"><p className="text-[10px] text-plum-400">{timeAgo(run.createdAt)}{run.retryOfRunId?` · retry of #${run.retryOfRunId}`:""}</p>{run.status==="failed"&&<Btn size="sm" variant="subtle" loading={busy} onClick={()=>void retryRun(run)}>Retry</Btn>}</div></div>)}</div></section>}
+      {runs.length>0&&<section className="panel p-5"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="font-display text-sm font-semibold text-plum-900">Scheduled action history</h3><div className="flex gap-1">{(["all","succeeded","failed","skipped"] as const).map(filter=><button key={filter} onClick={()=>setHistoryFilter(filter)} className={cn("rounded-lg px-2 py-1 text-[10px] font-bold uppercase",historyFilter===filter?"bg-candy-100 text-plum-800":"text-plum-400")}>{filter}</button>)}<button onClick={()=>void pruneHistory()} className="rounded-lg px-2 py-1 text-[10px] font-bold uppercase text-red-500">Prune 30d+</button></div></div><div className="max-h-72 space-y-2 overflow-auto">{runs.filter(run=>historyFilter==="all"||(historyFilter==="skipped"&&["skipped","rescheduled"].includes(run.status))||run.status===historyFilter).slice(0,30).map(run=><div key={run.id} className="rounded-xl border border-candy-100 px-3 py-2 text-xs"><div className="flex justify-between gap-2"><strong>{run.taskName}</strong><span className={run.status==="succeeded"?"text-emerald-600":["skipped","rescheduled"].includes(run.status)?"text-amber-600":"text-red-500"}>{run.status}</span></div>{run.command&&<code className="mt-1 block text-[10px] text-plum-500">{run.command}</code>}{run.error&&<p className="mt-1 text-[10px] text-red-500">{run.error}</p>}<div className="mt-1 flex items-center justify-between"><p className="text-[10px] text-plum-400">{timeAgo(run.createdAt)}{run.retryOfRunId?` · retry of #${run.retryOfRunId}`:""}</p>{run.status==="failed"&&<Btn size="sm" variant="subtle" loading={busy} onClick={()=>void retryRun(run)}>Retry</Btn>}</div></div>)}</div></section>}
       <Modal open={open} onClose={() => setOpen(false)} title={editing?"Edit scheduled task":"New scheduled task"}>
         <div className="space-y-4">
           <Field label="Task name">
