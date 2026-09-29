@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { installationEvents, installationJobs, servers } from "@/db/schema";
 import { cancelInstallation, ensureRuntimeInitialized, installFlow, repairInstallation } from "@/lib/runtime";
+import { createInstallationReport } from "@/lib/installation-report";
+import { appDataDir } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +45,13 @@ export async function POST(req: Request, ctx: Ctx) {
   const id = await serverId(ctx);
   if (!id) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const body = (await req.json().catch(() => ({}))) as { action?: string };
+
+  if (body.action === "diagnostic-report") {
+    const [job] = await db.select().from(installationJobs).where(eq(installationJobs.serverId, id)).orderBy(desc(installationJobs.id)).limit(1);
+    if (!job) return NextResponse.json({ error: "No installation job is available" }, { status: 404 });
+    const events = await db.select().from(installationEvents).where(and(eq(installationEvents.serverId, id), eq(installationEvents.jobId, job.id))).orderBy(desc(installationEvents.id)).limit(12);
+    return NextResponse.json({ report: createInstallationReport(job, events.reverse(), [appDataDir()]) });
+  }
 
   if (body.action === "cancel") {
     const result = await cancelInstallation(id);

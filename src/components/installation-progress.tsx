@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, CheckCircle2, Circle, Download, HardDrive, Loader2, RotateCw, Wrench, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, Circle, ClipboardCopy, Download, HardDrive, Loader2, RotateCw, Wrench, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn, hexA } from "@/lib/format";
 import { Btn } from "./ui";
@@ -72,6 +72,17 @@ export function InstallationProgress({ serverId, accent }: { serverId: number; a
     return () => clearInterval(timer);
   }, [pollingFast, refresh]);
 
+  async function copyDiagnosticReport() {
+    setActionError("");
+    try {
+      const response = await fetch(`/api/servers/${serverId}/installation`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "diagnostic-report" }) });
+      const data = (await response.json()) as { report?: string; error?: string };
+      if (!response.ok || !data.report) throw new Error(data.error ?? "Could not create diagnostic report");
+      await navigator.clipboard.writeText(data.report);
+      setActionError("Diagnostic report copied to clipboard.");
+    } catch (error) { setActionError(error instanceof Error ? error.message : String(error)); }
+  }
+
   async function act(action: "cancel" | "retry" | "repair") {
     if (acting) return;
     setActing(true);
@@ -132,6 +143,7 @@ export function InstallationProgress({ serverId, accent }: { serverId: number; a
           </Btn>
         ) : (
           <div className="flex gap-2">
+            <Btn variant="ghost" size="sm" onClick={() => void copyDiagnosticReport()}><ClipboardCopy size={13} /> Copy diagnostics</Btn>
             <Btn variant="ghost" size="sm" onClick={() => void act("repair")} loading={acting}>
               <Wrench size={13} /> Repair and retry
             </Btn>
@@ -176,7 +188,7 @@ export function InstallationProgress({ serverId, accent }: { serverId: number; a
             ))}
           </div>
         )}
-        {actionError && <p className="mt-3 text-[11.5px] font-medium text-red-500">{actionError}</p>}
+        {actionError && <p className={cn("mt-3 text-[11.5px] font-medium", actionError.startsWith("Diagnostic report copied") ? "text-emerald-600" : "text-red-500")}>{actionError}</p>}
       </div>
     </section>
   );
