@@ -12,7 +12,7 @@ import yauzl from "yauzl";
 import * as tar from "tar";
 import { and, asc, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db, dbPath, sqliteClient } from "@/db";
-import { activity, backups, consoleLogs, incidents, installationEvents, installationJobs, moderationActions, playerSessions, players, servers, taskRuns, tasks } from "@/db/schema";
+import { activity, backups, consoleLogs, incidents, installationEvents, installationJobs, moderationActions, playerSessions, players, servers, taskRuns, tasks, toolInventory, toolOperations } from "@/db/schema";
 import type { Backup, InstallationJob, Server } from "@/db/schema";
 import { getGame, type InstallerKind } from "./games";
 import { observationKey, reconcileObservationKeys } from "./player-observations";
@@ -906,6 +906,8 @@ async function runLogged(context: InstallContext, executable: string, args: stri
   });
 }
 
+async function markToolUsed(toolId:string,summary:string){const now=new Date();await db.update(toolInventory).set({lastUsedAt:now,updatedAt:now}).where(eq(toolInventory.id,toolId));await db.insert(toolOperations).values({toolId,operation:"use",status:"succeeded",summary,completedAt:now});}
+
 async function installSteam(server: Server, root: string, context: InstallContext) {
   const game = getGame(server.gameId);
   if (!game.steamAppId) throw new Error(`${game.name} has no verified SteamCMD application ID.`);
@@ -930,6 +932,7 @@ async function installSteam(server: Server, root: string, context: InstallContex
   } else {
     await runLogged(context, steamcmd, steamArgs, path.dirname(steamcmd));
   }
+  await markToolUsed("steamcmd",`Installed or validated Steam app ${game.steamAppId}`);
 }
 
 async function ensureHytaleDownloader(context: InstallContext) {
@@ -981,6 +984,7 @@ async function installHytale(server: Server, root: string, context: InstallConte
       "Authorize the official Hytale Downloader using the URL and device code shown in Console"
     );
     await runLogged(context, downloader, ["-download-path", archive], path.dirname(downloader));
+    await markToolUsed("hytale-downloader","Downloaded Hytale server archive");
   } else {
     await context.report("downloading", 68, "Reusing the Hytale server archive downloaded by the previous attempt");
   }

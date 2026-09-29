@@ -101,7 +101,7 @@ const DDL = [
     last_seen INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS players_server_idx ON players (server_id)`,
-  `CREATE TABLE IF NOT EXISTS tool_inventory (id TEXT PRIMARY KEY, name TEXT NOT NULL, ownership TEXT NOT NULL, path_category TEXT NOT NULL, available INTEGER NOT NULL DEFAULT 0, detected_version TEXT NOT NULL DEFAULT '', expected_version TEXT NOT NULL DEFAULT '', integrity_status TEXT NOT NULL DEFAULT 'unknown', last_verified_at INTEGER, last_used_at INTEGER, last_error TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS tool_inventory (id TEXT PRIMARY KEY, name TEXT NOT NULL, ownership TEXT NOT NULL, path_category TEXT NOT NULL, available INTEGER NOT NULL DEFAULT 0, detected_version TEXT NOT NULL DEFAULT '', expected_version TEXT NOT NULL DEFAULT '', integrity_status TEXT NOT NULL DEFAULT 'unknown', last_verified_at INTEGER, last_used_at INTEGER, last_error TEXT NOT NULL DEFAULT '', fingerprint_sha256 TEXT NOT NULL DEFAULT '', fingerprint_size INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS tool_operations (id INTEGER PRIMARY KEY AUTOINCREMENT, tool_id TEXT NOT NULL, operation TEXT NOT NULL, status TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', version_before TEXT NOT NULL DEFAULT '', version_after TEXT NOT NULL DEFAULT '', started_at INTEGER NOT NULL, completed_at INTEGER)`,
   `CREATE TABLE IF NOT EXISTS task_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, retry_of_run_id INTEGER, task_id INTEGER NOT NULL, server_id INTEGER NOT NULL, task_name TEXT NOT NULL, type TEXT NOT NULL, command TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL
@@ -247,6 +247,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
     owner_id: "TEXT NOT NULL DEFAULT ''",
     eula_accepted: "INTEGER NOT NULL DEFAULT 0",
   },
+  tool_inventory: { fingerprint_sha256: "TEXT NOT NULL DEFAULT ''", fingerprint_size: "INTEGER NOT NULL DEFAULT 0" },
   tasks: { missed_policy: "TEXT NOT NULL DEFAULT 'run'", schedule_time: "TEXT NOT NULL DEFAULT '09:00'", schedule_weekday: "INTEGER NOT NULL DEFAULT 1", schedule_kind: "TEXT NOT NULL DEFAULT 'interval'" },
   task_runs: { retry_of_run_id: "INTEGER" },
   moderation_actions: { expires_at: "INTEGER", expiration_attempts: "INTEGER NOT NULL DEFAULT 0", last_expiration_attempt_at: "INTEGER" },
@@ -261,7 +262,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
   },
 };
 
-export const SCHEMA_VERSION = 21000;
+export const SCHEMA_VERSION = 21100;
 
 function migrate(db: DatabaseSync) {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -286,7 +287,7 @@ function migrate(db: DatabaseSync) {
     db.prepare("UPDATE servers SET bind_address = ? WHERE bind_address = ?")
       .run("192.168.1.210", "185.83.148.20");
     db.prepare("INSERT INTO schema_migrations (version, applied_at, description) VALUES (?, ?, ?)")
-      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add persistent Tool Health inventory and operations");
+      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add managed tool fingerprints and last-use tracking");
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
