@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { backups, servers } from "@/db/schema";
 import { catalogVersions, serverCatalog } from "@/lib/catalog";
 import { getGame } from "@/lib/games";
-import { createBackupAndWait, deleteBackupFile, installFlow, logLine } from "@/lib/runtime";
+import { createBackupAndWait, deleteBackupFile, installFlow, logLine, restoreUpdateSafetyBackup } from "@/lib/runtime";
 export const dynamic = "force-dynamic";
 
 async function load(id: number) { return (await db.select().from(servers).where(eq(servers.id,id)))[0]; }
@@ -17,13 +17,16 @@ export async function GET(_request: Request, context: {params: Promise<{id:strin
   try {
     const versions=await catalogVersions(game.id); const latest=versions.find(item=>item.channel==="stable")?.id ?? versions[0]?.id ?? server.version;
     const rolling=latest==="latest";
-    return NextResponse.json({supported:true,currentVersion:server.version,latestVersion:latest,updateAvailable:rolling || latest!==server.version,rolling,provider:provider.sourceName,checkedAt:new Date().toISOString()});
+    return NextResponse.json({supported:true,currentVersion:server.version,latestVersion:latest,updateAvailable:rolling || latest!==server.version,rolling,provider:provider.sourceName,checkedAt:new Date().toISOString(),validationStatus:server.updateValidationStatus,previousVersion:server.updatePreviousVersion,targetVersion:server.updateTargetVersion,rollbackAvailable:Boolean(server.managedDirectory&&server.updateSafetyBackupId&&server.updatePreviousVersion&&["readiness-failed","rollback-failed","validated","awaiting-readiness"].includes(server.updateValidationStatus)),rollbackRequiresStop:!["offline","crashed","error"].includes(server.status)});
   } catch(error) { return NextResponse.json({error:error instanceof Error?error.message:String(error)},{status:502}); }
 }
 
-export async function POST(_request: Request, context: {params: Promise<{id:string}>}) {
+export async function POST(request: Request, context: {params: Promise<{id:string}>}) {
   const {id}=await context.params; const numeric=Number(id); const server=await load(numeric);
   if(!server) return NextResponse.json({error:"Not found"},{status:404});
+  const body=await request.json().catch(()=>({})) as {action?:string};
+  if(body.action==="rollback"){const result=await restoreUpdateSafetyBackup(numeric);return NextResponse.json(result,{status:result.ok?200:409});}
+  if(body.action&&body.action!=="update")return NextResponse.json({error:"Unknown update action"},{status:400});
   if(!["offline","crashed","error"].includes(server.status)) return NextResponse.json({error:"Stop the server before updating."},{status:409});
   const game=getGame(server.gameId);
   if(game.installer==="manual") return NextResponse.json({error:"Custom servers cannot be updated automatically."},{status:400});

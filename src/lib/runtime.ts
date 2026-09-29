@@ -1594,6 +1594,21 @@ async function attemptAutomaticUpdateRollback(serverId: number) {
   return { attempted: true, ok: restarted.ok };
 }
 
+export async function restoreUpdateSafetyBackup(serverId: number) {
+  await ensureRuntimeInitialized();
+  const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
+  if (!server) return { ok: false, reason: "Server not found" };
+  if (!server.managedDirectory || !server.updateSafetyBackupId || !server.updatePreviousVersion) return { ok: false, reason: "No managed pre-update safety backup is available" };
+  if (state.processes.has(serverId) || !["offline","crashed","error"].includes(server.status)) return { ok: false, reason: "Stop the server before restoring the previous version" };
+  if (!["readiness-failed","rollback-failed","validated","awaiting-readiness"].includes(server.updateValidationStatus)) return { ok: false, reason: "The current update state is not eligible for rollback" };
+  await db.update(servers).set({updateRollbackAttempted:true,updateValidationStatus:"rollback-running",updatedAt:new Date()}).where(eq(servers.id,serverId));
+  const restored=await restoreBackup(serverId,server.updateSafetyBackupId);
+  if(!restored.ok){await db.update(servers).set({updateValidationStatus:"rollback-failed",updatedAt:new Date()}).where(eq(servers.id,serverId));return restored;}
+  await db.update(servers).set({version:server.updatePreviousVersion,updateValidationStatus:"rollback-restored",updatedAt:new Date()}).where(eq(servers.id,serverId));
+  await logLine(serverId,"success","Updater",`Previous version ${server.updatePreviousVersion} restored manually from the verified safety backup.`);
+  return {ok:true,version:server.updatePreviousVersion};
+}
+
 export async function startFlow(id: number, automatic = false): Promise<{ ok: boolean; reason?: string }> {
   await ensureRuntimeInitialized();
   const pendingRestart = state.restartTimers.get(id);

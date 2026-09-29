@@ -54,7 +54,7 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
   const [deleting, setDeleting] = useState(false);
   const [cloning, setCloning] = useState(false);
   const [templating, setTemplating] = useState(false);
-  const [updateInfo, setUpdateInfo] = useState<{supported:boolean; currentVersion:string; latestVersion?:string; updateAvailable?:boolean; rolling?:boolean; provider?:string; reason?:string} | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<{supported:boolean; currentVersion:string; latestVersion?:string; updateAvailable?:boolean; rolling?:boolean; provider?:string; reason?:string; validationStatus?:string; previousVersion?:string; targetVersion?:string; rollbackAvailable?:boolean; rollbackRequiresStop?:boolean} | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updating, setUpdating] = useState(false);
 
@@ -117,6 +117,13 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
     try { const response=await fetch(`/api/servers/${initial.id}/updates`,{method:"POST"}); const body=await response.json(); if(!response.ok) throw new Error(body.error??body.reason??"Update failed"); router.refresh(); }
     catch(error) { setErr(error instanceof Error?error.message:String(error)); }
     finally { setUpdating(false); }
+  }
+
+  async function restorePreviousVersion() {
+    if(!window.confirm(`Restore the previous server version ${updateInfo?.previousVersion||"from the safety backup"}? The current managed files will be replaced.`))return;
+    setUpdating(true);setErr(null);
+    try{const response=await fetch(`/api/servers/${initial.id}/updates`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"rollback"})});const body=await response.json();if(!response.ok)throw new Error(body.reason??body.error??"Rollback failed");await checkUpdate();router.refresh();}
+    catch(error){setErr(error instanceof Error?error.message:String(error));}finally{setUpdating(false);}
   }
 
   async function resetCredentials() {
@@ -275,6 +282,7 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
                   {updateInfo.rolling ? "Latest provider build can be refreshed" : updateInfo.updateAvailable ? `${updateInfo.latestVersion} is available` : "Already up to date"}
                 </p>
                 <p className="mt-1 text-plum-500">Installed: {updateInfo.currentVersion}{updateInfo.provider ? ` · ${updateInfo.provider}` : ""}</p>
+                {updateInfo.validationStatus&&updateInfo.validationStatus!=="none"&&<p className="mt-1 font-medium text-amber-700">Validation: {updateInfo.validationStatus.replaceAll("-"," ")}{updateInfo.previousVersion&&updateInfo.targetVersion?` · ${updateInfo.previousVersion} → ${updateInfo.targetVersion}`:""}</p>}
               </div>
             )}
             <div className="mt-4 flex items-center justify-between rounded-xl border border-candy-200 bg-candy-50 px-4 py-3">
@@ -289,8 +297,9 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
                   <CloudDownload size={14}/> {updateInfo.rolling ? "Refresh build" : "Install update"}
                 </Btn>
               )}
+              {updateInfo?.rollbackAvailable&&<Btn variant="subtle" loading={updating} disabled={updateInfo.rollbackRequiresStop} onClick={restorePreviousVersion}><RotateCw size={14}/> Restore {updateInfo.previousVersion||"previous"}</Btn>}
             </div>
-            {updateInfo?.updateAvailable && !['offline','crashed','error'].includes(initial.status) && <p className="mt-2 text-[11px] text-amber-700">Stop the server before updating.</p>}
+            {(updateInfo?.updateAvailable||updateInfo?.rollbackAvailable) && !['offline','crashed','error'].includes(initial.status) && <p className="mt-2 text-[11px] text-amber-700">Stop the server before updating or restoring a previous version.</p>}
           </section>
         )}
 
