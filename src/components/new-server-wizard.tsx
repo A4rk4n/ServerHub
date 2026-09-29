@@ -41,6 +41,7 @@ export function NewServerWizard() {
   const [motd, setMotd] = useState("");
   const [pvp, setPvp] = useState(true);
   const [serverPassword, setServerPassword] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
   const [ownerId, setOwnerId] = useState("");
   const [eulaAccepted, setEulaAccepted] = useState(false);
   const [launchCommand, setLaunchCommand] = useState("");
@@ -91,6 +92,7 @@ export function NewServerWizard() {
     setWorld(g.id === "ark" ? "TheIsland" : g.id === "valheim" ? "Midgard" : "world");
     setMotd(`A ${g.short} server by Server Hub`);
     setServerPassword("");
+    setAdminPassword("");
     setOwnerId("");
     setEulaAccepted(false);
     setLaunchCommand("");
@@ -109,7 +111,7 @@ export function NewServerWizard() {
           port >= 1024 &&
           (!isMinecraft || eulaAccepted) &&
           (!game?.requiresPassword || serverPassword.length >= 5) &&
-          (game?.id !== "dragonwilds" || ownerId.trim().length > 0) &&
+          (game?.id !== "dragonwilds" || (ownerId.trim().length > 0 && adminPassword.length >= 5)) &&
           (game?.installer !== "manual" || launchCommand.trim())
         )
       : true;
@@ -136,6 +138,7 @@ export function NewServerWizard() {
           difficulty,
           pvp,
           serverPassword,
+          adminPassword,
           ownerId: ownerId.trim(),
           eulaAccepted,
           launchCommand,
@@ -336,13 +339,22 @@ export function NewServerWizard() {
               </div>
 
               {game.id === "dragonwilds" && (
-                <Field label="In-game Player ID" hint="required · identifies the server owner/admin">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Field label="In-game Player ID" hint="required · identifies the server owner/admin">
                   <div className="relative">
                     <KeyRound size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-plum-400" />
                     <input className={cn(inputCls, "pl-9 font-mono")} value={ownerId} onChange={(e) => setOwnerId(e.target.value)} placeholder="Enter your Dragonwilds Player ID" maxLength={200} autoComplete="off" />
                   </div>
-                  <p className="mt-1.5 text-[11px] leading-relaxed text-plum-500">Find this ID in Dragonwilds, then paste it here. Server Hub passes it to the dedicated server as the owner identifier.</p>
-                </Field>
+                    <p className="mt-1.5 text-[11px] leading-relaxed text-plum-500">Find this ID in Dragonwilds, then paste it here. Server Hub passes it to the dedicated server as the owner identifier.</p>
+                  </Field>
+                  <Field label="Admin password" hint="required · minimum 5 characters · stored locally">
+                    <div className="relative">
+                      <KeyRound size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-plum-400" />
+                      <input className={cn(inputCls, "pl-9")} type="password" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} placeholder="Enter an admin password" minLength={5} maxLength={200} autoComplete="new-password" />
+                    </div>
+                    <p className="mt-1.5 text-[11px] leading-relaxed text-plum-500">Used for Dragonwilds server administration. This can be different from the player-facing server password.</p>
+                  </Field>
+                </div>
               )}
 
               {game.requiresPassword && (
