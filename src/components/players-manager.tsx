@@ -2,13 +2,15 @@
 
 import { Ban, Clock3, Crown, LogOut, ShieldCheck, ShieldOff, Undo2, Users } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { Player } from "@/db/schema";
+import type { Player, PlayerSession } from "@/db/schema";
+type PlayerView=Player&{observedIdentity:boolean;sessionCount:number;totalObservedSeconds:number;currentSessionSeconds:number;firstObservedAt:Date};
 import { cn, hexA, initialAvatarHue, timeAgo } from "@/lib/format";
 import { Btn, Empty, Modal, Spin } from "./ui";
 
 export function PlayersManager({ serverId, accent }: { serverId: number; accent: string }) {
-  const [players, setPlayers] = useState<Player[] | null>(null);
-  const [banTarget, setBanTarget] = useState<Player | null>(null);
+  const [players, setPlayers] = useState<PlayerView[] | null>(null);
+  const [sessions, setSessions] = useState<PlayerSession[]>([]);
+  const [banTarget, setBanTarget] = useState<PlayerView | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function load() {
@@ -16,6 +18,7 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
       const r = await fetch(`/api/servers/${serverId}/players`, { cache: "no-store" });
       const j = await r.json();
       if (j.players) setPlayers(j.players);
+      if (j.sessions) setSessions(j.sessions);
     } catch {}
   }
   useEffect(() => {
@@ -25,7 +28,7 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverId]);
 
-  async function act(player: Player, action: string) {
+  async function act(player: PlayerView, action: string) {
     setBusy(true);
     try {
       await fetch(`/api/servers/${serverId}/players/${player.id}`, {
@@ -44,7 +47,7 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
 
   const online = players.filter((p) => p.isOnline);
   const banned = players.filter((p) => p.isBanned);
-  const totalHours = Math.round(players.reduce((a, p) => a + p.playMinutes, 0) / 60);
+  const totalHours = Math.round(players.reduce((a, p) => a + Math.max(p.playMinutes*60,p.totalObservedSeconds), 0) / 3600);
 
   return (
     <div className="space-y-5">
@@ -104,7 +107,7 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
                       {p.isOp && <ShieldCheck size={13} className="shrink-0 text-amber-500" />}
                       {p.isBanned && <Ban size={12} className="shrink-0 text-red-500" />}
                     </p>
-                    <p className="truncate font-mono text-[10px] text-plum-400">{p.externalId}</p>
+                    <p className="truncate font-mono text-[10px] text-plum-400">{p.observedIdentity?"Observed A2S name · unverified identity":p.externalId}</p>
                   </div>
                 </div>
                 <span className="hidden text-[12px] md:block">
@@ -115,7 +118,7 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
                   )}
                 </span>
                 <span className="hidden font-mono text-[12px] text-plum-500 md:block">{p.isOnline ? `${p.ping}ms` : "—"}</span>
-                <span className="hidden font-mono text-[12px] text-plum-500 md:block">{p.playMinutes >= 60 ? `${(p.playMinutes / 60).toFixed(1)}h` : `${p.playMinutes}m`}</span>
+                <span className="hidden font-mono text-[12px] text-plum-500 md:block">{p.isOnline&&p.currentSessionSeconds?`${Math.max(1,Math.round(p.currentSessionSeconds/60))}m now`:p.totalObservedSeconds>=3600?`${(p.totalObservedSeconds/3600).toFixed(1)}h`:`${Math.round(p.totalObservedSeconds/60)}m`}</span>
                 <div className="flex items-center justify-end gap-1">
                   {p.isBanned ? (
                     <ActionBtn title="Unban" onClick={() => act(p, "unban")} disabled={busy}>
@@ -142,6 +145,7 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
           })}
         </div>
       )}
+      {sessions.length>0&&<section className="panel p-5"><h3 className="font-display mb-3 text-sm font-semibold text-plum-900">Recent join and leave history</h3><div className="max-h-72 space-y-2 overflow-auto">{sessions.slice(0,30).map(session=><div key={session.id} className="flex items-center justify-between rounded-xl border border-candy-100 px-3 py-2 text-xs"><div><p className="font-semibold text-plum-800">{session.displayName}</p><p className="text-[10px] text-plum-400">Observed A2S name · unverified identity</p></div><div className="text-right text-plum-500"><p>{session.leftAt?`${Math.max(1,Math.round(session.durationSec/60))} min session`:"Online now"}</p><p className="text-[10px]">joined {timeAgo(session.joinedAt)}</p></div></div>)}</div></section>}
       {banned.length > 0 && (
         <p className="text-[11.5px] text-plum-400">
           {banned.length} player{banned.length > 1 ? "s are" : " is"} banned — unban from the actions column.
