@@ -101,6 +101,7 @@ const DDL = [
     last_seen INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS players_server_idx ON players (server_id)`,
+  `CREATE TABLE IF NOT EXISTS tool_jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, tool_id TEXT NOT NULL, operation TEXT NOT NULL, status TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '', rollback_available INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER)`,
   `CREATE TABLE IF NOT EXISTS tool_inventory (id TEXT PRIMARY KEY, name TEXT NOT NULL, ownership TEXT NOT NULL, path_category TEXT NOT NULL, available INTEGER NOT NULL DEFAULT 0, detected_version TEXT NOT NULL DEFAULT '', expected_version TEXT NOT NULL DEFAULT '', integrity_status TEXT NOT NULL DEFAULT 'unknown', last_verified_at INTEGER, last_used_at INTEGER, last_error TEXT NOT NULL DEFAULT '', fingerprint_sha256 TEXT NOT NULL DEFAULT '', fingerprint_size INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS tool_operations (id INTEGER PRIMARY KEY AUTOINCREMENT, tool_id TEXT NOT NULL, operation TEXT NOT NULL, status TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', version_before TEXT NOT NULL DEFAULT '', version_after TEXT NOT NULL DEFAULT '', started_at INTEGER NOT NULL, completed_at INTEGER)`,
   `CREATE TABLE IF NOT EXISTS task_runs (
@@ -262,7 +263,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
   },
 };
 
-export const SCHEMA_VERSION = 21100;
+export const SCHEMA_VERSION = 21200;
 
 function migrate(db: DatabaseSync) {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -287,7 +288,7 @@ function migrate(db: DatabaseSync) {
     db.prepare("UPDATE servers SET bind_address = ? WHERE bind_address = ?")
       .run("192.168.1.210", "185.83.148.20");
     db.prepare("INSERT INTO schema_migrations (version, applied_at, description) VALUES (?, ?, ?)")
-      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add managed tool fingerprints and last-use tracking");
+      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add persistent managed tool repair jobs");
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");

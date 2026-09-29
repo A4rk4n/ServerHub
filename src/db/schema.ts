@@ -96,6 +96,8 @@ export const players = sqliteTable(
   (t) => [index("players_server_idx").on(t.serverId)]
 );
 
+export const toolJobs = sqliteTable("tool_jobs", { id: integer("id").primaryKey({autoIncrement:true}), toolId: text("tool_id").notNull(), operation: text("operation").notNull(), status: text("status").notNull(), progress: integer("progress").notNull().default(0), message: text("message").notNull().default(""), error: text("error").notNull().default(""), rollbackAvailable: integer("rollback_available",{mode:"boolean"}).notNull().default(false), createdAt: tsNow("created_at"), updatedAt: tsNow("updated_at"), completedAt: ts("completed_at") },t=>[index("tool_jobs_status_idx").on(t.toolId,t.status)]);
+
 export const toolInventory = sqliteTable("tool_inventory", { id: text("id").primaryKey(), name: text("name").notNull(), ownership: text("ownership").notNull(), pathCategory: text("path_category").notNull(), available: integer("available", { mode: "boolean" }).notNull().default(false), detectedVersion: text("detected_version").notNull().default(""), expectedVersion: text("expected_version").notNull().default(""), integrityStatus: text("integrity_status").notNull().default("unknown"), lastVerifiedAt: ts("last_verified_at"), lastUsedAt: ts("last_used_at"), lastError: text("last_error").notNull().default(""), fingerprintSha256: text("fingerprint_sha256").notNull().default(""), fingerprintSize: integer("fingerprint_size").notNull().default(0), updatedAt: tsNow("updated_at") });
 export const toolOperations = sqliteTable("tool_operations", { id: integer("id").primaryKey({autoIncrement:true}), toolId: text("tool_id").notNull(), operation: text("operation").notNull(), status: text("status").notNull(), summary: text("summary").notNull().default(""), versionBefore: text("version_before").notNull().default(""), versionAfter: text("version_after").notNull().default(""), startedAt: tsNow("started_at"), completedAt: ts("completed_at") }, t=>[index("tool_operations_tool_idx").on(t.toolId,t.startedAt)]);
 
@@ -255,6 +257,7 @@ export const installationEvents = sqliteTable(
 export type ServerTemplate = typeof serverTemplates.$inferSelect;
 export type Server = typeof servers.$inferSelect;
 export type ConsoleLog = typeof consoleLogs.$inferSelect;
+export type ToolJob = typeof toolJobs.$inferSelect;
 export type ToolInventory = typeof toolInventory.$inferSelect;
 export type ToolOperation = typeof toolOperations.$inferSelect;
 export type TaskRun = typeof taskRuns.$inferSelect;
