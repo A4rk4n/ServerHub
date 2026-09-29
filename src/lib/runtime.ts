@@ -1,5 +1,6 @@
 import { hostPlatform } from "./host-platform";
 import { diagnoseInstallationFailure, installationFailureMessage } from "./installation-diagnostics";
+import { waitForManagedExecutableExit } from "./managed-process";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -921,11 +922,16 @@ async function runSteamCmdLogged(context: InstallContext, executable: string, ar
       const reason = bootstrapRestart ? "updated its bootstrap files" : `reported ${diagnosis?.code ?? "a temporary failure"}`;
       await context.report("installing", 25, `SteamCMD ${reason}; retrying safely (${attempt}/3)`);
       await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(resolve, bootstrapRestart ? 8_000 : attempt * 5_000);
-        const cancel = () => { clearTimeout(timer); reject(new InstallationCancelledError(cancellationMessage(context.signal))); };
+        const done = () => { context.signal.removeEventListener("abort", cancel); resolve(); };
+        const timer = setTimeout(done, bootstrapRestart ? 8_000 : attempt * 5_000);
+        const cancel = () => { clearTimeout(timer); context.signal.removeEventListener("abort", cancel); reject(new InstallationCancelledError(cancellationMessage(context.signal))); };
         context.signal.addEventListener("abort", cancel, { once: true });
         timer.unref?.();
       });
+      if (hostPlatform() === "win32") {
+        await context.report("installing", 25, "Waiting for the managed SteamCMD bootstrap process to exit safely");
+        await waitForManagedExecutableExit(path.join(cwd, "steamcmd.exe"), context.signal);
+      }
     }
   }
 }
