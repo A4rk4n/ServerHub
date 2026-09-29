@@ -31,6 +31,8 @@ export const servers = sqliteTable("servers", {
   healthFailures: integer("health_failures").notNull().default(0),
   lastHealthSuccessAt: ts("last_health_success_at"),
   lastHealthFailureAt: ts("last_health_failure_at"),
+  queryMetadata: text("query_metadata").notNull().default(""),
+  lastQueryAt: ts("last_query_at"),
   memoryMb: integer("memory_mb").notNull().default(4096),
   maxPlayers: integer("max_players").notNull().default(20),
   motd: text("motd").notNull().default(""),

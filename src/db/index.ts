@@ -47,6 +47,8 @@ const DDL = [
     health_failures INTEGER NOT NULL DEFAULT 0,
     last_health_success_at INTEGER,
     last_health_failure_at INTEGER,
+    query_metadata TEXT NOT NULL DEFAULT '',
+    last_query_at INTEGER,
     memory_mb INTEGER NOT NULL DEFAULT 4096,
     max_players INTEGER NOT NULL DEFAULT 20,
     motd TEXT NOT NULL DEFAULT '',
@@ -210,6 +212,8 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
     health_reason: "TEXT NOT NULL DEFAULT ''",
     health_probe: "TEXT NOT NULL DEFAULT 'none'",
     health_failures: "INTEGER NOT NULL DEFAULT 0",
+    query_metadata: "TEXT NOT NULL DEFAULT ''",
+    last_query_at: "INTEGER",
     last_health_success_at: "INTEGER",
     last_health_failure_at: "INTEGER",
     launch_command: "TEXT NOT NULL DEFAULT ''",
@@ -236,7 +240,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
   },
 };
 
-export const SCHEMA_VERSION = 2800;
+export const SCHEMA_VERSION = 2900;
 
 function migrate(db: DatabaseSync) {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -261,7 +265,7 @@ function migrate(db: DatabaseSync) {
     db.prepare("UPDATE servers SET bind_address = ? WHERE bind_address = ?")
       .run("192.168.1.210", "185.83.148.20");
     db.prepare("INSERT INTO schema_migrations (version, applied_at, description) VALUES (?, ?, ?)")
-      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add reusable server configuration templates");
+      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add persistent provider query metadata");
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
