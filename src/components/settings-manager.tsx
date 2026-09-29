@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Check, CloudDownload, Cpu, Globe, KeyRound, RefreshCw, RotateCw, Save, Swords, Terminal, Trash2, User } from "lucide-react";
+import { AlertTriangle, Check, CloudDownload, Copy, Cpu, Globe, KeyRound, RefreshCw, RotateCw, Save, Swords, Terminal, Trash2, User } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Server } from "@/db/schema";
@@ -52,6 +52,7 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
   const [confirmDel, setConfirmDel] = useState(false);
   const [delName, setDelName] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [cloning, setCloning] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<{supported:boolean; currentVersion:string; latestVersion?:string; updateAvailable?:boolean; rolling?:boolean; provider?:string; reason?:string} | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -78,6 +79,8 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
     form.launchCommand !== initial.launchCommand ||
     form.launchArgs !== initial.launchArgs ||
     form.workingDirectory !== initial.workingDirectory;
+
+  async function cloneConfiguration() { setCloning(true);setErr(null);try{const r=await fetch(`/api/servers/${initial.id}/clone`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:`${initial.name} Copy`})});const j=await r.json();if(!r.ok)setErr(j.error??"Clone failed");else router.push(`/servers/${j.server.id}/settings`)}finally{setCloning(false)}}
 
   async function save() {
     setSaving(true);
@@ -367,6 +370,8 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
           </div>
           {err && <p className="mt-3 text-[12px] text-red-500">{err}</p>}
         </section>
+
+        <section className="panel p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div className="max-w-xl"><p className="text-sm font-semibold text-plum-800">Clone configuration</p><p className="mt-1 text-xs text-plum-500">Creates a new setup with a free adjacent port. Credentials, worlds, backups, players, logs, tasks, mods, and private paths are excluded.</p></div><Btn variant="subtle" loading={cloning} onClick={cloneConfiguration}><Copy size={14}/> Clone safely</Btn></div></section>
 
         {/* danger zone */}
         <section className="rounded-2xl border border-red-200 bg-red-50 p-5">
