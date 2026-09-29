@@ -1,19 +1,24 @@
 import fsp from "node:fs/promises";
+import crypto from "node:crypto";
 import path from "node:path";
+import { createRequire } from "node:module";
+const archiver = createRequire(import.meta.url)("archiver") as (format:"zip",options:{zlib:{level:number}})=>NodeJS.ReadWriteStream & {append:(content:string,options:{name:string})=>void;finalize:()=>Promise<void>};
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import os from "node:os";
 import { eq, desc } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { consoleLogs, incidents, installationJobs, servers } from "@/db/schema";
+import { consoleLogs, incidents, installationEvents, installationJobs, servers } from "@/db/schema";
 import { getGame } from "@/lib/games";
 import { portAvailable, redactLogSecrets } from "@/lib/runtime";
 import { serverDir, toolsDir } from "@/lib/storage";
 export const dynamic="force-dynamic";
+async function supportZip(entries:Record<string,string>){const zip=archiver("zip",{zlib:{level:9}});const chunks:Buffer[]=[];zip.on("data",(chunk:Buffer)=>chunks.push(Buffer.from(chunk)));const complete=new Promise<Buffer>((resolve,reject)=>{zip.once("end",()=>resolve(Buffer.concat(chunks)));zip.once("error",reject)});for(const [name,content] of Object.entries(entries))zip.append(content,{name});await zip.finalize();return complete;}
 export async function GET(request:Request,context:{params:Promise<{id:string}>}) {
  const {id}=await context.params; const [server]=await db.select().from(servers).where(eq(servers.id,Number(id))); if(!server)return NextResponse.json({error:"Not found"},{status:404});
- const game=getGame(server.gameId); const incidentRows=await db.select().from(incidents).where(eq(incidents.serverId,server.id)).orderBy(desc(incidents.id)).limit(50); const stat=await fsp.statfs(serverDir(server)).catch(()=>null); const logs=await db.select().from(consoleLogs).where(eq(consoleLogs.serverId,server.id)).orderBy(desc(consoleLogs.id)).limit(100); const jobs=await db.select().from(installationJobs).where(eq(installationJobs.serverId,server.id)).orderBy(desc(installationJobs.id)).limit(10);
+ const game=getGame(server.gameId); const incidentRows=await db.select().from(incidents).where(eq(incidents.serverId,server.id)).orderBy(desc(incidents.id)).limit(50); const stat=await fsp.statfs(serverDir(server)).catch(()=>null); const logs=await db.select().from(consoleLogs).where(eq(consoleLogs.serverId,server.id)).orderBy(desc(consoleLogs.id)).limit(500); const jobs=await db.select().from(installationJobs).where(eq(installationJobs.serverId,server.id)).orderBy(desc(installationJobs.id)).limit(10);
+ const installEvents=await db.select().from(installationEvents).where(eq(installationEvents.serverId,server.id)).orderBy(desc(installationEvents.id)).limit(200);
  const adapters=Object.entries(os.networkInterfaces()).flatMap(([name,items])=>(items??[]).filter(item=>item.family==="IPv4"&&!item.internal).map(item=>({name,address:item.address,netmask:item.netmask})));
  const bindAssigned=adapters.some(item=>item.address===server.bindAddress)||["0.0.0.0","127.0.0.1"].includes(server.bindAddress);
  const ports=[{name:"Game",port:server.port,protocol:game.protocol,required:true},...(game.queryPort&&game.queryPort!==server.port?[{name:"Query",port:game.queryPort,protocol:"UDP",required:true}]:[])];
@@ -30,8 +35,22 @@ export async function GET(request:Request,context:{params:Promise<{id:string}>})
   {id:"firewall",label:"Windows Firewall rules configured",ok:process.platform!=="win32"||firewallRules.length>=ports.length,fix:"Create/repair firewall rules below."},
   {id:"backup",label:"Recovery policy available",ok:true,fix:"Configure scheduled backups."},
  ];
- const report={generatedAt:new Date().toISOString(),application:"Server Hub",platform:{os:os.platform(),release:os.release(),arch:os.arch(),node:process.version,cpuCount:os.cpus().length,totalMemoryMb:Math.round(os.totalmem()/1048576),freeMemoryMb:Math.round(os.freemem()/1048576)},tools,firewall:{rules:firewallRules,configured:firewallRules.length>=ports.length},network:{adapters,lanEndpoint:`${server.bindAddress}:${server.port}`,publicEndpoint:`${server.publicAddress}:${server.port}`,ports,routerTarget:server.bindAddress},server:{id:server.id,name:server.name,game:game.name,version:server.version,status:server.status,healthStatus:server.healthStatus,healthReason:server.healthReason,healthProbe:server.healthProbe,healthFailures:server.healthFailures,bindAddress:server.bindAddress,publicAddress:server.publicAddress,port:server.port,protocol:game.protocol,workingDirectory:server.managedDirectory?"managed":"external",passwordConfigured:Boolean(server.serverPassword),adminPasswordConfigured:Boolean(server.adminPassword),ownerConfigured:Boolean(server.ownerId)},checks:{bindAddressAssigned:bindAssigned,bindAddressAvailable:await portAvailable(server.port,game.protocol,server.bindAddress),diskFreeMb:stat?Math.round(Number(stat.bavail)*Number(stat.bsize)/1048576):null,checklist},incidents:incidentRows,jobs,logs:logs.map(line=>({...line,message:redactLogSecrets(line.message)}))};
- if(new URL(request.url).searchParams.get("download")==="1")return new Response(JSON.stringify(report,null,2),{headers:{"content-type":"application/json","content-disposition":`attachment; filename="serverhub-diagnostics-${server.id}.json"`}});
+ const report={generatedAt:new Date().toISOString(),application:"Server Hub",platform:{os:os.platform(),release:os.release(),arch:os.arch(),node:process.version,cpuCount:os.cpus().length,totalMemoryMb:Math.round(os.totalmem()/1048576),freeMemoryMb:Math.round(os.freemem()/1048576)},tools,firewall:{rules:firewallRules,configured:firewallRules.length>=ports.length},network:{adapters,lanEndpoint:`${server.bindAddress}:${server.port}`,publicEndpoint:`${server.publicAddress}:${server.port}`,ports,routerTarget:server.bindAddress},server:{id:server.id,name:server.name,game:game.name,version:server.version,status:server.status,healthStatus:server.healthStatus,healthReason:server.healthReason,healthProbe:server.healthProbe,healthFailures:server.healthFailures,bindAddress:server.bindAddress,publicAddress:server.publicAddress,port:server.port,protocol:game.protocol,workingDirectory:server.managedDirectory?"managed":"external",passwordConfigured:Boolean(server.serverPassword),adminPasswordConfigured:Boolean(server.adminPassword),ownerConfigured:Boolean(server.ownerId)},checks:{bindAddressAssigned:bindAssigned,bindAddressAvailable:await portAvailable(server.port,game.protocol,server.bindAddress),diskFreeMb:stat?Math.round(Number(stat.bavail)*Number(stat.bsize)/1048576):null,checklist},incidents:incidentRows,installationEvents:installEvents,jobs,logs:logs.map(line=>({...line,message:redactLogSecrets(line.message)}))};
+ const params=new URL(request.url).searchParams;
+ if(params.get("bundle")==="1"){
+  const sanitize=(value:unknown)=>redactLogSecrets(JSON.stringify(value,null,2).replaceAll(os.homedir(),"<user-home>").replaceAll(path.dirname(serverDir(server)),"<server-storage>"));
+  const entries:Record<string,string>={
+   "summary.json":sanitize({generatedAt:report.generatedAt,application:report.application,server:report.server,checks:report.checks}),
+   "diagnostics.json":sanitize(report),"readiness.json":sanitize({healthStatus:server.healthStatus,healthReason:server.healthReason,healthProbe:server.healthProbe,healthFailures:server.healthFailures,lastSuccess:server.lastHealthSuccessAt,lastFailure:server.lastHealthFailureAt}),
+   "incidents.json":sanitize(incidentRows),"installation-events.json":sanitize(installEvents),
+   "console-redacted.txt":logs.slice().reverse().map(line=>`${new Date(line.ts??0).toISOString()} [${line.level}] ${line.source}: ${redactLogSecrets(line.message)}`).join("\n"),
+   "tool-health.json":sanitize(tools),"network.json":sanitize(report.network),"firewall.json":sanitize(report.firewall),
+   "build-info.json":sanitize({node:process.version,platform:process.platform,arch:process.arch})
+  };
+  entries["SHA256SUMS"]=Object.entries(entries).map(([name,content])=>`${crypto.createHash("sha256").update(content).digest("hex")}  ${name}`).join("\n")+"\n";
+  const zip=await supportZip(entries);return new Response(new Uint8Array(zip),{headers:{"content-type":"application/zip","content-disposition":`attachment; filename="serverhub-support-${server.id}.zip"`,"content-length":String(zip.length)}});
+ }
+ if(params.get("download")==="1")return new Response(JSON.stringify(report,null,2),{headers:{"content-type":"application/json","content-disposition":`attachment; filename="serverhub-diagnostics-${server.id}.json"`}});
  return NextResponse.json(report);
 }
 
@@ -39,8 +58,10 @@ const execFileAsync=promisify(execFile);
 function psQuote(value:string){return `'${value.replaceAll("'","''")}'`;}
 export async function POST(request:Request,context:{params:Promise<{id:string}>}) {
  const {id}=await context.params; const [server]=await db.select().from(servers).where(eq(servers.id,Number(id))); if(!server)return NextResponse.json({error:"Not found"},{status:404});
+ const body=await request.json().catch(()=>({})) as {action?:string;incidentId?:number};
+ if(body.action==="resolve-incident"&&Number.isInteger(body.incidentId)){await db.update(incidents).set({resolved:true,resolvedAt:new Date()}).where(eq(incidents.id,body.incidentId!));return NextResponse.json({ok:true});}
  if(process.platform!=="win32")return NextResponse.json({error:"Windows Defender Firewall management is available on Windows only"},{status:409});
- const body=await request.json().catch(()=>({})) as {action?:string}; if(!["create","remove"].includes(body.action??""))return NextResponse.json({error:"Unknown firewall action"},{status:400});
+ if(!["create","remove"].includes(body.action??""))return NextResponse.json({error:"Unknown firewall action"},{status:400});
  const game=getGame(server.gameId); const prefix=`Server Hub — ${server.id} —`; const ports=[{name:"Game",port:server.port,protocol:game.protocol},...(game.queryPort&&game.queryPort!==server.port?[{name:"Query",port:game.queryPort,protocol:"UDP"}]:[])];
  const commands=body.action==="remove"?[`Get-NetFirewallRule -DisplayName ${psQuote(prefix+"*")} -ErrorAction SilentlyContinue | Remove-NetFirewallRule`]:ports.map(item=>`New-NetFirewallRule -DisplayName ${psQuote(`${prefix} ${item.name} ${item.protocol} ${item.port}`)} -Direction Inbound -Action Allow -Protocol ${item.protocol} -LocalPort ${item.port} -Profile Private -ErrorAction Stop`);
  const script=path.join(os.tmpdir(),`serverhub-firewall-${server.id}-${Date.now()}.ps1`); await fsp.writeFile(script,["$ErrorActionPreference='Stop'",`Get-NetFirewallRule -DisplayName ${psQuote(prefix+"*")} -ErrorAction SilentlyContinue | Remove-NetFirewallRule`,...(body.action==="create"?commands:[]),""].join("\r\n"));
