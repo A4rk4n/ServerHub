@@ -33,12 +33,14 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
   }, [serverId]);
 
   async function act(player: PlayerView, action: string) {
+    const verb=action==="unban"?"pardon":action; const command=`${verb} ${player.name}`;
+    if(!window.confirm(`Send this exact moderation command?\n\n${command}`))return;
     setBusy(true);
     try {
       await fetch(`/api/servers/${serverId}/players/${player.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, confirmedCommand: command }),
       });
       await load();
     } finally {
@@ -164,8 +166,8 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
       <Modal open={!!noteTarget} onClose={()=>setNoteTarget(null)} title={`Notes for ${noteTarget?.name}`}><textarea className={`${inputCls} min-h-28 w-full`} value={note} maxLength={1000} onChange={event=>setNote(event.target.value)} placeholder="Local administrator notes…"/><p className="mt-2 text-[11px] text-plum-400">Stored locally and excluded from support bundles.</p><div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={()=>setNoteTarget(null)}>Cancel</Btn><Btn variant="primary" loading={busy} onClick={()=>noteTarget&&saveProfile(noteTarget,{notes:note})}>Save notes</Btn></div></Modal>
       <Modal open={!!banTarget} onClose={() => setBanTarget(null)} title={`Ban ${banTarget?.name}?`}>
         <p className="text-[13.5px] leading-relaxed text-plum-500">
-          The Ban Hammer will speak. <span className="text-plum-800">{banTarget?.name}</span> will be disconnected immediately and cannot rejoin until
-          pardoned.
+          The exact command below will be sent after confirmation. <span className="text-plum-800">{banTarget?.name}</span> will be disconnected and cannot rejoin until pardoned.
+          <code className="mt-3 block rounded-lg bg-plum-900 p-3 text-xs text-white">ban {banTarget?.name}</code>
         </p>
         <div className="mt-5 flex justify-end gap-2">
           <Btn variant="ghost" onClick={() => setBanTarget(null)}>Cancel</Btn>
