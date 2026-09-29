@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { protectAndVerify } from "@/lib/credential-vault";
 import { NextResponse } from "next/server";
 import { asc } from "drizzle-orm";
 import { db } from "@/db";
@@ -125,9 +126,9 @@ export async function POST(req: Request) {
       launchArgs,
       workingDirectory,
       managedDirectory: !workingDirectory,
-      serverPassword: (body.serverPassword ?? "").slice(0, 200),
-      adminPassword: (body.adminPassword ?? "").slice(0, 200),
-      ownerId: (body.ownerId ?? "").trim().slice(0, 200),
+      serverPassword: await protectAndVerify((body.serverPassword ?? "").slice(0, 200)),
+      adminPassword: await protectAndVerify((body.adminPassword ?? "").slice(0, 200)),
+      ownerId: await protectAndVerify((body.ownerId ?? "").trim().slice(0, 200)),
       eulaAccepted: body.eulaAccepted === true,
     }).returning();
     await installFlow(server.id);

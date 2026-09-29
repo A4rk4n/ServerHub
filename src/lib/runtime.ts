@@ -15,6 +15,7 @@ import { db } from "@/db";
 import { activity, backups, consoleLogs, installationEvents, installationJobs, players, servers, tasks } from "@/db/schema";
 import type { Backup, InstallationJob, Server } from "@/db/schema";
 import { getGame, type InstallerKind } from "./games";
+import { revealSecret } from "./credential-vault";
 import { appDataDir, backupsDir, ensureDataDirs, safeFileName, serverDir, toolsDir } from "./storage";
 
 export type Metric = { t: number; cpu: number; ram: number; players: number; tps: number | null };
@@ -417,8 +418,9 @@ async function latestInstallationJob(serverId: number): Promise<InstallationJob 
 
 export async function installFlow(id: number): Promise<{ ok: boolean; reason?: string; jobId?: number }> {
   await ensureRuntimeInitialized();
-  const [server] = await db.select().from(servers).where(eq(servers.id, id));
-  if (!server) return { ok: false, reason: "Server not found" };
+  const [storedServer] = await db.select().from(servers).where(eq(servers.id, id));
+  if (!storedServer) return { ok: false, reason: "Server not found" };
+  const server = { ...storedServer, serverPassword: await revealSecret(storedServer.serverPassword), adminPassword: await revealSecret(storedServer.adminPassword), ownerId: await revealSecret(storedServer.ownerId) };
   if (state.processes.has(id) || state.restartTimers.has(id)) return { ok: false, reason: "Stop the server and cancel any pending restart before installing or updating it" };
 
   const [active] = await db
@@ -1214,7 +1216,8 @@ async function mergeProperties(file: string, values: Record<string, string | num
   await fsp.writeFile(file, propertiesText(existing, values), "utf8");
 }
 
-export async function writeServerConfig(server: Server, rootOverride?: string, activatedRootOverride?: string) {
+export async function writeServerConfig(storedServer: Server, rootOverride?: string, activatedRootOverride?: string) {
+  const server = { ...storedServer, serverPassword: await revealSecret(storedServer.serverPassword), adminPassword: await revealSecret(storedServer.adminPassword), ownerId: await revealSecret(storedServer.ownerId) };
   const root = rootOverride ?? serverDir(server);
   const activatedRoot = activatedRootOverride ?? root;
   await fsp.mkdir(root, { recursive: true });
