@@ -9,7 +9,7 @@ import { db } from "@/db";
 import { consoleLogs, installationJobs, servers } from "@/db/schema";
 import { getGame } from "@/lib/games";
 import { portAvailable, redactLogSecrets } from "@/lib/runtime";
-import { serverDir } from "@/lib/storage";
+import { serverDir, toolsDir } from "@/lib/storage";
 export const dynamic="force-dynamic";
 export async function GET(request:Request,context:{params:Promise<{id:string}>}) {
  const {id}=await context.params; const [server]=await db.select().from(servers).where(eq(servers.id,Number(id))); if(!server)return NextResponse.json({error:"Not found"},{status:404});
@@ -18,14 +18,19 @@ export async function GET(request:Request,context:{params:Promise<{id:string}>})
  const bindAssigned=adapters.some(item=>item.address===server.bindAddress)||["0.0.0.0","127.0.0.1"].includes(server.bindAddress);
  const ports=[{name:"Game",port:server.port,protocol:game.protocol,required:true},...(game.queryPort&&game.queryPort!==server.port?[{name:"Query",port:game.queryPort,protocol:"UDP",required:true}]:[])];
  const running=["online","starting","restarting"].includes(server.status);
+ const steamcmd=path.join(toolsDir(),"steamcmd",process.platform==="win32"?"steamcmd.exe":"steamcmd.sh"); const hytale=path.join(toolsDir(),"hytale-downloader");
+ const commandAvailable=async(command:string)=>{try{await execFileAsync(process.platform==="win32"?"where.exe":"which",[command],{windowsHide:true,timeout:3000});return true}catch{return false}};
+ const tools=[{name:"SteamCMD",installed:await fsp.stat(steamcmd).then(x=>x.isFile()).catch(()=>false),path:steamcmd},{name:"PowerShell",installed:await commandAvailable("powershell.exe"),path:"system"},{name:"Java",installed:await commandAvailable("java.exe"),path:"system"},{name:"Hytale downloader",installed:await fsp.stat(hytale).then(()=>true).catch(()=>false),path:hytale},{name:"WebView2 Runtime",installed:process.platform==="win32",path:"Windows runtime"}];
+ let firewallRules:string[]=[]; if(process.platform==="win32"){try{const {stdout}=await execFileAsync("powershell.exe",["-NoLogo","-NoProfile","-NonInteractive","-Command",`Get-NetFirewallRule -DisplayName ${psQuote(`Server Hub — ${server.id} —*`)} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty DisplayName`],{windowsHide:true,timeout:5000});firewallRules=stdout.split(/\r?\n/).filter(Boolean)}catch{}}
  const checklist=[
   {id:"bind",label:"Bind address assigned to this PC",ok:bindAssigned,fix:"Choose one of the detected LAN adapters in Settings."},
   {id:"public",label:"Public player address configured",ok:Boolean(server.publicAddress),fix:"Enter the public IP or hostname in Settings."},
   {id:"install",label:"Installation completed",ok:jobs[0]?.status==="succeeded"||running,fix:"Run Repair and retry."},
   {id:"ready",label:"Server ready for players",ok:server.status==="online",fix:"Start the server and review its readiness result."},
+  {id:"firewall",label:"Windows Firewall rules configured",ok:process.platform!=="win32"||firewallRules.length>=ports.length,fix:"Create/repair firewall rules below."},
   {id:"backup",label:"Recovery policy available",ok:true,fix:"Configure scheduled backups."},
  ];
- const report={generatedAt:new Date().toISOString(),application:"Server Hub",platform:{os:os.platform(),release:os.release(),arch:os.arch(),node:process.version,cpuCount:os.cpus().length,totalMemoryMb:Math.round(os.totalmem()/1048576),freeMemoryMb:Math.round(os.freemem()/1048576)},network:{adapters,lanEndpoint:`${server.bindAddress}:${server.port}`,publicEndpoint:`${server.publicAddress}:${server.port}`,ports,routerTarget:server.bindAddress},server:{id:server.id,name:server.name,game:game.name,version:server.version,status:server.status,bindAddress:server.bindAddress,publicAddress:server.publicAddress,port:server.port,protocol:game.protocol,workingDirectory:server.managedDirectory?"managed":"external",passwordConfigured:Boolean(server.serverPassword),adminPasswordConfigured:Boolean(server.adminPassword),ownerConfigured:Boolean(server.ownerId)},checks:{bindAddressAssigned:bindAssigned,bindAddressAvailable:await portAvailable(server.port,game.protocol,server.bindAddress),diskFreeMb:stat?Math.round(Number(stat.bavail)*Number(stat.bsize)/1048576):null,checklist},jobs,logs:logs.map(line=>({...line,message:redactLogSecrets(line.message)}))};
+ const report={generatedAt:new Date().toISOString(),application:"Server Hub",platform:{os:os.platform(),release:os.release(),arch:os.arch(),node:process.version,cpuCount:os.cpus().length,totalMemoryMb:Math.round(os.totalmem()/1048576),freeMemoryMb:Math.round(os.freemem()/1048576)},tools,firewall:{rules:firewallRules,configured:firewallRules.length>=ports.length},network:{adapters,lanEndpoint:`${server.bindAddress}:${server.port}`,publicEndpoint:`${server.publicAddress}:${server.port}`,ports,routerTarget:server.bindAddress},server:{id:server.id,name:server.name,game:game.name,version:server.version,status:server.status,bindAddress:server.bindAddress,publicAddress:server.publicAddress,port:server.port,protocol:game.protocol,workingDirectory:server.managedDirectory?"managed":"external",passwordConfigured:Boolean(server.serverPassword),adminPasswordConfigured:Boolean(server.adminPassword),ownerConfigured:Boolean(server.ownerId)},checks:{bindAddressAssigned:bindAssigned,bindAddressAvailable:await portAvailable(server.port,game.protocol,server.bindAddress),diskFreeMb:stat?Math.round(Number(stat.bavail)*Number(stat.bsize)/1048576):null,checklist},jobs,logs:logs.map(line=>({...line,message:redactLogSecrets(line.message)}))};
  if(new URL(request.url).searchParams.get("download")==="1")return new Response(JSON.stringify(report,null,2),{headers:{"content-type":"application/json","content-disposition":`attachment; filename="serverhub-diagnostics-${server.id}.json"`}});
  return NextResponse.json(report);
 }
