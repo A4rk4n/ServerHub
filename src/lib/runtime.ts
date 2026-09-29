@@ -3,6 +3,7 @@ import { diagnoseInstallationFailure, installationFailureMessage } from "./insta
 import { waitForManagedExecutableExit } from "./managed-process";
 import { isAssignedLocalAddress, validateDragonwildsPreflight } from "./provider-preflight";
 import { minimumProcessStabilityMs, processStabilityReady, readinessProbeFor, readinessRemediation, readinessWaitingReason } from "./readiness-policy";
+import { activateServerStaging } from "./server-activation";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -1159,20 +1160,6 @@ async function validateInstalledArtifacts(server: Server, root: string) {
   }
 }
 
-async function activateStaging(root: string, staging: string, jobId: number) {
-  const previous = `${root}.serverhub-previous-${jobId}`;
-  await fsp.rm(previous, { recursive: true, force: true });
-  const hasCurrent = await fsp.stat(root).then(() => true).catch(() => false);
-  if (hasCurrent) await fsp.rename(root, previous);
-  try {
-    await fsp.rename(staging, root);
-  } catch (error) {
-    if (hasCurrent) await fsp.rename(previous, root).catch(() => {});
-    throw error;
-  }
-  if (hasCurrent) await fsp.rm(previous, { recursive: true, force: true });
-}
-
 async function executeInstallation(job: InstallationJob, server: Server, signal: AbortSignal) {
   const root = serverDir(server);
   const staged = server.managedDirectory ? `${root}.serverhub-install-${job.id}` : root;
@@ -1217,8 +1204,13 @@ async function executeInstallation(job: InstallationJob, server: Server, signal:
     throwIfCancelled(signal);
 
     if (server.managedDirectory) {
-      await context.report("activating", 96, "Activating the validated installation");
-      await activateStaging(root, staged, job.id);
+      await context.report("activating", 96, "Activating and re-verifying the staged installation");
+      await activateServerStaging(root, staged, `${root}.serverhub-previous-${job.id}`, async activated => {
+        await validateInstalledArtifacts(server, activated);
+        const expectedConfigRoot = server.gameId === "dragonwilds" ? path.join(activated,"RSDragonwilds","Saved","Config",hostPlatform() === "win32" ? "WindowsServer" : "LinuxServer","DedicatedServer.ini") : null;
+        if (expectedConfigRoot) await fsp.stat(expectedConfigRoot);
+      });
+      await context.report("activating", 99, "Activated installation passed post-swap verification", "success");
     }
 
     await db
