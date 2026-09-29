@@ -46,7 +46,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", type: "backup", payload: "", intervalMin: 360 });
+  const [form, setForm] = useState({ name: "", type: "backup", payload: "", intervalMin: 360, scheduleKind: "interval", scheduledFor: "" });
 
   async function load() {
     try {
@@ -75,7 +75,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
       const j = await r.json();
       if (!r.ok) return setErr(j.error ?? "Failed");
       setOpen(false);
-      setForm({ name: "", type: "backup", payload: "", intervalMin: 360 });
+      setForm({ name: "", type: "backup", payload: "", intervalMin: 360, scheduleKind: "interval", scheduledFor: "" });
       await load();
     } finally {
       setBusy(false);
@@ -148,7 +148,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
                     </div>
                     {t.payload && <p className="mt-0.5 truncate font-mono text-[11px] text-plum-500">“{t.payload}”</p>}
                     <p className="mt-1.5 text-[11.5px] text-plum-500">
-                      every {fmtInterval(t.intervalMin)} · next <span className="font-medium text-plum-700">{t.enabled ? inTime(t.nextRunAt) : "paused"}</span>
+                      {t.scheduleKind === "once" ? "one time" : `every ${fmtInterval(t.intervalMin)}`} · next <span className="font-medium text-plum-700">{t.enabled ? inTime(t.nextRunAt) : t.scheduleKind === "once" && t.lastRunAt ? "completed" : "paused"}</span>
                       {t.lastRunAt ? ` · last ${timeAgo(t.lastRunAt)}` : " · never run"}
                     </p>
                   </div>
@@ -213,13 +213,14 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
             </Field>
           )}
           {needsPayload&&form.payload.trim()&&<div className="rounded-xl border border-candy-200 bg-plum-900 p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-candy-200">Exact command preview</p><code className="mt-1 block break-all text-xs text-white">{form.type==="broadcast"?`say ${form.payload.trim()}`:form.payload.trim()}</code></div>}
-          <Field label="Repeat every">
+          <Field label="Schedule"><div className="grid grid-cols-2 gap-2"><button className={cn("rounded-xl border p-2 text-xs font-semibold",form.scheduleKind==="interval"?"border-candy-400 bg-candy-50":"border-candy-200")} onClick={()=>setForm({...form,scheduleKind:"interval"})}>Recurring interval</button><button className={cn("rounded-xl border p-2 text-xs font-semibold",form.scheduleKind==="once"?"border-candy-400 bg-candy-50":"border-candy-200")} onClick={()=>setForm({...form,scheduleKind:"once"})}>One-time action</button></div></Field>
+          {form.scheduleKind==="once"?<Field label="Run at"><input className={inputCls} type="datetime-local" value={form.scheduledFor} onChange={event=>setForm({...form,scheduledFor:event.target.value})}/></Field>:<Field label="Repeat every">
             <select className={inputCls} value={form.intervalMin} onChange={(e) => setForm({ ...form, intervalMin: Number(e.target.value) })}>
               {INTERVALS.map((i) => (
                 <option key={i.min} value={i.min} className="bg-white">{i.label}</option>
               ))}
             </select>
-          </Field>
+          </Field>}
           {err && <p className="text-[12px] text-red-500">{err}</p>}
           <div className="flex justify-end gap-2 pt-1">
             <Btn variant="ghost" onClick={() => setOpen(false)}>Cancel</Btn>
