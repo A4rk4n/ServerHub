@@ -908,6 +908,24 @@ async function runLogged(context: InstallContext, executable: string, args: stri
   });
 }
 
+async function runSteamCmdLogged(context: InstallContext, executable: string, args: string[], cwd: string) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try { await runLogged(context, executable, args, cwd); return; }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const bootstrapRestart = /exited with code 7/i.test(message) && /(?:Downloading update|Installing update|Update complete, launching Steamcmd)/i.test(message);
+      if (!bootstrapRestart || attempt === 3) throw error;
+      await context.report("installing", 25, `SteamCMD updated its bootstrap files; waiting for restart (${attempt}/3)`);
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, 8_000);
+        const cancel = () => { clearTimeout(timer); reject(new InstallationCancelledError(cancellationMessage(context.signal))); };
+        context.signal.addEventListener("abort", cancel, { once: true });
+        timer.unref?.();
+      });
+    }
+  }
+}
+
 async function installSteam(server: Server, root: string, context: InstallContext) {
   const game = getGame(server.gameId);
   if (!game.steamAppId) throw new Error(`${game.name} has no verified SteamCMD application ID.`);
@@ -925,12 +943,12 @@ async function installSteam(server: Server, root: string, context: InstallContex
     // through Windows' native command resolution while preserving each arg.
     const ps = (value: string) => `'${value.replaceAll("'", "''")}'`;
     const command = `$exe=${ps(steamcmd)}; $arguments=@(${steamArgs.map(ps).join(",")}); & $exe @arguments; exit $LASTEXITCODE`;
-    await runLogged(context, "powershell.exe", [
+    await runSteamCmdLogged(context, "powershell.exe", [
       "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
       "-Command", command,
     ], path.dirname(steamcmd));
   } else {
-    await runLogged(context, steamcmd, steamArgs, path.dirname(steamcmd));
+    await runSteamCmdLogged(context, steamcmd, steamArgs, path.dirname(steamcmd));
   }
   await recordSuccessfulToolUse("steamcmd",`Installed or validated Steam app ${game.steamAppId}`);
   if(hostPlatform() === "win32") await recordSuccessfulToolUse("powershell","Launched SteamCMD for a successful managed installation");
