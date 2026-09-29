@@ -10,9 +10,9 @@ import { Readable } from "node:stream";
 import { finished, pipeline } from "node:stream/promises";
 import yauzl from "yauzl";
 import * as tar from "tar";
-import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db, dbPath, sqliteClient } from "@/db";
-import { activity, backups, consoleLogs, incidents, installationEvents, installationJobs, playerSessions, players, servers, tasks } from "@/db/schema";
+import { activity, backups, consoleLogs, incidents, installationEvents, installationJobs, moderationActions, playerSessions, players, servers, tasks } from "@/db/schema";
 import type { Backup, InstallationJob, Server } from "@/db/schema";
 import { getGame, type InstallerKind } from "./games";
 import { observationKey, reconcileObservationKeys } from "./player-observations";
@@ -1904,11 +1904,14 @@ export async function restoreBackup(serverId: number, backupId: number) {
 // Scheduler and logs
 // ---------------------------------------------------------------------------
 
+async function enforceExpiredModeration(){const now=new Date(),pending=await db.select().from(moderationActions).where(and(eq(moderationActions.status,"pending-expiration"),lte(moderationActions.expiresAt,now)));for(const record of pending){if(record.expirationAttempts>=3){await db.update(moderationActions).set({status:"expiration-failed"}).where(eq(moderationActions.id,record.id));continue}const [server]=await db.select().from(servers).where(eq(servers.id,record.serverId));const [player]=await db.select().from(players).where(eq(players.id,record.playerId));if(!server||!player){await db.update(moderationActions).set({status:"expiration-failed"}).where(eq(moderationActions.id,record.id));continue}const command=`pardon ${record.target}`,result=await runCommand(server,command);const attempts=record.expirationAttempts+1;await db.update(moderationActions).set({expirationAttempts:attempts,lastExpirationAttemptAt:now,status:result.ok?"expiration-enforced":attempts>=3?"expiration-failed":"pending-expiration"}).where(eq(moderationActions.id,record.id));await db.insert(moderationActions).values({serverId:server.id,playerId:player.id,action:"automatic-unban",target:record.target,command,reason:`Temporary ban #${record.id} expired`,status:result.ok?"sent":"failed"});if(result.ok)await db.update(players).set({isBanned:false}).where(eq(players.id,player.id));}}
+
 export async function sweepTasks(serverId?: number) {
   await ensureRuntimeInitialized();
   if (state.sweeping) return;
   state.sweeping = true;
   try {
+    await enforceExpiredModeration();
     const now = new Date();
     const enabled = await db.select().from(tasks).where(eq(tasks.enabled, true));
     for (const task of enabled) {

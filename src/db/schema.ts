@@ -97,7 +97,7 @@ export const players = sqliteTable(
 );
 
 export const moderationActions = sqliteTable("moderation_actions", {
-  id: integer("id").primaryKey({ autoIncrement: true }), serverId: integer("server_id").notNull(), playerId: integer("player_id").notNull(), action: text("action").notNull(), target: text("target").notNull(), command: text("command").notNull(), reason: text("reason").notNull().default(""), status: text("status").notNull(), expiresAt: ts("expires_at"), createdAt: tsNow("created_at"),
+  id: integer("id").primaryKey({ autoIncrement: true }), serverId: integer("server_id").notNull(), playerId: integer("player_id").notNull(), action: text("action").notNull(), target: text("target").notNull(), command: text("command").notNull(), reason: text("reason").notNull().default(""), status: text("status").notNull(), expirationAttempts: integer("expiration_attempts").notNull().default(0), lastExpirationAttemptAt: ts("last_expiration_attempt_at"), expiresAt: ts("expires_at"), createdAt: tsNow("created_at"),
 }, (t) => [index("moderation_actions_server_idx").on(t.serverId, t.createdAt)]);
 
 export const playerSessions = sqliteTable("player_sessions", {

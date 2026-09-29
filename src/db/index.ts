@@ -102,7 +102,7 @@ const DDL = [
   )`,
   `CREATE INDEX IF NOT EXISTS players_server_idx ON players (server_id)`,
   `CREATE TABLE IF NOT EXISTS moderation_actions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, server_id INTEGER NOT NULL, player_id INTEGER NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL, command TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, expires_at INTEGER, created_at INTEGER NOT NULL
+    id INTEGER PRIMARY KEY AUTOINCREMENT, server_id INTEGER NOT NULL, player_id INTEGER NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL, command TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, expiration_attempts INTEGER NOT NULL DEFAULT 0, last_expiration_attempt_at INTEGER, expires_at INTEGER, created_at INTEGER NOT NULL
   )`,
   `CREATE TABLE IF NOT EXISTS player_sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT, server_id INTEGER NOT NULL, provider TEXT NOT NULL, observation_key TEXT NOT NULL, display_name TEXT NOT NULL, joined_at INTEGER NOT NULL, left_at INTEGER, duration_sec INTEGER NOT NULL DEFAULT 0, score INTEGER NOT NULL DEFAULT 0
@@ -238,7 +238,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
     owner_id: "TEXT NOT NULL DEFAULT ''",
     eula_accepted: "INTEGER NOT NULL DEFAULT 0",
   },
-  moderation_actions: { expires_at: "INTEGER" },
+  moderation_actions: { expires_at: "INTEGER", expiration_attempts: "INTEGER NOT NULL DEFAULT 0", last_expiration_attempt_at: "INTEGER" },
   players: { trusted: "INTEGER NOT NULL DEFAULT 0", notes: "TEXT NOT NULL DEFAULT ''" },
   backups: {
     archive_path: "TEXT NOT NULL DEFAULT ''",
@@ -250,7 +250,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
   },
 };
 
-export const SCHEMA_VERSION = 2940;
+export const SCHEMA_VERSION = 2950;
 
 function migrate(db: DatabaseSync) {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -275,7 +275,7 @@ function migrate(db: DatabaseSync) {
     db.prepare("UPDATE servers SET bind_address = ? WHERE bind_address = ?")
       .run("192.168.1.210", "185.83.148.20");
     db.prepare("INSERT INTO schema_migrations (version, applied_at, description) VALUES (?, ?, ?)")
-      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add moderation expiration metadata");
+      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add restart-safe temporary ban enforcement");
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
