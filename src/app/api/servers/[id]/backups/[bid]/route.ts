@@ -1,6 +1,4 @@
 import fs from "node:fs";
-import crypto from "node:crypto";
-import * as tar from "tar";
 import { Readable } from "node:stream";
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
@@ -8,9 +6,9 @@ import { db } from "@/db";
 import { backups, servers } from "@/db/schema";
 import { act, backupArchivePath, deleteBackupFile, restoreBackup } from "@/lib/runtime";
 import { safeFileName } from "@/lib/storage";
+import { inspectBackupArchive } from "@/lib/backup-validation";
 
 export const dynamic = "force-dynamic";
-async function checksum(file:string){return new Promise<string>((resolve,reject)=>{const hash=crypto.createHash("sha256"),stream=fs.createReadStream(file);stream.on("data",chunk=>hash.update(chunk));stream.once("error",reject);stream.once("end",()=>resolve(hash.digest("hex")))})}
 
 type Context = { params: Promise<{ id: string; bid: string }> };
 
@@ -57,9 +55,7 @@ export async function POST(req: Request, ctx: Context) {
   if (action === "verify" || action === "preview") {
     if (!backup || backup.status !== "complete") return NextResponse.json({error:"Backup is unavailable"},{status:404});
     const archive=backupArchivePath(backup); if(!fs.existsSync(archive))return NextResponse.json({error:"Backup archive is missing"},{status:404});
-    const actual=await checksum(archive); const entries:string[]=[]; await tar.t({file:archive,gzip:true,strict:true,onentry:entry=>{if(entries.length<5000)entries.push(entry.path)}});
-    const valid=!backup.checksum||actual===backup.checksum; if(action==="verify")return NextResponse.json({ok:valid,checksum:actual,expected:backup.checksum,entries:entries.length},{status:valid?200:409});
-    const stat=await fs.promises.stat(archive); return NextResponse.json({ok:valid,checksumValid:valid,archiveBytes:stat.size,entries:entries.length,sample:entries.slice(0,20)});
+    try { const result=await inspectBackupArchive(archive,backup.checksum); if(action==="verify")return NextResponse.json({ok:result.valid,checksum:result.actualChecksum,expected:result.expectedChecksum,entries:result.entries},{status:result.valid?200:409}); return NextResponse.json({ok:result.valid,checksumValid:result.valid,archiveBytes:result.archiveBytes,entries:result.entries,sample:result.sample}); } catch(error) { return NextResponse.json({error:error instanceof Error?error.message:"Backup validation failed"},{status:409}); }
   }
   if (action === "manifest") {
     const [server] = await db.select().from(servers).where(eq(servers.id, id));
