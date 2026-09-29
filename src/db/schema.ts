@@ -56,6 +56,11 @@ export const servers = sqliteTable("servers", {
   lastStartedAt: ts("last_started_at"),
 });
 
+export const serverTemplates = sqliteTable("server_templates", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(), gameId: text("game_id").notNull(), config: text("config").notNull(), createdAt: tsNow("created_at"), updatedAt: tsNow("updated_at"),
+});
+
 export const consoleLogs = sqliteTable(
   "console_logs",
   {
@@ -224,6 +229,7 @@ export const installationEvents = sqliteTable(
   ]
 );
 
+export type ServerTemplate = typeof serverTemplates.$inferSelect;
 export type Server = typeof servers.$inferSelect;
 export type ConsoleLog = typeof consoleLogs.$inferSelect;
 export type Player = typeof players.$inferSelect;

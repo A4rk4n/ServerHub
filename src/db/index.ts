@@ -71,6 +71,9 @@ const DDL = [
     updated_at INTEGER NOT NULL,
     last_started_at INTEGER
   )`,
+  `CREATE TABLE IF NOT EXISTS server_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, game_id TEXT NOT NULL, config TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS console_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     server_id INTEGER NOT NULL,
@@ -233,7 +236,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
   },
 };
 
-export const SCHEMA_VERSION = 2700;
+export const SCHEMA_VERSION = 2800;
 
 function migrate(db: DatabaseSync) {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -258,7 +261,7 @@ function migrate(db: DatabaseSync) {
     db.prepare("UPDATE servers SET bind_address = ? WHERE bind_address = ?")
       .run("192.168.1.210", "185.83.148.20");
     db.prepare("INSERT INTO schema_migrations (version, applied_at, description) VALUES (?, ?, ?)")
-      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add persistent health and incident history");
+      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add reusable server configuration templates");
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
