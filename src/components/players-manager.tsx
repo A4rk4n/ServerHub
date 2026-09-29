@@ -2,7 +2,7 @@
 
 import { Ban, Clock3, Crown, LogOut, ShieldCheck, Search, ShieldOff, Star, Undo2, Users } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { Player, PlayerSession } from "@/db/schema";
+import type { ModerationActionRecord, Player, PlayerSession } from "@/db/schema";
 type PlayerView=Player&{observedIdentity:boolean;sessionCount:number;totalObservedSeconds:number;currentSessionSeconds:number;firstObservedAt:Date};
 import { cn, hexA, initialAvatarHue, timeAgo } from "@/lib/format";
 import { Btn, Empty, Modal, Spin, inputCls } from "./ui";
@@ -10,6 +10,9 @@ import { Btn, Empty, Modal, Spin, inputCls } from "./ui";
 export function PlayersManager({ serverId, accent }: { serverId: number; accent: string }) {
   const [players, setPlayers] = useState<PlayerView[] | null>(null);
   const [sessions, setSessions] = useState<PlayerSession[]>([]);
+  const [moderation,setModeration]=useState<ModerationActionRecord[]>([]);
+  const [reason,setReason]=useState("");
+  const [durationMinutes,setDurationMinutes]=useState(0);
   const [banTarget, setBanTarget] = useState<PlayerView | null>(null);
   const [busy, setBusy] = useState(false);
   const [query,setQuery]=useState("");
@@ -23,6 +26,7 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
       const j = await r.json();
       if (j.players) setPlayers(j.players);
       if (j.sessions) setSessions(j.sessions);
+      if (j.moderation) setModeration(j.moderation);
     } catch {}
   }
   useEffect(() => {
@@ -32,15 +36,15 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverId]);
 
-  async function act(player: PlayerView, action: string) {
-    const verb=action==="unban"?"pardon":action; const command=`${verb} ${player.name}`;
+  async function act(player: PlayerView, action: string, moderationReason="", duration=0) {
+    const verb=action==="unban"?"pardon":action; const command=`${verb} ${player.name}${moderationReason.trim()&&["kick","ban"].includes(action)?` ${moderationReason.trim()}`:""}`;
     if(!window.confirm(`Send this exact moderation command?\n\n${command}`))return;
     setBusy(true);
     try {
       await fetch(`/api/servers/${serverId}/players/${player.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, confirmedCommand: command }),
+        body: JSON.stringify({ action, reason:moderationReason, durationMinutes:duration, confirmedCommand: command }),
       });
       await load();
     } finally {
@@ -163,15 +167,16 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
         </p>
       )}
 
+      {moderation.length>0&&<section className="panel p-5"><h3 className="font-display mb-3 text-sm font-semibold text-plum-900">Moderation audit</h3><div className="max-h-72 space-y-2 overflow-auto">{moderation.slice(0,30).map(item=><div key={item.id} className="rounded-xl border border-candy-100 px-3 py-2 text-xs"><div className="flex justify-between"><strong>{item.action} · {item.target}</strong><span className={item.status==="sent"?"text-emerald-600":"text-red-500"}>{item.status}</span></div><code className="mt-1 block text-[10px] text-plum-500">{item.command}</code>{item.expiresAt&&<p className="mt-1 text-[10px] text-amber-600">Expiration metadata: {new Date(item.expiresAt).toLocaleString()} · manual unban required</p>}</div>)}</div></section>}
       <Modal open={!!noteTarget} onClose={()=>setNoteTarget(null)} title={`Notes for ${noteTarget?.name}`}><textarea className={`${inputCls} min-h-28 w-full`} value={note} maxLength={1000} onChange={event=>setNote(event.target.value)} placeholder="Local administrator notes…"/><p className="mt-2 text-[11px] text-plum-400">Stored locally and excluded from support bundles.</p><div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={()=>setNoteTarget(null)}>Cancel</Btn><Btn variant="primary" loading={busy} onClick={()=>noteTarget&&saveProfile(noteTarget,{notes:note})}>Save notes</Btn></div></Modal>
       <Modal open={!!banTarget} onClose={() => setBanTarget(null)} title={`Ban ${banTarget?.name}?`}>
         <p className="text-[13.5px] leading-relaxed text-plum-500">
           The exact command below will be sent after confirmation. <span className="text-plum-800">{banTarget?.name}</span> will be disconnected and cannot rejoin until pardoned.
-          <code className="mt-3 block rounded-lg bg-plum-900 p-3 text-xs text-white">ban {banTarget?.name}</code>
-        </p>
+          <code className="mt-3 block rounded-lg bg-plum-900 p-3 text-xs text-white">ban {banTarget?.name}{reason.trim()?` ${reason.trim()}`:""}</code>
+        </p><input className={`${inputCls} mt-4 w-full`} value={reason} maxLength={120} onChange={event=>setReason(event.target.value)} placeholder="Reason (optional)"/><input className={`${inputCls} mt-2 w-full`} type="number" min="0" max="525600" value={durationMinutes} onChange={event=>setDurationMinutes(Number(event.target.value))} placeholder="Expiration minutes (metadata only)"/><p className="mt-2 text-[11px] text-amber-600">Expiration is recorded for administrators; automatic unban is not enabled.</p>
         <div className="mt-5 flex justify-end gap-2">
           <Btn variant="ghost" onClick={() => setBanTarget(null)}>Cancel</Btn>
-          <Btn variant="danger" loading={busy} onClick={() => banTarget && act(banTarget, "ban")}>
+          <Btn variant="danger" loading={busy} onClick={() => banTarget && act(banTarget, "ban", reason, durationMinutes)}>
             <Ban size={14} /> Ban player
           </Btn>
         </div>
