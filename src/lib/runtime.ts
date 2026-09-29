@@ -12,7 +12,7 @@ import yauzl from "yauzl";
 import * as tar from "tar";
 import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { db, dbPath, sqliteClient } from "@/db";
-import { activity, backups, consoleLogs, installationEvents, installationJobs, players, servers, tasks } from "@/db/schema";
+import { activity, backups, consoleLogs, incidents, installationEvents, installationJobs, players, servers, tasks } from "@/db/schema";
 import type { Backup, InstallationJob, Server } from "@/db/schema";
 import { getGame, type InstallerKind } from "./games";
 import { isProtectedSecret, protectAndVerify, revealSecret } from "./credential-vault";
@@ -94,6 +94,13 @@ export async function act(serverId: number | null, kind: string, message: string
 export async function setStatus(id: number, status: string) {
   await db.update(servers).set({ status, updatedAt: new Date() }).where(eq(servers.id, id));
 }
+
+async function setHealth(id:number,status:string,reason:string,probe:string,success:boolean){
+ const [current]=await db.select({failures:servers.healthFailures}).from(servers).where(eq(servers.id,id)); const failures=success?0:(current?.failures??0)+1;
+ await db.update(servers).set({healthStatus:success?status:(failures>=3?status:"checking"),healthReason:reason,healthProbe:probe,healthFailures:failures,...(success?{lastHealthSuccessAt:new Date()}:{lastHealthFailureAt:new Date()}),updatedAt:new Date()}).where(eq(servers.id,id));
+}
+async function incident(serverId:number,severity:string,component:string,summary:string,remediation=""){await db.insert(incidents).values({serverId,severity,component,summary:redactLogSecrets(summary),remediation:redactLogSecrets(remediation)});}
+
 
 async function migrateCredentialVault() {
   if (process.platform !== "win32") return;
@@ -1563,14 +1570,17 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
     entry.monitor = setInterval(() => void sampleEntry(entry).catch(() => {}), 2_000);
     entry.monitor.unref?.();
 
+    const probe=server.gameId.startsWith("minecraft")?"minecraft-status":["ark","rust","valheim"].includes(server.gameId)?"steam-a2s":getGame(server.gameId).protocol==="UDP"?"process-stability":"tcp-connect";
+    await db.update(servers).set({healthStatus:"checking",healthReason:"Waiting for provider readiness",healthProbe:probe,updatedAt:new Date()}).where(eq(servers.id,id));
     const ready = await waitUntilReady(entry);
-    if (!state.processes.has(id)) return { ok: false, reason: "The server process exited during startup. Check Console for details." };
-    if (!ready) {
+    if (!state.processes.has(id)) { await setHealth(id,"blocked","Process exited during startup",probe,false); await incident(id,"error","readiness","Process exited during startup","Review Console and run Diagnostics"); return { ok: false, reason: "The server process exited during startup. Check Console for details." }; }
+    if (!ready) { await setHealth(id,"blocked",`Readiness timed out after ${server.readinessTimeoutSec} seconds`,probe,false); await incident(id,"error","readiness","Provider readiness timed out","Review bind address, ports, firewall, and provider logs");
       entry.stopping = true;
       killProcessTree(child.pid, true);
       throw new Error(`Readiness probe timed out after ${server.readinessTimeoutSec} seconds on ${server.bindAddress}:${server.port}.`);
     }
     await db.update(servers).set({ status: "online", lastStartedAt: new Date(), updatedAt: new Date() }).where(eq(servers.id, id));
+    await setHealth(id,"ready","Provider readiness probe passed",probe,true);
     await logLine(id, "success", "Runtime", `Process started with PID ${child.pid}.`);
     await act(id, "power", `${server.name} started (PID ${child.pid})`);
     return { ok: true };

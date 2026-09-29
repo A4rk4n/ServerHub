@@ -41,6 +41,12 @@ const DDL = [
     bind_address TEXT NOT NULL DEFAULT '192.168.1.210',
     public_address TEXT NOT NULL DEFAULT '185.83.148.20',
     readiness_timeout_sec INTEGER NOT NULL DEFAULT 60,
+    health_status TEXT NOT NULL DEFAULT 'unknown',
+    health_reason TEXT NOT NULL DEFAULT '',
+    health_probe TEXT NOT NULL DEFAULT 'none',
+    health_failures INTEGER NOT NULL DEFAULT 0,
+    last_health_success_at INTEGER,
+    last_health_failure_at INTEGER,
     memory_mb INTEGER NOT NULL DEFAULT 4096,
     max_players INTEGER NOT NULL DEFAULT 20,
     motd TEXT NOT NULL DEFAULT '',
@@ -144,6 +150,12 @@ const DDL = [
     ts INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS activity_ts_idx ON activity (id)`,
+  `CREATE TABLE IF NOT EXISTS incidents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, server_id INTEGER, severity TEXT NOT NULL DEFAULT 'warning',
+    component TEXT NOT NULL, summary TEXT NOT NULL, remediation TEXT NOT NULL DEFAULT '', resolved INTEGER NOT NULL DEFAULT 0,
+    related_type TEXT NOT NULL DEFAULT '', related_id INTEGER, created_at INTEGER NOT NULL, resolved_at INTEGER
+  )`,
+  `CREATE INDEX IF NOT EXISTS incidents_server_idx ON incidents (server_id, id)`,
   `CREATE TABLE IF NOT EXISTS installation_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     server_id INTEGER NOT NULL,
@@ -191,6 +203,12 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
     bind_address: "TEXT NOT NULL DEFAULT '192.168.1.210'",
     public_address: "TEXT NOT NULL DEFAULT '185.83.148.20'",
     readiness_timeout_sec: "INTEGER NOT NULL DEFAULT 60",
+    health_status: "TEXT NOT NULL DEFAULT 'unknown'",
+    health_reason: "TEXT NOT NULL DEFAULT ''",
+    health_probe: "TEXT NOT NULL DEFAULT 'none'",
+    health_failures: "INTEGER NOT NULL DEFAULT 0",
+    last_health_success_at: "INTEGER",
+    last_health_failure_at: "INTEGER",
     launch_command: "TEXT NOT NULL DEFAULT ''",
     launch_args: "TEXT NOT NULL DEFAULT ''",
     working_directory: "TEXT NOT NULL DEFAULT ''",
@@ -215,7 +233,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
   },
 };
 
-export const SCHEMA_VERSION = 2300;
+export const SCHEMA_VERSION = 2700;
 
 function migrate(db: DatabaseSync) {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -240,7 +258,7 @@ function migrate(db: DatabaseSync) {
     db.prepare("UPDATE servers SET bind_address = ? WHERE bind_address = ?")
       .run("192.168.1.210", "185.83.148.20");
     db.prepare("INSERT INTO schema_migrations (version, applied_at, description) VALUES (?, ?, ?)")
-      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add separate player-facing public address");
+      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add persistent health and incident history");
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");

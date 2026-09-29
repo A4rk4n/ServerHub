@@ -25,6 +25,12 @@ export const servers = sqliteTable("servers", {
   bindAddress: text("bind_address").notNull().default("192.168.1.210"),
   publicAddress: text("public_address").notNull().default("185.83.148.20"),
   readinessTimeoutSec: integer("readiness_timeout_sec").notNull().default(60),
+  healthStatus: text("health_status").notNull().default("unknown"),
+  healthReason: text("health_reason").notNull().default(""),
+  healthProbe: text("health_probe").notNull().default("none"),
+  healthFailures: integer("health_failures").notNull().default(0),
+  lastHealthSuccessAt: ts("last_health_success_at"),
+  lastHealthFailureAt: ts("last_health_failure_at"),
   memoryMb: integer("memory_mb").notNull().default(4096),
   maxPlayers: integer("max_players").notNull().default(20),
   motd: text("motd").notNull().default(""),
@@ -162,6 +168,21 @@ export const activity = sqliteTable(
  * re-queued without losing a partially downloaded artifact in its staging
  * directory.
  */
+
+export const incidents = sqliteTable("incidents", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  serverId: integer("server_id"),
+  severity: text("severity").notNull().default("warning"),
+  component: text("component").notNull(),
+  summary: text("summary").notNull(),
+  remediation: text("remediation").notNull().default(""),
+  resolved: integer("resolved", { mode: "boolean" }).notNull().default(false),
+  relatedType: text("related_type").notNull().default(""),
+  relatedId: integer("related_id"),
+  createdAt: tsNow("created_at"),
+  resolvedAt: ts("resolved_at"),
+}, (t) => [index("incidents_server_idx").on(t.serverId,t.id)]);
+
 export const installationJobs = sqliteTable(
   "installation_jobs",
   {
@@ -211,6 +232,7 @@ export type Task = typeof tasks.$inferSelect;
 export type Addon = typeof addons.$inferSelect;
 export type FileRow = typeof files.$inferSelect;
 export type Activity = typeof activity.$inferSelect;
+export type Incident = typeof incidents.$inferSelect;
 export type InstallationJob = typeof installationJobs.$inferSelect;
 export type InstallationEvent = typeof installationEvents.$inferSelect;
 
