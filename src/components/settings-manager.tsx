@@ -46,6 +46,7 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
     workingDirectory: initial.workingDirectory,
   });
   const [saving, setSaving] = useState(false);
+  const [resettingCredentials, setResettingCredentials] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
@@ -110,6 +111,17 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
     try { const response=await fetch(`/api/servers/${initial.id}/updates`,{method:"POST"}); const body=await response.json(); if(!response.ok) throw new Error(body.error??body.reason??"Update failed"); router.refresh(); }
     catch(error) { setErr(error instanceof Error?error.message:String(error)); }
     finally { setUpdating(false); }
+  }
+
+  async function resetCredentials() {
+    if (!window.confirm("Reset all stored passwords and the Player/Owner ID for this server? This cannot decrypt or recover credentials protected by another Windows account.")) return;
+    setResettingCredentials(true); setErr(null);
+    try {
+      const response=await fetch(`/api/servers/${initial.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({resetCredentials:true})});
+      const body=await response.json(); if(!response.ok) throw new Error(body.error??"Credential reset failed");
+      setForm(current=>({...current,serverPassword:""})); setSavedAt(Date.now()); router.refresh();
+    } catch(error) { setErr(error instanceof Error?error.message:String(error)); }
+    finally { setResettingCredentials(false); }
   }
 
   async function destroy() {
@@ -364,9 +376,14 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
           <p className="mb-4 text-[12px] leading-relaxed text-plum-500">
             Permanently deletes <span className="text-plum-800">{initial.name}</span>, its backups, logs and schedules. {initial.managedDirectory ? "Managed server files and worlds are also deleted." : "Your external working directory is left untouched."} This cannot be undone.
           </p>
-          <Btn variant="danger" onClick={() => setConfirmDel(true)}>
-            <Trash2 size={14} /> Delete server
-          </Btn>
+          <div className="flex flex-wrap gap-2">
+            <Btn variant="ghost" loading={resettingCredentials} onClick={() => void resetCredentials()}>
+              <KeyRound size={14} /> Reset stored credentials
+            </Btn>
+            <Btn variant="danger" onClick={() => setConfirmDel(true)}>
+              <Trash2 size={14} /> Delete server
+            </Btn>
+          </div>
         </section>
       </div>
 
