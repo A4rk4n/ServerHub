@@ -102,7 +102,7 @@ const DDL = [
   )`,
   `CREATE INDEX IF NOT EXISTS players_server_idx ON players (server_id)`,
   `CREATE TABLE IF NOT EXISTS tool_jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, tool_id TEXT NOT NULL, operation TEXT NOT NULL, status TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT '', rollback_available INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER)`,
-  `CREATE TABLE IF NOT EXISTS tool_inventory (id TEXT PRIMARY KEY, name TEXT NOT NULL, ownership TEXT NOT NULL, path_category TEXT NOT NULL, available INTEGER NOT NULL DEFAULT 0, detected_version TEXT NOT NULL DEFAULT '', expected_version TEXT NOT NULL DEFAULT '', integrity_status TEXT NOT NULL DEFAULT 'unknown', last_verified_at INTEGER, last_used_at INTEGER, last_error TEXT NOT NULL DEFAULT '', update_status TEXT NOT NULL DEFAULT 'unchecked', available_version TEXT NOT NULL DEFAULT '', update_source TEXT NOT NULL DEFAULT '', last_update_check_at INTEGER, fingerprint_sha256 TEXT NOT NULL DEFAULT '', fingerprint_size INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS tool_inventory (id TEXT PRIMARY KEY, name TEXT NOT NULL, ownership TEXT NOT NULL, path_category TEXT NOT NULL, available INTEGER NOT NULL DEFAULT 0, detected_version TEXT NOT NULL DEFAULT '', expected_version TEXT NOT NULL DEFAULT '', integrity_status TEXT NOT NULL DEFAULT 'unknown', last_verified_at INTEGER, last_used_at INTEGER, last_error TEXT NOT NULL DEFAULT '', update_status TEXT NOT NULL DEFAULT 'unchecked', available_version TEXT NOT NULL DEFAULT '', update_source TEXT NOT NULL DEFAULT '', last_update_check_at INTEGER, fingerprint_sha256 TEXT NOT NULL DEFAULT '', fingerprint_size INTEGER NOT NULL DEFAULT 0, signature_status TEXT NOT NULL DEFAULT 'unchecked', signature_publisher TEXT NOT NULL DEFAULT '', signature_thumbprint TEXT NOT NULL DEFAULT '', signature_verified_at INTEGER, updated_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS tool_operations (id INTEGER PRIMARY KEY AUTOINCREMENT, tool_id TEXT NOT NULL, operation TEXT NOT NULL, status TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', version_before TEXT NOT NULL DEFAULT '', version_after TEXT NOT NULL DEFAULT '', started_at INTEGER NOT NULL, completed_at INTEGER)`,
   `CREATE TABLE IF NOT EXISTS task_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, retry_of_run_id INTEGER, task_id INTEGER NOT NULL, server_id INTEGER NOT NULL, task_name TEXT NOT NULL, type TEXT NOT NULL, command TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL
@@ -248,7 +248,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
     owner_id: "TEXT NOT NULL DEFAULT ''",
     eula_accepted: "INTEGER NOT NULL DEFAULT 0",
   },
-  tool_inventory: { update_status: "TEXT NOT NULL DEFAULT 'unchecked'", available_version: "TEXT NOT NULL DEFAULT ''", update_source: "TEXT NOT NULL DEFAULT ''", last_update_check_at: "INTEGER", fingerprint_sha256: "TEXT NOT NULL DEFAULT ''", fingerprint_size: "INTEGER NOT NULL DEFAULT 0" },
+  tool_inventory: { update_status: "TEXT NOT NULL DEFAULT 'unchecked'", available_version: "TEXT NOT NULL DEFAULT ''", update_source: "TEXT NOT NULL DEFAULT ''", last_update_check_at: "INTEGER", fingerprint_sha256: "TEXT NOT NULL DEFAULT ''", fingerprint_size: "INTEGER NOT NULL DEFAULT 0", signature_status: "TEXT NOT NULL DEFAULT 'unchecked'", signature_publisher: "TEXT NOT NULL DEFAULT ''", signature_thumbprint: "TEXT NOT NULL DEFAULT ''", signature_verified_at: "INTEGER" },
   tasks: { missed_policy: "TEXT NOT NULL DEFAULT 'run'", schedule_time: "TEXT NOT NULL DEFAULT '09:00'", schedule_weekday: "INTEGER NOT NULL DEFAULT 1", schedule_kind: "TEXT NOT NULL DEFAULT 'interval'" },
   task_runs: { retry_of_run_id: "INTEGER" },
   moderation_actions: { expires_at: "INTEGER", expiration_attempts: "INTEGER NOT NULL DEFAULT 0", last_expiration_attempt_at: "INTEGER" },
@@ -263,7 +263,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
   },
 };
 
-export const SCHEMA_VERSION = 21300;
+export const SCHEMA_VERSION = 21400;
 
 function migrate(db: DatabaseSync) {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
