@@ -1622,7 +1622,8 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
   if (state.processes.has(id)) return { ok: false, reason: "Server process is already running" };
   if (state.installs.has(id) || server.status === "installing") return { ok: false, reason: "Installation is still running" };
   if (server.status === "error") return { ok: false, reason: "Installation failed. Retry installation first." };
-  const pendingUpdateValidation=server.updateValidationStatus==="awaiting-readiness"||server.updateValidationStatus==="validating-runtime";
+  const rollbackReadinessValidation=server.updateValidationStatus==="rollback-restored"||server.updateValidationStatus==="rollback-validating";
+  const pendingUpdateValidation=server.updateValidationStatus==="awaiting-readiness"||server.updateValidationStatus==="validating-runtime"||rollbackReadinessValidation;
 
   try {
     const game = getGame(server.gameId);
@@ -1630,7 +1631,7 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
       throw new Error(`Port ${server.port}/${game.protocol} is currently in use. Stop the conflicting process or choose another port.`);
     }
     await writeServerConfig(server);
-    if(pendingUpdateValidation) await db.update(servers).set({updateValidationStatus:"validating-runtime",updatedAt:new Date()}).where(eq(servers.id,id));
+    if(pendingUpdateValidation) await db.update(servers).set({updateValidationStatus:rollbackReadinessValidation?"rollback-validating":"validating-runtime",updatedAt:new Date()}).where(eq(servers.id,id));
     await setStatus(id, "starting");
     await logLine(id, "system", "Runtime", `Starting ${server.name} from ${serverDir(server)}`);
     const spec = await launchSpec(server);
@@ -1668,7 +1669,7 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
     await db.update(servers).set({healthStatus:"checking",healthReason:waitingReason,healthProbe:probe,updatedAt:new Date()}).where(eq(servers.id,id));
     await logLine(id,"system","Readiness",`${waitingReason}.`);
     const ready = await waitUntilReady(entry);
-    if (!state.processes.has(id)) { await setHealth(id,"blocked","Process exited during startup",probe,false); await incident(id,"error","readiness","Process exited during startup",readinessRemediation(server.gameId,probe)); if(pendingUpdateValidation){await db.update(servers).set({updateValidationStatus:"readiness-failed",updatedAt:new Date()}).where(eq(servers.id,id));await attemptAutomaticUpdateRollback(id);} return { ok: false, reason: "The server process exited during startup. Check Console for details." }; }
+    if (!state.processes.has(id)) { await setHealth(id,"blocked","Process exited during startup",probe,false); await incident(id,"error","readiness","Process exited during startup",readinessRemediation(server.gameId,probe)); if(pendingUpdateValidation){await db.update(servers).set({updateValidationStatus:rollbackReadinessValidation?"rollback-failed":"readiness-failed",updatedAt:new Date()}).where(eq(servers.id,id));if(!rollbackReadinessValidation)await attemptAutomaticUpdateRollback(id);} return { ok: false, reason: "The server process exited during startup. Check Console for details." }; }
     if (!ready) { await setHealth(id,"blocked",`Readiness timed out after ${server.readinessTimeoutSec} seconds`,probe,false); await incident(id,"error","readiness","Provider readiness timed out",readinessRemediation(server.gameId,probe));
       entry.stopping = true;
       killProcessTree(child.pid, true);
@@ -1677,16 +1678,16 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
     await db.update(servers).set({ status: "online", lastStartedAt: new Date(), updatedAt: new Date() }).where(eq(servers.id, id));
     await setHealth(id,"ready","Provider readiness probe passed",probe,true);
     await logLine(id,"success","Readiness",`${probe} readiness passed after ${Math.max(1,Math.round((Date.now()-entry.startedAtMs)/1000))} seconds.`);
-    if(pendingUpdateValidation){await db.update(servers).set({updateValidationStatus:"validated",updatedAt:new Date()}).where(eq(servers.id,id));await logLine(id,"success","Updater",`Update ${server.updatePreviousVersion} → ${server.updateTargetVersion} passed first-start readiness validation.`);}
+    if(pendingUpdateValidation){await db.update(servers).set({updateValidationStatus:rollbackReadinessValidation?"rollback-validated":"validated",updatedAt:new Date()}).where(eq(servers.id,id));await logLine(id,"success","Updater",rollbackReadinessValidation?`Restored version ${server.updatePreviousVersion} passed readiness validation.`:`Update ${server.updatePreviousVersion} → ${server.updateTargetVersion} passed first-start readiness validation.`);}
     if(server.gameId === "minecraft" || server.gameId === "minecraft-modded") await recordSuccessfulToolUse("java","Started a Minecraft server and passed its readiness probe");
     await logLine(id, "success", "Runtime", `Process started with PID ${child.pid}.`);
     await act(id, "power", `${server.name} started (PID ${child.pid})`);
     return { ok: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if(pendingUpdateValidation)await db.update(servers).set({updateValidationStatus:"readiness-failed",updatedAt:new Date()}).where(eq(servers.id,id));
+    if(pendingUpdateValidation)await db.update(servers).set({updateValidationStatus:rollbackReadinessValidation?"rollback-failed":"readiness-failed",updatedAt:new Date()}).where(eq(servers.id,id));
     await setStatus(id, "crashed");
-    if(pendingUpdateValidation)await attemptAutomaticUpdateRollback(id);
+    if(pendingUpdateValidation&&!rollbackReadinessValidation)await attemptAutomaticUpdateRollback(id);
     await logLine(id, "error", "Runtime", message);
     return { ok: false, reason: message };
   }
