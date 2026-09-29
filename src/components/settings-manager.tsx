@@ -27,6 +27,7 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
     motd: initial.motd,
     port: initial.port,
     bindAddress: initial.bindAddress,
+    publicAddress: initial.publicAddress,
     readinessTimeoutSec: initial.readinessTimeoutSec,
     memoryMb: initial.memoryMb,
     maxPlayers: initial.maxPlayers,
@@ -59,6 +60,7 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
     form.motd !== initial.motd ||
     form.port !== initial.port ||
     form.bindAddress !== initial.bindAddress ||
+    form.publicAddress !== initial.publicAddress ||
     form.readinessTimeoutSec !== initial.readinessTimeoutSec ||
     form.memoryMb !== initial.memoryMb ||
     form.maxPlayers !== initial.maxPlayers ||
@@ -151,9 +153,9 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
               <input className={cn(inputCls, "font-mono opacity-60")} readOnly value={game.protocol === "UDP" ? form.port + 1 : form.port} />
             </Field>
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-4"><Field label="Bind IP" hint="must belong to this machine"><input className={cn(inputCls,"font-mono")} value={form.bindAddress} onChange={(e)=>setForm({...form,bindAddress:e.target.value})}/></Field><Field label="Readiness timeout" hint="seconds"><input className={cn(inputCls,"font-mono")} type="number" min={10} max={300} value={form.readinessTimeoutSec} onChange={(e)=>setForm({...form,readinessTimeoutSec:Number(e.target.value)})}/></Field></div>
+          <div className="mt-4 grid grid-cols-3 gap-4"><Field label="Bind IP" hint="local server interface"><input className={cn(inputCls,"font-mono")} value={form.bindAddress} onChange={(e)=>setForm({...form,bindAddress:e.target.value})}/></Field><Field label="Public address" hint="what internet players enter"><input className={cn(inputCls,"font-mono")} value={form.publicAddress} onChange={(e)=>setForm({...form,publicAddress:e.target.value})}/></Field><Field label="Readiness timeout" hint="seconds"><input className={cn(inputCls,"font-mono")} type="number" min={10} max={300} value={form.readinessTimeoutSec} onChange={(e)=>setForm({...form,readinessTimeoutSec:Number(e.target.value)})}/></Field></div>
           <p className="mt-3 rounded-lg bg-candy-50 px-3 py-2 font-mono text-[11px] text-plum-500">
-            players connect via <span className="text-plum-800">{form.bindAddress}:{form.port}</span>
+            LAN players use <span className="text-plum-800">{form.bindAddress}:{form.port}</span>; internet players use <span className="text-plum-800">{form.publicAddress}:{form.port}</span>. Forward the game ports to {form.bindAddress}.
           </p>
         </section>
 

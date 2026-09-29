@@ -96,7 +96,7 @@ export function ServerFrame({ initial, game, children }: { initial: Server; game
             {" · "}v{server.version}
             {server.loader !== "vanilla" ? ` · ${server.loader}` : ""}
             {" · "}
-            <span className="font-mono text-[11.5px]">{server.bindAddress}:{server.port}</span>
+            <span className="font-mono text-[11.5px]">{server.publicAddress}:{server.port}</span>
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
