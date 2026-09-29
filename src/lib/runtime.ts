@@ -15,7 +15,7 @@ import { db } from "@/db";
 import { activity, backups, consoleLogs, installationEvents, installationJobs, players, servers, tasks } from "@/db/schema";
 import type { Backup, InstallationJob, Server } from "@/db/schema";
 import { getGame, type InstallerKind } from "./games";
-import { revealSecret } from "./credential-vault";
+import { isProtectedSecret, protectAndVerify, revealSecret } from "./credential-vault";
 import { appDataDir, backupsDir, ensureDataDirs, safeFileName, serverDir, toolsDir } from "./storage";
 
 export type Metric = { t: number; cpu: number; ram: number; players: number; tps: number | null };
@@ -95,8 +95,18 @@ export async function setStatus(id: number, status: string) {
   await db.update(servers).set({ status, updatedAt: new Date() }).where(eq(servers.id, id));
 }
 
+async function migrateCredentialVault() {
+  if (process.platform !== "win32") return;
+  const rows = await db.select().from(servers);
+  const pending = rows.filter(row => [row.serverPassword,row.adminPassword,row.ownerId].some(value => value && !isProtectedSecret(value)));
+  if (!pending.length) return;
+  const encrypted = await Promise.all(pending.map(async row => ({ id: row.id, serverPassword: await protectAndVerify(row.serverPassword), adminPassword: await protectAndVerify(row.adminPassword), ownerId: await protectAndVerify(row.ownerId) })));
+  await db.transaction(async tx => { for (const row of encrypted) await tx.update(servers).set({serverPassword:row.serverPassword,adminPassword:row.adminPassword,ownerId:row.ownerId,updatedAt:new Date()}).where(eq(servers.id,row.id)); });
+}
+
 async function initializeRuntime() {
   ensureDataDirs();
+  await migrateCredentialVault();
   await recoverInstallationQueue();
   const activeJobs = await db
     .select({ serverId: installationJobs.serverId })

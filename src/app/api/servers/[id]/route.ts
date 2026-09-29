@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { addons, backups, consoleLogs, files, installationEvents, installationJobs, players, servers, tasks } from "@/db/schema";
+import { protectAndVerify } from "@/lib/credential-vault";
 import { getGame } from "@/lib/games";
 import { act, cancelInstallation, ensureRuntimeInitialized, cancelPendingRestart, killFlow, logLine, metricsFor, writeServerConfig } from "@/lib/runtime";
 import { backupsDir, serverDir } from "@/lib/storage";
@@ -102,18 +103,18 @@ export async function PATCH(req: Request, ctx: Ctx) {
   }
   if (typeof body.serverPassword === "string" && body.serverPassword !== "••••••••") {
     if (g.requiresPassword && body.serverPassword.length < 5) return NextResponse.json({ error: "Password must contain at least five characters" }, { status: 400 });
-    patch.serverPassword = body.serverPassword.slice(0, 200);
+    patch.serverPassword = await protectAndVerify(body.serverPassword.slice(0, 200));
     changes.push(s.gameId === "dragonwilds" ? "world password" : "password");
   }
   if (s.gameId === "dragonwilds") {
     if (typeof body.ownerId === "string") {
       if (!body.ownerId.trim()) return NextResponse.json({ error: "Dragonwilds requires your in-game Player ID" }, { status: 400 });
-      patch.ownerId = body.ownerId.trim().slice(0, 200);
+      patch.ownerId = await protectAndVerify(body.ownerId.trim().slice(0, 200));
       changes.push("owner ID");
     }
     if (typeof body.adminPassword === "string" && body.adminPassword !== "••••••••") {
       if (body.adminPassword.length < 5) return NextResponse.json({ error: "Admin password must contain at least five characters" }, { status: 400 });
-      patch.adminPassword = body.adminPassword.slice(0, 200);
+      patch.adminPassword = await protectAndVerify(body.adminPassword.slice(0, 200));
       changes.push("admin password");
     }
   }
