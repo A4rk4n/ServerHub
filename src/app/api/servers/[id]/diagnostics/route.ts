@@ -1,4 +1,7 @@
 import fsp from "node:fs/promises";
+import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import os from "node:os";
 import { eq, desc } from "drizzle-orm";
 import { NextResponse } from "next/server";
@@ -25,4 +28,16 @@ export async function GET(request:Request,context:{params:Promise<{id:string}>})
  const report={generatedAt:new Date().toISOString(),application:"Server Hub",platform:{os:os.platform(),release:os.release(),arch:os.arch(),node:process.version,cpuCount:os.cpus().length,totalMemoryMb:Math.round(os.totalmem()/1048576),freeMemoryMb:Math.round(os.freemem()/1048576)},network:{adapters,lanEndpoint:`${server.bindAddress}:${server.port}`,publicEndpoint:`${server.publicAddress}:${server.port}`,ports,routerTarget:server.bindAddress},server:{id:server.id,name:server.name,game:game.name,version:server.version,status:server.status,bindAddress:server.bindAddress,publicAddress:server.publicAddress,port:server.port,protocol:game.protocol,workingDirectory:server.managedDirectory?"managed":"external",passwordConfigured:Boolean(server.serverPassword),adminPasswordConfigured:Boolean(server.adminPassword),ownerConfigured:Boolean(server.ownerId)},checks:{bindAddressAssigned:bindAssigned,bindAddressAvailable:await portAvailable(server.port,game.protocol,server.bindAddress),diskFreeMb:stat?Math.round(Number(stat.bavail)*Number(stat.bsize)/1048576):null,checklist},jobs,logs:logs.map(line=>({...line,message:redactLogSecrets(line.message)}))};
  if(new URL(request.url).searchParams.get("download")==="1")return new Response(JSON.stringify(report,null,2),{headers:{"content-type":"application/json","content-disposition":`attachment; filename="serverhub-diagnostics-${server.id}.json"`}});
  return NextResponse.json(report);
+}
+
+const execFileAsync=promisify(execFile);
+function psQuote(value:string){return `'${value.replaceAll("'","''")}'`;}
+export async function POST(request:Request,context:{params:Promise<{id:string}>}) {
+ const {id}=await context.params; const [server]=await db.select().from(servers).where(eq(servers.id,Number(id))); if(!server)return NextResponse.json({error:"Not found"},{status:404});
+ if(process.platform!=="win32")return NextResponse.json({error:"Windows Defender Firewall management is available on Windows only"},{status:409});
+ const body=await request.json().catch(()=>({})) as {action?:string}; if(!["create","remove"].includes(body.action??""))return NextResponse.json({error:"Unknown firewall action"},{status:400});
+ const game=getGame(server.gameId); const prefix=`Server Hub — ${server.id} —`; const ports=[{name:"Game",port:server.port,protocol:game.protocol},...(game.queryPort&&game.queryPort!==server.port?[{name:"Query",port:game.queryPort,protocol:"UDP"}]:[])];
+ const commands=body.action==="remove"?[`Get-NetFirewallRule -DisplayName ${psQuote(prefix+"*")} -ErrorAction SilentlyContinue | Remove-NetFirewallRule`]:ports.map(item=>`New-NetFirewallRule -DisplayName ${psQuote(`${prefix} ${item.name} ${item.protocol} ${item.port}`)} -Direction Inbound -Action Allow -Protocol ${item.protocol} -LocalPort ${item.port} -Profile Private -ErrorAction Stop`);
+ const script=path.join(os.tmpdir(),`serverhub-firewall-${server.id}-${Date.now()}.ps1`); await fsp.writeFile(script,["$ErrorActionPreference='Stop'",`Get-NetFirewallRule -DisplayName ${psQuote(prefix+"*")} -ErrorAction SilentlyContinue | Remove-NetFirewallRule`,...(body.action==="create"?commands:[]),""].join("\r\n"));
+ try { const command=`Start-Process powershell.exe -Verb RunAs -Wait -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',${psQuote(script)})`; await execFileAsync("powershell.exe",["-NoLogo","-NoProfile","-NonInteractive","-Command",command],{windowsHide:true,timeout:120000}); return NextResponse.json({ok:true,action:body.action,rules:ports}); } catch(error){return NextResponse.json({error:`Firewall change was cancelled or failed: ${error instanceof Error?error.message:String(error)}`},{status:409});} finally {await fsp.rm(script,{force:true}).catch(()=>{});}
 }
