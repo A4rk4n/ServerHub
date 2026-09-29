@@ -96,6 +96,10 @@ export const players = sqliteTable(
   (t) => [index("players_server_idx").on(t.serverId)]
 );
 
+export const taskRuns = sqliteTable("task_runs", {
+  id: integer("id").primaryKey({ autoIncrement: true }), taskId: integer("task_id").notNull(), serverId: integer("server_id").notNull(), taskName: text("task_name").notNull(), type: text("type").notNull(), command: text("command").notNull().default(""), status: text("status").notNull(), error: text("error").notNull().default(""), createdAt: tsNow("created_at"),
+}, (t) => [index("task_runs_server_idx").on(t.serverId, t.createdAt)]);
+
 export const moderationActions = sqliteTable("moderation_actions", {
   id: integer("id").primaryKey({ autoIncrement: true }), serverId: integer("server_id").notNull(), playerId: integer("player_id").notNull(), action: text("action").notNull(), target: text("target").notNull(), command: text("command").notNull(), reason: text("reason").notNull().default(""), status: text("status").notNull(), expirationAttempts: integer("expiration_attempts").notNull().default(0), lastExpirationAttemptAt: ts("last_expiration_attempt_at"), expiresAt: ts("expires_at"), createdAt: tsNow("created_at"),
 }, (t) => [index("moderation_actions_server_idx").on(t.serverId, t.createdAt)]);
@@ -244,6 +248,7 @@ export const installationEvents = sqliteTable(
 export type ServerTemplate = typeof serverTemplates.$inferSelect;
 export type Server = typeof servers.$inferSelect;
 export type ConsoleLog = typeof consoleLogs.$inferSelect;
+export type TaskRun = typeof taskRuns.$inferSelect;
 export type ModerationActionRecord = typeof moderationActions.$inferSelect;
 export type PlayerSession = typeof playerSessions.$inferSelect;
 export type Player = typeof players.$inferSelect;

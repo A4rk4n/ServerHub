@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { asc, eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { servers, tasks } from "@/db/schema";
+import { servers, taskRuns, tasks } from "@/db/schema";
 import { scheduledCommand } from "@/lib/scheduled-actions";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +13,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   const [s] = await db.select().from(servers).where(eq(servers.id, Number(id)));
   if (!s) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const rows = await db.select().from(tasks).where(eq(tasks.serverId, s.id)).orderBy(asc(tasks.id));
-  return NextResponse.json({ tasks: rows });
+  const runs=await db.select().from(taskRuns).where(eq(taskRuns.serverId,s.id)).orderBy(desc(taskRuns.createdAt)).limit(100);
+  return NextResponse.json({ tasks: rows, runs });
 }
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {

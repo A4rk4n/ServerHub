@@ -12,7 +12,7 @@ import yauzl from "yauzl";
 import * as tar from "tar";
 import { and, asc, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db, dbPath, sqliteClient } from "@/db";
-import { activity, backups, consoleLogs, incidents, installationEvents, installationJobs, moderationActions, playerSessions, players, servers, tasks } from "@/db/schema";
+import { activity, backups, consoleLogs, incidents, installationEvents, installationJobs, moderationActions, playerSessions, players, servers, taskRuns, tasks } from "@/db/schema";
 import type { Backup, InstallationJob, Server } from "@/db/schema";
 import { getGame, type InstallerKind } from "./games";
 import { observationKey, reconcileObservationKeys } from "./player-observations";
@@ -1942,7 +1942,7 @@ export async function sweepTasks(serverId?: number) {
       else if (task.type === "restart") {
         if (state.processes.has(server.id)) await restartFlow(server.id);
         else await logLine(server.id, "warn", "Scheduler", `Skipped "${task.name}": server is offline.`);
-      } else if (task.type === "broadcast" || task.type === "command") await runCommand(server, scheduledCommand(server.gameId, task.type, task.payload), "Scheduler");
+      } else if (task.type === "broadcast" || task.type === "command") {let command="";try{command=scheduledCommand(server.gameId,task.type,task.payload);const result=await runCommand(server,command,"Scheduler");await db.insert(taskRuns).values({taskId:task.id,serverId:server.id,taskName:task.name,type:task.type,command,status:result.ok?"succeeded":"failed",error:result.reason??""});if(!result.ok)throw new Error(result.reason??"Command failed")}catch(error){if(!command)await db.insert(taskRuns).values({taskId:task.id,serverId:server.id,taskName:task.name,type:task.type,command,status:"failed",error:error instanceof Error?error.message:String(error)});await logLine(server.id,"error","Scheduler",`Scheduled action failed: ${error instanceof Error?error.message:String(error)}`);continue}}
       await act(server.id, "task", `Scheduled task "${task.name}" executed`);
     }
     for (const entry of state.processes.values()) {

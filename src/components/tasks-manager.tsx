@@ -2,7 +2,7 @@
 
 import { CalendarClock, DatabaseBackup, Megaphone, Play, Plus, RotateCw, Terminal, Trash2, Wrench } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { Task } from "@/db/schema";
+import type { Task, TaskRun } from "@/db/schema";
 import { cn, hexA, timeAgo } from "@/lib/format";
 import { Btn, Empty, Field, Modal, Spin, Toggle, inputCls } from "./ui";
 
@@ -42,6 +42,7 @@ function fmtInterval(min: number) {
 
 export function TasksManager({ serverId, accent }: { serverId: number; accent: string }) {
   const [tasks, setTasks] = useState<Task[] | null>(null);
+  const [runs,setRuns]=useState<TaskRun[]>([]);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -52,6 +53,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
       const r = await fetch(`/api/servers/${serverId}/tasks`, { cache: "no-store" });
       const j = await r.json();
       if (j.tasks) setTasks(j.tasks);
+      if (j.runs) setRuns(j.runs);
     } catch {}
   }
   useEffect(() => {
@@ -170,6 +172,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
         </div>
       )}
 
+      {runs.length>0&&<section className="panel p-5"><h3 className="font-display mb-3 text-sm font-semibold text-plum-900">Scheduled action history</h3><div className="max-h-72 space-y-2 overflow-auto">{runs.slice(0,30).map(run=><div key={run.id} className="rounded-xl border border-candy-100 px-3 py-2 text-xs"><div className="flex justify-between gap-2"><strong>{run.taskName}</strong><span className={run.status==="succeeded"?"text-emerald-600":"text-red-500"}>{run.status}</span></div>{run.command&&<code className="mt-1 block text-[10px] text-plum-500">{run.command}</code>}{run.error&&<p className="mt-1 text-[10px] text-red-500">{run.error}</p>}<p className="mt-1 text-[10px] text-plum-400">{timeAgo(run.createdAt)}</p></div>)}</div></section>}
       <Modal open={open} onClose={() => setOpen(false)} title="New scheduled task">
         <div className="space-y-4">
           <Field label="Task name">

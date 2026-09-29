@@ -101,6 +101,9 @@ const DDL = [
     last_seen INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS players_server_idx ON players (server_id)`,
+  `CREATE TABLE IF NOT EXISTS task_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER NOT NULL, server_id INTEGER NOT NULL, task_name TEXT NOT NULL, type TEXT NOT NULL, command TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS moderation_actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT, server_id INTEGER NOT NULL, player_id INTEGER NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL, command TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, expiration_attempts INTEGER NOT NULL DEFAULT 0, last_expiration_attempt_at INTEGER, expires_at INTEGER, created_at INTEGER NOT NULL
   )`,
@@ -250,7 +253,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
   },
 };
 
-export const SCHEMA_VERSION = 2950;
+export const SCHEMA_VERSION = 2960;
 
 function migrate(db: DatabaseSync) {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -275,7 +278,7 @@ function migrate(db: DatabaseSync) {
     db.prepare("UPDATE servers SET bind_address = ? WHERE bind_address = ?")
       .run("192.168.1.210", "185.83.148.20");
     db.prepare("INSERT INTO schema_migrations (version, applied_at, description) VALUES (?, ?, ?)")
-      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add restart-safe temporary ban enforcement");
+      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add scheduled action execution audit");
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
