@@ -5,6 +5,7 @@ import { ArrowLeft, ArrowRight, Boxes, Check, CloudDownload, Cpu, Globe, HardDri
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { GAMES, type GameDef } from "@/lib/games";
+import { nextFreeServerPort } from "@/lib/server-templates";
 import { cn, hexA } from "@/lib/format";
 import { Btn, Field, Toggle, inputCls } from "./ui";
 
@@ -91,8 +92,7 @@ export function NewServerWizard() {
     return () => controller.abort();
   }, [game]);
 
-  function nextFreePort(start:number){let candidate=start;while(candidate<=65535&&usedPorts.includes(candidate))candidate++;return candidate<=65535?candidate:start}
-  function applyTemplate(template:SavedTemplate){const g=GAMES.find(item=>item.id===template.gameId);if(!g)return;chooseGame(g);const c=JSON.parse(template.config) as Record<string,unknown>;if(typeof c.version==="string")setVersion(c.version);if(typeof c.loader==="string")setLoader(c.loader);if(typeof c.memoryMb==="number")setMemory(c.memoryMb);if(typeof c.maxPlayers==="number")setSlots(c.maxPlayers);if(typeof c.motd==="string")setMotd(c.motd);if(typeof c.difficulty==="string")setDifficulty(c.difficulty);if(typeof c.pvp==="boolean")setPvp(c.pvp);setName(`${template.name.replace(/ template$/i,"")} New`);setPort(nextFreePort(g.defaultPort))}
+  function applyTemplate(template:SavedTemplate){const g=GAMES.find(item=>item.id===template.gameId);if(!g)return;chooseGame(g);const c=JSON.parse(template.config) as Record<string,unknown>;if(typeof c.version==="string")setVersion(c.version);if(typeof c.loader==="string")setLoader(c.loader);if(typeof c.memoryMb==="number")setMemory(c.memoryMb);if(typeof c.maxPlayers==="number")setSlots(c.maxPlayers);if(typeof c.motd==="string")setMotd(c.motd);if(typeof c.difficulty==="string")setDifficulty(c.difficulty);if(typeof c.pvp==="boolean")setPvp(c.pvp);setName(`${template.name.replace(/ template$/i,"")} New`);setPort(nextFreeServerPort(g.defaultPort,usedPorts))}
   async function deleteTemplate(id:number){await fetch(`/api/templates/${id}`,{method:"DELETE"});setTemplates(items=>items.filter(item=>item.id!==id))}
 
   function chooseGame(g: GameDef) {
@@ -100,7 +100,7 @@ export function NewServerWizard() {
     setName(SUGGESTIONS[g.id] ?? "My Server");
     setVersion(g.versions[0]);
     setLoader(g.loaders?.[0]?.id ?? "vanilla");
-    setPort(nextFreePort(g.defaultPort));
+    setPort(nextFreeServerPort(g.defaultPort,usedPorts));
     setMemory(g.defaultMemory);
     setSlots(g.defaultMaxPlayers);
     setWorld(g.id === "ark" ? "TheIsland" : g.id === "valheim" ? "Midgard" : "world");
