@@ -46,7 +46,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", type: "backup", payload: "", intervalMin: 360, scheduleKind: "interval", scheduledFor: "" });
+  const [form, setForm] = useState({ name: "", type: "backup", payload: "", intervalMin: 360, scheduleKind: "interval", scheduledFor: "", scheduleTime: "09:00", scheduleWeekday: 1 });
 
   async function load() {
     try {
@@ -75,7 +75,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
       const j = await r.json();
       if (!r.ok) return setErr(j.error ?? "Failed");
       setOpen(false);
-      setForm({ name: "", type: "backup", payload: "", intervalMin: 360, scheduleKind: "interval", scheduledFor: "" });
+      setForm({ name: "", type: "backup", payload: "", intervalMin: 360, scheduleKind: "interval", scheduledFor: "", scheduleTime: "09:00", scheduleWeekday: 1 });
       await load();
     } finally {
       setBusy(false);
@@ -148,7 +148,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
                     </div>
                     {t.payload && <p className="mt-0.5 truncate font-mono text-[11px] text-plum-500">“{t.payload}”</p>}
                     <p className="mt-1.5 text-[11.5px] text-plum-500">
-                      {t.scheduleKind === "once" ? "one time" : `every ${fmtInterval(t.intervalMin)}`} · next <span className="font-medium text-plum-700">{t.enabled ? inTime(t.nextRunAt) : t.scheduleKind === "once" && t.lastRunAt ? "completed" : "paused"}</span>
+                      {t.scheduleKind === "once" ? "one time" : t.scheduleKind === "daily" ? `daily at ${t.scheduleTime}` : t.scheduleKind === "weekly" ? `weekly at ${t.scheduleTime}` : `every ${fmtInterval(t.intervalMin)}`} · next <span className="font-medium text-plum-700">{t.enabled ? inTime(t.nextRunAt) : t.scheduleKind === "once" && t.lastRunAt ? "completed" : "paused"}</span>
                       {t.lastRunAt ? ` · last ${timeAgo(t.lastRunAt)}` : " · never run"}
                     </p>
                   </div>
@@ -213,8 +213,8 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
             </Field>
           )}
           {needsPayload&&form.payload.trim()&&<div className="rounded-xl border border-candy-200 bg-plum-900 p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-candy-200">Exact command preview</p><code className="mt-1 block break-all text-xs text-white">{form.type==="broadcast"?`say ${form.payload.trim()}`:form.payload.trim()}</code></div>}
-          <Field label="Schedule"><div className="grid grid-cols-2 gap-2"><button className={cn("rounded-xl border p-2 text-xs font-semibold",form.scheduleKind==="interval"?"border-candy-400 bg-candy-50":"border-candy-200")} onClick={()=>setForm({...form,scheduleKind:"interval"})}>Recurring interval</button><button className={cn("rounded-xl border p-2 text-xs font-semibold",form.scheduleKind==="once"?"border-candy-400 bg-candy-50":"border-candy-200")} onClick={()=>setForm({...form,scheduleKind:"once"})}>One-time action</button></div></Field>
-          {form.scheduleKind==="once"?<Field label="Run at"><input className={inputCls} type="datetime-local" value={form.scheduledFor} onChange={event=>setForm({...form,scheduledFor:event.target.value})}/></Field>:<Field label="Repeat every">
+          <Field label="Schedule"><div className="grid grid-cols-2 gap-2"><button className={cn("rounded-xl border p-2 text-xs font-semibold",form.scheduleKind==="interval"?"border-candy-400 bg-candy-50":"border-candy-200")} onClick={()=>setForm({...form,scheduleKind:"interval"})}>Recurring interval</button><button className={cn("rounded-xl border p-2 text-xs font-semibold",form.scheduleKind==="once"?"border-candy-400 bg-candy-50":"border-candy-200")} onClick={()=>setForm({...form,scheduleKind:"once"})}>One-time action</button><button className={cn("rounded-xl border p-2 text-xs font-semibold",form.scheduleKind==="daily"?"border-candy-400 bg-candy-50":"border-candy-200")} onClick={()=>setForm({...form,scheduleKind:"daily"})}>Daily time</button><button className={cn("rounded-xl border p-2 text-xs font-semibold",form.scheduleKind==="weekly"?"border-candy-400 bg-candy-50":"border-candy-200")} onClick={()=>setForm({...form,scheduleKind:"weekly"})}>Weekly time</button></div></Field>
+          {form.scheduleKind==="once"?<Field label="Run at"><input className={inputCls} type="datetime-local" value={form.scheduledFor} onChange={event=>setForm({...form,scheduledFor:event.target.value})}/></Field>:form.scheduleKind==="daily"||form.scheduleKind==="weekly"?<div className="grid grid-cols-2 gap-2">{form.scheduleKind==="weekly"&&<Field label="Weekday"><select className={inputCls} value={form.scheduleWeekday} onChange={event=>setForm({...form,scheduleWeekday:Number(event.target.value)})}>{["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"].map((day,index)=><option key={day} value={index}>{day}</option>)}</select></Field>}<Field label="Local time"><input className={inputCls} type="time" value={form.scheduleTime} onChange={event=>setForm({...form,scheduleTime:event.target.value})}/></Field></div>:<Field label="Repeat every">
             <select className={inputCls} value={form.intervalMin} onChange={(e) => setForm({ ...form, intervalMin: Number(e.target.value) })}>
               {INTERVALS.map((i) => (
                 <option key={i.min} value={i.min} className="bg-white">{i.label}</option>

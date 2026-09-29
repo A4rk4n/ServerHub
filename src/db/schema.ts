@@ -134,6 +134,8 @@ export const tasks = sqliteTable(
     payload: text("payload").notNull().default(""),
     intervalMin: integer("interval_min").notNull().default(360),
     scheduleKind: text("schedule_kind").notNull().default("interval"),
+    scheduleTime: text("schedule_time").notNull().default("09:00"),
+    scheduleWeekday: integer("schedule_weekday").notNull().default(1),
     enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
     lastRunAt: ts("last_run_at"),
     nextRunAt: ts("next_run_at"),

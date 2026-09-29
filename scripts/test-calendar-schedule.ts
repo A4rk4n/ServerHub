@@ -1,0 +1,2 @@
+import assert from "node:assert/strict";import { nextCalendarRun } from "../src/lib/calendar-schedule";
+const morning=new Date(2026,8,29,8,0),late=new Date(2026,8,29,10,0);assert.equal(nextCalendarRun("daily","09:30",0,morning).getDate(),29);assert.equal(nextCalendarRun("daily","09:30",0,late).getDate(),30);const monday=new Date(2026,8,28,12);assert.equal(nextCalendarRun("weekly","09:00",1,monday).getDate(),5);assert.throws(()=>nextCalendarRun("daily","25:00",0));assert.throws(()=>nextCalendarRun("weekly","09:00",8));console.log("CALENDAR_SCHEDULE_REGRESSION_OK");

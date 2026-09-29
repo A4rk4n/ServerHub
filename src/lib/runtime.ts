@@ -16,6 +16,7 @@ import { activity, backups, consoleLogs, incidents, installationEvents, installa
 import type { Backup, InstallationJob, Server } from "@/db/schema";
 import { getGame, type InstallerKind } from "./games";
 import { observationKey, reconcileObservationKeys } from "./player-observations";
+import { nextCalendarRun } from "./calendar-schedule";
 import { scheduledCommand } from "./scheduled-actions";
 import { queryA2sInfo, queryA2sPlayers, queryMinecraftStatus } from "./query-protocols";
 import { isProtectedSecret, protectAndVerify, revealSecret } from "./credential-vault";
@@ -1918,7 +1919,7 @@ export async function sweepTasks(serverId?: number) {
     for (const task of enabled) {
       if (serverId && task.serverId !== serverId) continue;
       if (!task.nextRunAt || task.nextRunAt > now) continue;
-      await db.update(tasks).set({ lastRunAt: now, enabled:task.scheduleKind==="once"?false:task.enabled, nextRunAt: task.scheduleKind==="once"?null:new Date(now.getTime() + Math.max(1, task.intervalMin) * 60_000) }).where(eq(tasks.id, task.id));
+      await db.update(tasks).set({ lastRunAt: now, enabled:task.scheduleKind==="once"?false:task.enabled, nextRunAt: task.scheduleKind==="once"?null:task.scheduleKind==="daily"||task.scheduleKind==="weekly"?nextCalendarRun(task.scheduleKind,task.scheduleTime,task.scheduleWeekday,now):new Date(now.getTime() + Math.max(1, task.intervalMin) * 60_000) }).where(eq(tasks.id, task.id));
       const [server] = await db.select().from(servers).where(eq(servers.id, task.serverId));
       if (!server) continue;
       if (task.type === "backup") await createBackup(server.id, `auto-${safeFileName(task.name)}`, "scheduler");

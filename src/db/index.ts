@@ -130,6 +130,8 @@ const DDL = [
     payload TEXT NOT NULL DEFAULT '',
     interval_min INTEGER NOT NULL DEFAULT 360,
     schedule_kind TEXT NOT NULL DEFAULT 'interval',
+    schedule_time TEXT NOT NULL DEFAULT '09:00',
+    schedule_weekday INTEGER NOT NULL DEFAULT 1,
     enabled INTEGER NOT NULL DEFAULT 1,
     last_run_at INTEGER,
     next_run_at INTEGER,
@@ -242,7 +244,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
     owner_id: "TEXT NOT NULL DEFAULT ''",
     eula_accepted: "INTEGER NOT NULL DEFAULT 0",
   },
-  tasks: { schedule_kind: "TEXT NOT NULL DEFAULT 'interval'" },
+  tasks: { schedule_time: "TEXT NOT NULL DEFAULT '09:00'", schedule_weekday: "INTEGER NOT NULL DEFAULT 1", schedule_kind: "TEXT NOT NULL DEFAULT 'interval'" },
   task_runs: { retry_of_run_id: "INTEGER" },
   moderation_actions: { expires_at: "INTEGER", expiration_attempts: "INTEGER NOT NULL DEFAULT 0", last_expiration_attempt_at: "INTEGER" },
   players: { trusted: "INTEGER NOT NULL DEFAULT 0", notes: "TEXT NOT NULL DEFAULT ''" },
@@ -256,7 +258,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
   },
 };
 
-export const SCHEMA_VERSION = 2980;
+export const SCHEMA_VERSION = 2990;
 
 function migrate(db: DatabaseSync) {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -281,7 +283,7 @@ function migrate(db: DatabaseSync) {
     db.prepare("UPDATE servers SET bind_address = ? WHERE bind_address = ?")
       .run("192.168.1.210", "185.83.148.20");
     db.prepare("INSERT INTO schema_migrations (version, applied_at, description) VALUES (?, ?, ?)")
-      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add restart-safe one-time calendar actions");
+      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add local daily and weekly calendar recurrence");
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
