@@ -1,0 +1,2 @@
+export function observationKey(provider:string,name:string){return `${provider}:${name.trim().toLocaleLowerCase("en-US")}`.slice(0,300)}
+export function reconcileObservationKeys(openKeys:readonly string[],observedKeys:readonly string[]){const open=new Set(openKeys),observed=new Set(observedKeys);return{joined:[...observed].filter(key=>!open.has(key)),left:[...open].filter(key=>!observed.has(key)),online:[...observed]}}

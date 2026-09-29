@@ -99,6 +99,9 @@ const DDL = [
     last_seen INTEGER NOT NULL
   )`,
   `CREATE INDEX IF NOT EXISTS players_server_idx ON players (server_id)`,
+  `CREATE TABLE IF NOT EXISTS player_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, server_id INTEGER NOT NULL, provider TEXT NOT NULL, observation_key TEXT NOT NULL, display_name TEXT NOT NULL, joined_at INTEGER NOT NULL, left_at INTEGER, duration_sec INTEGER NOT NULL DEFAULT 0, score INTEGER NOT NULL DEFAULT 0
+  )`,
   `CREATE TABLE IF NOT EXISTS backups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     server_id INTEGER NOT NULL,
@@ -240,7 +243,7 @@ const ADDITIVE_MIGRATIONS: Record<string, Record<string, string>> = {
   },
 };
 
-export const SCHEMA_VERSION = 2900;
+export const SCHEMA_VERSION = 2910;
 
 function migrate(db: DatabaseSync) {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -265,7 +268,7 @@ function migrate(db: DatabaseSync) {
     db.prepare("UPDATE servers SET bind_address = ? WHERE bind_address = ?")
       .run("192.168.1.210", "185.83.148.20");
     db.prepare("INSERT INTO schema_migrations (version, applied_at, description) VALUES (?, ?, ?)")
-      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add persistent provider query metadata");
+      .run(SCHEMA_VERSION, Math.floor(Date.now() / 1000), "Add persistent observed player sessions");
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");

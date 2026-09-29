@@ -10,12 +10,13 @@ import { Readable } from "node:stream";
 import { finished, pipeline } from "node:stream/promises";
 import yauzl from "yauzl";
 import * as tar from "tar";
-import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { db, dbPath, sqliteClient } from "@/db";
-import { activity, backups, consoleLogs, incidents, installationEvents, installationJobs, players, servers, tasks } from "@/db/schema";
+import { activity, backups, consoleLogs, incidents, installationEvents, installationJobs, playerSessions, players, servers, tasks } from "@/db/schema";
 import type { Backup, InstallationJob, Server } from "@/db/schema";
 import { getGame, type InstallerKind } from "./games";
-import { queryA2sInfo, queryMinecraftStatus } from "./query-protocols";
+import { observationKey, reconcileObservationKeys } from "./player-observations";
+import { queryA2sInfo, queryA2sPlayers, queryMinecraftStatus } from "./query-protocols";
 import { isProtectedSecret, protectAndVerify, revealSecret } from "./credential-vault";
 import { appDataDir, backupsDir, ensureDataDirs, safeFileName, serverDir, toolsDir } from "./storage";
 
@@ -1504,9 +1505,15 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
 // Real process lifecycle and metrics
 // ---------------------------------------------------------------------------
 
+async function reconcileA2sPlayerSessions(server:Server,observed:Awaited<ReturnType<typeof queryA2sPlayers>>){
+ const provider="steam-a2s",now=new Date(),open=await db.select().from(playerSessions).where(and(eq(playerSessions.serverId,server.id),eq(playerSessions.provider,provider),isNull(playerSessions.leftAt))); const byKey=new Map(observed.filter(item=>item.name.trim()).map(item=>[observationKey(provider,item.name),item])); const changes=reconcileObservationKeys(open.map(item=>item.observationKey),[...byKey.keys()]);
+ for(const key of changes.left){const session=open.find(item=>item.observationKey===key);if(session)await db.update(playerSessions).set({leftAt:now,durationSec:Math.max(session.durationSec,Math.round((now.getTime()-(session.joinedAt?.getTime()??now.getTime()))/1000))}).where(eq(playerSessions.id,session.id));}
+ for(const key of changes.joined){const item=byKey.get(key);if(item)await db.insert(playerSessions).values({serverId:server.id,provider,observationKey:key,displayName:item.name.slice(0,100),joinedAt:new Date(now.getTime()-Math.max(0,item.durationSeconds)*1000),durationSec:Math.round(Math.max(0,item.durationSeconds)),score:item.score});}
+ const known=await db.select().from(players).where(eq(players.serverId,server.id)); for(const row of known.filter(row=>row.externalId.startsWith(`${provider}:`)&&!changes.online.includes(row.externalId)))await db.update(players).set({isOnline:false,lastSeen:now}).where(eq(players.id,row.id)); for(const [key,item] of byKey){const row=known.find(value=>value.externalId===key);if(row)await db.update(players).set({name:item.name.slice(0,100),isOnline:true,ping:0,lastSeen:now}).where(eq(players.id,row.id));else await db.insert(players).values({serverId:server.id,name:item.name.slice(0,100),externalId:key,isOnline:true,lastSeen:now});}
+}
 async function probeEntry(entry:RuntimeEntry){
  const server=entry.server,game=getGame(server.gameId); const method=server.gameId.startsWith("minecraft")?"minecraft-status":["ark","rust","valheim"].includes(server.gameId)?"steam-a2s":game.protocol==="UDP"?"process-stability":"tcp-connect";
- let detail="",metadata:Record<string,unknown>|null=null; const ok=method==="minecraft-status"?await queryMinecraftStatus(server.bindAddress,server.port).then(info=>{metadata={provider:"minecraft",version:info.version,protocol:info.protocol,motd:info.motd,players:info.players,maxPlayers:info.maxPlayers,latencyMs:info.latencyMs};detail=`${info.version} · ${info.players}/${info.maxPlayers} players · ${info.latencyMs} ms${info.motd?` · ${info.motd}`:""}`;return true}).catch(()=>false):method==="steam-a2s"?await queryA2sInfo(server.bindAddress,game.queryPort!).then(info=>{metadata={provider:"steam-a2s",name:info.name,map:info.map,game:info.game,players:info.players,maxPlayers:info.maxPlayers,bots:info.bots,password:info.password,vac:info.vac,version:info.version};detail=`${info.name} · ${info.map} · ${info.players}/${info.maxPlayers} players · v${info.version}`;return true}).catch(()=>false):method==="process-stability"?state.processes.has(server.id):await new Promise<boolean>(resolve=>{const socket=net.createConnection({host:server.bindAddress,port:server.port});const done=(v:boolean)=>{socket.destroy();resolve(v)};socket.setTimeout(750);socket.once("connect",()=>done(true));socket.once("timeout",()=>done(false));socket.once("error",()=>done(false))});
+ let detail="",metadata:Record<string,unknown>|null=null; const ok=method==="minecraft-status"?await queryMinecraftStatus(server.bindAddress,server.port).then(info=>{metadata={provider:"minecraft",version:info.version,protocol:info.protocol,motd:info.motd,players:info.players,maxPlayers:info.maxPlayers,latencyMs:info.latencyMs};detail=`${info.version} · ${info.players}/${info.maxPlayers} players · ${info.latencyMs} ms${info.motd?` · ${info.motd}`:""}`;return true}).catch(()=>false):method==="steam-a2s"?await queryA2sInfo(server.bindAddress,game.queryPort!).then(async info=>{const observed=await queryA2sPlayers(server.bindAddress,game.queryPort!).catch(()=>null);if(observed)await reconcileA2sPlayerSessions(server,observed);metadata={provider:"steam-a2s",name:info.name,map:info.map,game:info.game,players:info.players,maxPlayers:info.maxPlayers,bots:info.bots,password:info.password,vac:info.vac,version:info.version};detail=`${info.name} · ${info.map} · ${info.players}/${info.maxPlayers} players · v${info.version}`;return true}).catch(()=>false):method==="process-stability"?state.processes.has(server.id):await new Promise<boolean>(resolve=>{const socket=net.createConnection({host:server.bindAddress,port:server.port});const done=(v:boolean)=>{socket.destroy();resolve(v)};socket.setTimeout(750);socket.once("connect",()=>done(true));socket.once("timeout",()=>done(false));socket.once("error",()=>done(false))});
  if(ok&&metadata)await db.update(servers).set({queryMetadata:JSON.stringify(metadata),lastQueryAt:new Date()}).where(eq(servers.id,server.id));
  return {ok,method,detail};
 }

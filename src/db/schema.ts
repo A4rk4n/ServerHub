@@ -94,6 +94,10 @@ export const players = sqliteTable(
   (t) => [index("players_server_idx").on(t.serverId)]
 );
 
+export const playerSessions = sqliteTable("player_sessions", {
+  id: integer("id").primaryKey({ autoIncrement: true }), serverId: integer("server_id").notNull(), provider: text("provider").notNull(), observationKey: text("observation_key").notNull(), displayName: text("display_name").notNull(), joinedAt: tsNow("joined_at"), leftAt: ts("left_at"), durationSec: integer("duration_sec").notNull().default(0), score: integer("score").notNull().default(0),
+}, (t) => [index("player_sessions_server_idx").on(t.serverId, t.joinedAt)]);
+
 export const backups = sqliteTable(
   "backups",
   {
@@ -234,6 +238,7 @@ export const installationEvents = sqliteTable(
 export type ServerTemplate = typeof serverTemplates.$inferSelect;
 export type Server = typeof servers.$inferSelect;
 export type ConsoleLog = typeof consoleLogs.$inferSelect;
+export type PlayerSession = typeof playerSessions.$inferSelect;
 export type Player = typeof players.$inferSelect;
 export type Backup = typeof backups.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
