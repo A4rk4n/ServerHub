@@ -13,6 +13,7 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
   const [moderation,setModeration]=useState<ModerationActionRecord[]>([]);
   const [reason,setReason]=useState("");
   const [durationMinutes,setDurationMinutes]=useState(0);
+  const [moderationFilter,setModerationFilter]=useState<"all"|"pending"|"failed">("all");
   const [banTarget, setBanTarget] = useState<PlayerView | null>(null);
   const [busy, setBusy] = useState(false);
   const [query,setQuery]=useState("");
@@ -55,6 +56,7 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
 
   if (!players) return <Spin label="Loading players…" />;
   const shown=players.filter(player=>(!onlyTrusted||player.trusted)&&(!query||player.name.toLowerCase().includes(query.toLowerCase())));
+  async function retryExpiration(item:ModerationActionRecord){setBusy(true);try{await fetch(`/api/servers/${serverId}/players/${item.playerId}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({retryModerationId:item.id})});await load()}finally{setBusy(false)}}
   async function saveProfile(player:PlayerView,patch:{trusted?:boolean;notes?:string}){setBusy(true);try{await fetch(`/api/servers/${serverId}/players/${player.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)});await load()}finally{setBusy(false);setNoteTarget(null)}}
 
   const online = players.filter((p) => p.isOnline);
@@ -167,7 +169,7 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
         </p>
       )}
 
-      {moderation.length>0&&<section className="panel p-5"><h3 className="font-display mb-3 text-sm font-semibold text-plum-900">Moderation audit</h3><div className="max-h-72 space-y-2 overflow-auto">{moderation.slice(0,30).map(item=><div key={item.id} className="rounded-xl border border-candy-100 px-3 py-2 text-xs"><div className="flex justify-between"><strong>{item.action} · {item.target}</strong><span className={item.status==="sent"?"text-emerald-600":"text-red-500"}>{item.status}</span></div><code className="mt-1 block text-[10px] text-plum-500">{item.command}</code>{item.expiresAt&&<p className="mt-1 text-[10px] text-amber-600">Expiration metadata: {new Date(item.expiresAt).toLocaleString()} · manual unban required</p>}</div>)}</div></section>}
+      {moderation.length>0&&<section className="panel p-5"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="font-display text-sm font-semibold text-plum-900">Moderation audit</h3><div className="flex gap-1">{(["all","pending","failed"] as const).map(filter=><button key={filter} onClick={()=>setModerationFilter(filter)} className={cn("rounded-lg px-2 py-1 text-[10px] font-bold uppercase",moderationFilter===filter?"bg-candy-100 text-plum-800":"text-plum-400")}>{filter}</button>)}</div></div><div className="max-h-72 space-y-2 overflow-auto">{moderation.filter(item=>moderationFilter==="all"||(moderationFilter==="pending"&&item.status==="pending-expiration")||(moderationFilter==="failed"&&item.status==="expiration-failed")).slice(0,30).map(item=><div key={item.id} className="rounded-xl border border-candy-100 px-3 py-2 text-xs"><div className="flex items-center justify-between gap-2"><strong>{item.action} · {item.target}</strong><span className={cn("rounded-full px-2 py-0.5 text-[10px]",["sent","expiration-enforced"].includes(item.status)?"bg-emerald-50 text-emerald-600":item.status==="pending-expiration"?"bg-amber-50 text-amber-600":"bg-red-50 text-red-500")}>{item.status.replaceAll("-"," ")}</span></div><code className="mt-1 block text-[10px] text-plum-500">{item.command}</code>{item.expiresAt&&<p className="mt-1 text-[10px] text-plum-500">Expires: {new Date(item.expiresAt).toLocaleString()} · attempts {item.expirationAttempts}/3</p>}{item.status==="expiration-failed"&&<Btn className="mt-2" size="sm" variant="subtle" loading={busy} onClick={()=>void retryExpiration(item)}>Retry automatic unban</Btn>}</div>)}</div></section>}
       <Modal open={!!noteTarget} onClose={()=>setNoteTarget(null)} title={`Notes for ${noteTarget?.name}`}><textarea className={`${inputCls} min-h-28 w-full`} value={note} maxLength={1000} onChange={event=>setNote(event.target.value)} placeholder="Local administrator notes…"/><p className="mt-2 text-[11px] text-plum-400">Stored locally and excluded from support bundles.</p><div className="mt-4 flex justify-end gap-2"><Btn variant="ghost" onClick={()=>setNoteTarget(null)}>Cancel</Btn><Btn variant="primary" loading={busy} onClick={()=>noteTarget&&saveProfile(noteTarget,{notes:note})}>Save notes</Btn></div></Modal>
       <Modal open={!!banTarget} onClose={() => setBanTarget(null)} title={`Ban ${banTarget?.name}?`}>
         <p className="text-[13.5px] leading-relaxed text-plum-500">
