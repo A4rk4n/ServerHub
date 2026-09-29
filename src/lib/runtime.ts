@@ -2005,21 +2005,31 @@ export async function sweepTasks(serverId?: number) {
       if (!server) continue;
       if (task.type === "backup") await createBackup(server.id, `auto-${safeFileName(task.name)}`, "scheduler");
       else if (task.type === "maintenance") {
-        await logLine(server.id, "system", "Maintenance", `Scheduled maintenance "${task.name}" started.`);
-        if (state.processes.has(server.id)) { await runCommand(server, "say Scheduled maintenance is starting", "Scheduler"); await stopFlow(server.id, "Maintenance"); await new Promise((resolve) => setTimeout(resolve, 2000)); }
-        const safety = await createBackupAndWait(server.id, `maintenance-${safeFileName(task.name)}`, "scheduler");
-        const installed = await installFlow(server.id);
-        if (!installed.ok || !installed.jobId) await logLine(server.id, "error", "Maintenance", `Update queue failed: ${installed.reason}`);
-        else {
+        let maintenanceStatus = "failed", maintenanceError = "";
+        try {
+          await logLine(server.id, "system", "Maintenance", `Scheduled maintenance "${task.name}" started.`);
+          if (state.processes.has(server.id)) { await runCommand(server, "say Scheduled maintenance is starting", "Scheduler"); await stopFlow(server.id, "Maintenance"); await new Promise((resolve) => setTimeout(resolve, 2000)); }
+          const safety = await createBackupAndWait(server.id, `maintenance-${safeFileName(task.name)}`, "scheduler");
+          await db.update(servers).set({updateValidationStatus:"installing",updatePreviousVersion:server.version,updateTargetVersion:"provider-current",updateSafetyBackupId:safety.id,updateRollbackAttempted:false,updateValidationStartedAt:new Date(),updatedAt:new Date()}).where(eq(servers.id,server.id));
+          const installed = await installFlow(server.id);
+          if (!installed.ok || !installed.jobId) throw new Error(`Update queue failed: ${installed.reason ?? "unknown error"}`);
           const deadline = Date.now() + 2 * 60 * 60_000;
           let outcome = "running";
           while (Date.now() < deadline && ["queued","running","cancelling"].includes(outcome)) { await new Promise((resolve)=>setTimeout(resolve,1000)); const [job]=await db.select().from(installationJobs).where(eq(installationJobs.id,installed.jobId!)); outcome=job?.status ?? "failed"; }
-          if (outcome === "succeeded") {
-            const started = await startFlow(server.id);
-            if (!started.ok) { await logLine(server.id,"error","Maintenance",`Readiness failed; restoring safety backup: ${started.reason}`); await restoreBackup(server.id,safety.id); await startFlow(server.id); }
-            else await logLine(server.id,"success","Maintenance",`Scheduled maintenance "${task.name}" completed and readiness passed.`);
-          } else await logLine(server.id,"error","Maintenance",`Update ended with status ${outcome}.`);
+          if (outcome !== "succeeded") throw new Error(`Update ended with status ${outcome}`);
+          const started = await startFlow(server.id);
+          const [validated] = await db.select().from(servers).where(eq(servers.id,server.id));
+          if (!started.ok || validated?.updateValidationStatus !== "validated") {
+            if (validated?.updateValidationStatus === "rollback-validated") throw new Error("Updated version failed readiness; previous version was restored and validated");
+            throw new Error(`Update readiness failed: ${started.reason ?? validated?.updateValidationStatus ?? "unknown error"}`);
+          }
+          maintenanceStatus = "succeeded";
+          await logLine(server.id,"success","Maintenance",`Scheduled maintenance "${task.name}" completed and update readiness passed.`);
+        } catch (error) {
+          maintenanceError = error instanceof Error ? error.message : String(error);
+          await logLine(server.id,"error","Maintenance",maintenanceError);
         }
+        await db.insert(taskRuns).values({taskId:task.id,serverId:server.id,taskName:task.name,type:task.type,command:"",status:maintenanceStatus,error:maintenanceError});
       }
       else if (task.type === "restart") {
         if (state.processes.has(server.id)) await restartFlow(server.id);
