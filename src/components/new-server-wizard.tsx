@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, ArrowRight, Boxes, Check, CloudDownload, Cpu, Globe, HardDrive, KeyRound, Loader2, MemoryStick, ShieldCheck, Sparkles, Terminal, Users } from "lucide-react";
+import { ArrowLeft, ArrowRight, Boxes, Check, CloudDownload, Cpu, Globe, HardDrive, KeyRound, Loader2, MemoryStick, ShieldCheck, Sparkles, Terminal, Trash2, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { GAMES, type GameDef } from "@/lib/games";
@@ -10,6 +10,7 @@ import { Btn, Field, Toggle, inputCls } from "./ui";
 
 const ease = [0.22, 1, 0.36, 1] as const;
 type RemoteVersion = { id: string; channel: "stable" | "preview" | "legacy"; releasedAt?: string };
+type SavedTemplate = {id:number;name:string;gameId:string;config:string};
 type CatalogDetails = { automatic: boolean; sourceName: string; sourceUrl: string; authentication: "none" | "oauth" | "user-files" };
 
 function generatedPassword() {
@@ -59,6 +60,9 @@ export function NewServerWizard() {
   const [catalogWarning, setCatalogWarning] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [templates, setTemplates] = useState<SavedTemplate[]>([]);
+  const [usedPorts, setUsedPorts] = useState<number[]>([]);
+  useEffect(()=>{void fetch("/api/templates",{cache:"no-store"}).then(r=>r.json()).then(j=>setTemplates(j.templates??[])).catch(()=>{});void fetch("/api/servers",{cache:"no-store"}).then(r=>r.json()).then(j=>setUsedPorts((j.servers??[]).map((server:{port:number})=>server.port))).catch(()=>{})},[]);
 
   useEffect(() => {
     if (!game) return;
@@ -87,12 +91,16 @@ export function NewServerWizard() {
     return () => controller.abort();
   }, [game]);
 
+  function nextFreePort(start:number){let candidate=start;while(candidate<=65535&&usedPorts.includes(candidate))candidate++;return candidate<=65535?candidate:start}
+  function applyTemplate(template:SavedTemplate){const g=GAMES.find(item=>item.id===template.gameId);if(!g)return;chooseGame(g);const c=JSON.parse(template.config) as Record<string,unknown>;if(typeof c.version==="string")setVersion(c.version);if(typeof c.loader==="string")setLoader(c.loader);if(typeof c.memoryMb==="number")setMemory(c.memoryMb);if(typeof c.maxPlayers==="number")setSlots(c.maxPlayers);if(typeof c.motd==="string")setMotd(c.motd);if(typeof c.difficulty==="string")setDifficulty(c.difficulty);if(typeof c.pvp==="boolean")setPvp(c.pvp);setName(`${template.name.replace(/ template$/i,"")} New`);setPort(nextFreePort(g.defaultPort))}
+  async function deleteTemplate(id:number){await fetch(`/api/templates/${id}`,{method:"DELETE"});setTemplates(items=>items.filter(item=>item.id!==id))}
+
   function chooseGame(g: GameDef) {
     setGame(g);
     setName(SUGGESTIONS[g.id] ?? "My Server");
     setVersion(g.versions[0]);
     setLoader(g.loaders?.[0]?.id ?? "vanilla");
-    setPort(g.defaultPort);
+    setPort(nextFreePort(g.defaultPort));
     setMemory(g.defaultMemory);
     setSlots(g.defaultMaxPlayers);
     setWorld(g.id === "ark" ? "TheIsland" : g.id === "valheim" ? "Midgard" : "world");
@@ -202,6 +210,7 @@ export function NewServerWizard() {
         {/* ---------------- STEP 0: game ---------------- */}
         {step === 0 && (
           <motion.section key="s0" initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -18 }} transition={{ duration: 0.45, ease }}>
+            {templates.length>0&&<div className="mb-5 rounded-2xl border border-candy-200 bg-candy-50/50 p-4"><p className="mb-3 text-xs font-bold uppercase tracking-wider text-plum-500">Start from a saved template</p><div className="flex flex-wrap gap-2">{templates.map(template=><div key={template.id} className="flex items-center rounded-xl border border-candy-200 bg-white"><button className="px-3 py-2 text-sm font-semibold text-plum-700 hover:text-candy-600" onClick={()=>applyTemplate(template)}>{template.name}</button><button className="border-l border-candy-100 p-2 text-plum-400 hover:text-red-500" aria-label={`Delete ${template.name}`} onClick={()=>void deleteTemplate(template.id)}><Trash2 size={13}/></button></div>)}</div><p className="mt-3 text-[11px] text-plum-500">Templates apply non-secret settings only. Choose fresh ports, world identity, and credentials below.</p></div>}
             <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
               {GAMES.map((g, i) => {
                 const selected = game?.id === g.id;
