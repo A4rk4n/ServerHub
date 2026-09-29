@@ -20,7 +20,7 @@
     "test:security": "tsx scripts/test-security.ts",
     "test:extraction": "tsx --require ./scripts/register-better-sqlite3-stub.cjs scripts/test-extraction.ts",
     "test:migrations": "tsx --require ./scripts/register-better-sqlite3-stub.cjs scripts/test-migrations.ts",
-    "test": "npm run typecheck && npm run lint && npm run test:security && npm run test:extraction && npm run test:backup-validation && npm run test:support-bundle && npm run test:server-templates && npm run test:tool-security && npm run test:installation-diagnostics && npm run test:provider-preflight && npm run test:readiness-policy && npm run test:firewall-diagnostics && npm run test:managed-process && npm run test:recovery-history && npm run test:installation-report && npm run test:host-platform && npm run test:tool-usage && npm run test:authenticode && npm run test:tool-repair-failures && npm run test:server-activation && npm run test:update-validation && npm run test:manual-update-rollback && npm run test:maintenance-lifecycle && npm run test:shutdown-lifecycle && npm run test:query-protocols && npm run test:a2s-players && npm run test:player-observations && npm run test:moderation && npm run test:scheduled-actions && npm run test:calendar-schedule && npm run test:minecraft-status && npm run test:migrations && npm run test:migration-matrix && npm run test:installation-jobs && npm run test:package-integrity",
+    "test": "npm run typecheck && npm run lint && npm run test:security && npm run test:extraction && npm run test:backup-validation && npm run test:support-bundle && npm run test:server-templates && npm run test:tool-security && npm run test:installation-diagnostics && npm run test:provider-preflight && npm run test:readiness-policy && npm run test:firewall-diagnostics && npm run test:managed-process && npm run test:recovery-history && npm run test:installation-report && npm run test:host-platform && npm run test:tool-usage && npm run test:authenticode && npm run test:tool-repair-failures && npm run test:server-activation && npm run test:update-validation && npm run test:update-recovery && npm run test:manual-update-rollback && npm run test:maintenance-lifecycle && npm run test:shutdown-lifecycle && npm run test:query-protocols && npm run test:a2s-players && npm run test:player-observations && npm run test:moderation && npm run test:scheduled-actions && npm run test:calendar-schedule && npm run test:minecraft-status && npm run test:migrations && npm run test:migration-matrix && npm run test:installation-jobs && npm run test:package-integrity",
     "sbom": "node scripts/generate-sbom.mjs",
     "test:catalog": "tsx scripts/test-catalog.ts",
     "test:backup-validation": "tsx scripts/test-backup-validation.ts",
@@ -50,7 +50,8 @@
     "test:server-activation": "tsx scripts/test-server-activation.ts",
     "test:update-validation": "tsx scripts/test-update-validation.ts",
     "test:maintenance-lifecycle": "tsx scripts/test-maintenance-lifecycle.ts",
-    "test:manual-update-rollback": "tsx scripts/test-manual-update-rollback.ts"
+    "test:manual-update-rollback": "tsx scripts/test-manual-update-rollback.ts",
+    "test:update-recovery": "tsx scripts/test-update-recovery.ts"
   },
   "dependencies": {
     "clsx": "2.1.1",

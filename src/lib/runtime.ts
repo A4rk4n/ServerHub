@@ -4,6 +4,7 @@ import { waitForManagedExecutableExit } from "./managed-process";
 import { isAssignedLocalAddress, validateDragonwildsPreflight } from "./provider-preflight";
 import { minimumProcessStabilityMs, processStabilityReady, readinessProbeFor, readinessRemediation, readinessWaitingReason } from "./readiness-policy";
 import { activateServerStaging } from "./server-activation";
+import { recoverInterruptedUpdateState } from "./update-recovery";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -143,6 +144,8 @@ async function initializeRuntime() {
   const installingServers = new Set(activeJobs.map((job) => job.serverId));
   const rows = await db.select().from(servers);
   for (const server of rows) {
+    const recoveredUpdate=recoverInterruptedUpdateState(server.updateValidationStatus,installingServers.has(server.id));
+    if(recoveredUpdate){await db.update(servers).set({updateValidationStatus:recoveredUpdate.status,updatedAt:new Date()}).where(eq(servers.id,server.id));await logLine(server.id,"warn","Updater",recoveredUpdate.message);}
     if (["online", "starting", "stopping"].includes(server.status)) {
       await setStatus(server.id, "crashed");
       await logLine(server.id, "warn", "Runtime", "The Server Hub runtime restarted; the previous process is no longer attached.");
