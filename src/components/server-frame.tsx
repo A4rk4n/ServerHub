@@ -41,7 +41,7 @@ export function ServerFrame({ initial, game, children }: { initial: Server; game
       dead = true;
       clearInterval(t);
     };
-  }, [initial.id]);
+  }, [initial.id, initial.name]);
 
   async function power(action: string) {
     if (busy) return;

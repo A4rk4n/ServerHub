@@ -73,14 +73,8 @@ state.installPumpScheduled ??= false;
 state.installPumpRunning ??= false;
 globalRuntime.__serverHubRuntime = state;
 
-/** Remove common credential forms before installer/process output is persisted. */
-export function redactLogSecrets(input: string) {
-  return input
-    .replace(/\b(authorization\s*[:=]\s*)(?:bearer\s+)?[^\s,;]+/gi, "$1[redacted]")
-    .replace(/\b((?:admin|server|world|rcon)?[ _-]?password\s*[:=]\s*)[^\s,;]+/gi, "$1[redacted]")
-    .replace(/\b((?:access|refresh|oauth|device)[ _-]?token\s*[:=]\s*)[^\s,;]+/gi, "$1[redacted]")
-    .replace(/([?&](?:token|key|secret|password)=)[^&#\s]+/gi, "$1[redacted]");
-}
+export { redactLogSecrets } from "./support-redaction";
+import { redactLogSecrets } from "./support-redaction";
 
 export async function logLine(serverId: number, level: string, source: string, message: string) {
   const clean = redactLogSecrets(message).replace(/\0/g, "").slice(0, 16_000);

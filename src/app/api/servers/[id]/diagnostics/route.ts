@@ -12,7 +12,8 @@ import { db } from "@/db";
 import { consoleLogs, incidents, installationEvents, installationJobs, servers } from "@/db/schema";
 import { isProtectedSecret } from "@/lib/credential-vault";
 import { getGame } from "@/lib/games";
-import { portAvailable, redactLogSecrets } from "@/lib/runtime";
+import { portAvailable } from "@/lib/runtime";
+import { redactLogSecrets, sanitizeSupportText } from "@/lib/support-redaction";
 import { appDataDir, serverDir, toolsDir } from "@/lib/storage";
 export const dynamic="force-dynamic";
 async function supportZip(entries:Record<string,string>){const zip=archiver("zip",{zlib:{level:9}});const chunks:Buffer[]=[];zip.on("data",(chunk:Buffer)=>chunks.push(Buffer.from(chunk)));const complete=new Promise<Buffer>((resolve,reject)=>{zip.once("end",()=>resolve(Buffer.concat(chunks)));zip.once("error",reject)});for(const [name,content] of Object.entries(entries))zip.append(content,{name});await zip.finalize();return complete;}
@@ -43,7 +44,7 @@ export async function GET(request:Request,context:{params:Promise<{id:string}>})
  const report={generatedAt:new Date().toISOString(),application:"Server Hub",vault,platform:{os:os.platform(),release:os.release(),arch:os.arch(),node:process.version,cpuCount:os.cpus().length,totalMemoryMb:Math.round(os.totalmem()/1048576),freeMemoryMb:Math.round(os.freemem()/1048576)},tools,firewall:{rules:firewallRules,configured:firewallRules.length>=ports.length},network:{adapters,lanEndpoint:`${server.bindAddress}:${server.port}`,publicEndpoint:`${server.publicAddress}:${server.port}`,ports,routerTarget:server.bindAddress},server:{id:server.id,name:server.name,game:game.name,version:server.version,status:server.status,healthStatus:server.healthStatus,healthReason:server.healthReason,healthProbe:server.healthProbe,healthFailures:server.healthFailures,bindAddress:server.bindAddress,publicAddress:server.publicAddress,port:server.port,protocol:game.protocol,workingDirectory:server.managedDirectory?"managed":"external",passwordConfigured:Boolean(server.serverPassword),adminPasswordConfigured:Boolean(server.adminPassword),ownerConfigured:Boolean(server.ownerId)},checks:{bindAddressAssigned:bindAssigned,bindAddressAvailable:await portAvailable(server.port,game.protocol,server.bindAddress),diskFreeMb:stat?Math.round(Number(stat.bavail)*Number(stat.bsize)/1048576):null,checklist},incidents:incidentRows,installationEvents:installEvents,jobs,logs:logs.map(line=>({...line,message:redactLogSecrets(line.message)}))};
  const params=new URL(request.url).searchParams;
  if(params.get("bundle")==="1"){
-  const sanitize=(value:unknown)=>redactLogSecrets(JSON.stringify(value,null,2).replaceAll(os.homedir(),"<user-home>").replaceAll(path.dirname(serverDir(server)),"<server-storage>"));
+  const sanitize=(value:unknown)=>sanitizeSupportText(JSON.stringify(value,null,2),[os.homedir(),path.dirname(serverDir(server))]);
   const entries:Record<string,string>={
    "summary.json":sanitize({generatedAt:report.generatedAt,application:report.application,server:report.server,checks:report.checks}),
    "diagnostics.json":sanitize(report),"readiness.json":sanitize({healthStatus:server.healthStatus,healthReason:server.healthReason,healthProbe:server.healthProbe,healthFailures:server.healthFailures,lastSuccess:server.lastHealthSuccessAt,lastFailure:server.lastHealthFailureAt}),
