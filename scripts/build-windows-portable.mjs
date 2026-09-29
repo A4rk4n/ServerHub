@@ -21,7 +21,8 @@ const standalone = path.join(root, "build", "server");
 const version = JSON.parse(await fsp.readFile(path.join(root, "package.json"), "utf8")).version;
 const output = path.join(release, `ServerHub-${version}-Windows-x64-Portable.zip`);
 const expectedVersion = process.env.SERVERHUB_RELEASE_VERSION || version;
-const npmExecutable = process.platform === "win32" ? "npm.cmd" : "npm";
+const npmCli = process.env.npm_execpath;
+if (!npmCli) throw new Error("npm CLI path is unavailable");
 if (version !== expectedVersion) throw new Error(`Version mismatch: package=${version}, requested=${expectedVersion}`);
 const sourceCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
 const sourceState = execFileSync("git", ["status", "--porcelain", "--untracked-files=normal"], { cwd: root, encoding: "utf8" }).trim();
@@ -67,7 +68,7 @@ await fsp.mkdir(release, { recursive: true });
 // Match the build-host Node exactly because SEA blobs are version-specific.
 const nodePackage = `node-win-x64@${process.versions.node}`;
 console.log(`[portable] acquiring ${nodePackage}`);
-execFileSync(npmExecutable, ["pack", nodePackage, "--pack-destination", cache, "--silent"], { cwd: root, stdio: "inherit" });
+execFileSync(process.execPath, [npmCli, "pack", nodePackage, "--pack-destination", cache, "--silent"], { cwd: root, stdio: "inherit" });
 const packageFile = path.join(cache, `node-win-x64-${process.versions.node}.tgz`);
 const unpacked = path.join(build, "node-package");
 await fsp.mkdir(unpacked, { recursive: true });
@@ -100,7 +101,7 @@ const nativeShell = path.join(stage, "resources", "native-shell");
 await fsp.mkdir(nativeShell, { recursive: true });
 await fsp.writeFile(path.join(nativeShell, "entry.cjs"), "// Module-resolution anchor for the packaged native shell.\n");
 for (const packageName of ["@webviewjs/webview@0.4.7", "@webviewjs/webview-win32-x64-msvc@0.4.7"]) {
-  const packed = execFileSync(npmExecutable, ["pack", packageName, "--pack-destination", cache, "--silent"], { cwd: root, encoding: "utf8" }).trim().split(/\r?\n/).at(-1);
+  const packed = execFileSync(process.execPath, [npmCli, "pack", packageName, "--pack-destination", cache, "--silent"], { cwd: root, encoding: "utf8" }).trim().split(/\r?\n/).at(-1);
   const scopeDir = path.join(nativeShell, "node_modules", "@webviewjs");
   const packageDir = path.join(build, `webview-${packed.replace(/[^a-z0-9.-]/gi, "-")}`);
   await fsp.mkdir(packageDir, { recursive: true });
@@ -118,7 +119,7 @@ for (const name of ["server.js", "package.json", ".next", "node_modules", "publi
 }
 const buildInfo = {
   version, sourceCommit, sourceState: "clean", sourceEpoch, buildEpoch: Number(process.env.SOURCE_DATE_EPOCH || sourceEpoch),
-  node: process.version, npm: execFileSync(npmExecutable, ["--version"], { encoding: "utf8" }).trim(),
+  node: process.version, npm: execFileSync(process.execPath, [npmCli, "--version"], { encoding: "utf8" }).trim(),
   target: { platform: "win32", architecture: "x64" }, lockfileSha256,
 };
 await fsp.writeFile(path.join(packagedServer, "build-info.json"), `${JSON.stringify(buildInfo, null, 2)}\n`);

@@ -14,6 +14,6 @@ await mustReject("credentials",async root=>fs.writeFile(path.join(root,"credenti
 await mustReject("world",async root=>fs.mkdir(path.join(root,"world")));
 await mustReject("absolute developer path",async root=>fs.writeFile(path.join(root,"public","leak.txt"),"C:\\Users\\Ahri\\ServerHub\\src"));
 if(process.platform!=="win32")await mustReject("symbolic link",async root=>fs.symlink(path.join(root,"server.js"),path.join(root,"public","server-link")));
-const packager=await fs.readFile("scripts/build-windows-portable.mjs","utf8");if(!packager.includes('process.platform === "win32" ? "npm.cmd" : "npm"')||packager.includes('execFileSync("npm",'))throw new Error("Portable packager must invoke npm.cmd on Windows");
+const packager=await fs.readFile("scripts/build-windows-portable.mjs","utf8");if(!packager.includes('const npmCli = process.env.npm_execpath')||!packager.includes('execFileSync(process.execPath, [npmCli,')||packager.includes('execFileSync("npm",')||packager.includes('"npm.cmd"'))throw new Error("Portable packager must invoke npm through Node on every platform");
 console.log("PACKAGE_CONTENT_EXCLUSION_REGRESSION_OK");
 console.log("FINAL_NATIVE_PACKAGE_INTEGRITY_OK");
