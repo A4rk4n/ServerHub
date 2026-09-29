@@ -41,6 +41,7 @@ export function NewServerWizard() {
   const [motd, setMotd] = useState("");
   const [pvp, setPvp] = useState(true);
   const [serverPassword, setServerPassword] = useState("");
+  const [ownerId, setOwnerId] = useState("");
   const [eulaAccepted, setEulaAccepted] = useState(false);
   const [launchCommand, setLaunchCommand] = useState("");
   const [launchArgs, setLaunchArgs] = useState("");
@@ -90,6 +91,7 @@ export function NewServerWizard() {
     setWorld(g.id === "ark" ? "TheIsland" : g.id === "valheim" ? "Midgard" : "world");
     setMotd(`A ${g.short} server by Server Hub`);
     setServerPassword("");
+    setOwnerId("");
     setEulaAccepted(false);
     setLaunchCommand("");
     setLaunchArgs("");
@@ -107,6 +109,7 @@ export function NewServerWizard() {
           port >= 1024 &&
           (!isMinecraft || eulaAccepted) &&
           (!game?.requiresPassword || serverPassword.length >= 5) &&
+          (game?.id !== "dragonwilds" || ownerId.trim().length > 0) &&
           (game?.installer !== "manual" || launchCommand.trim())
         )
       : true;
@@ -133,6 +136,7 @@ export function NewServerWizard() {
           difficulty,
           pvp,
           serverPassword,
+          ownerId: ownerId.trim(),
           eulaAccepted,
           launchCommand,
           launchArgs,
@@ -331,6 +335,16 @@ export function NewServerWizard() {
                 </Field>
               </div>
 
+              {game.id === "dragonwilds" && (
+                <Field label="In-game Player ID" hint="required · identifies the server owner/admin">
+                  <div className="relative">
+                    <KeyRound size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-plum-400" />
+                    <input className={cn(inputCls, "pl-9 font-mono")} value={ownerId} onChange={(e) => setOwnerId(e.target.value)} placeholder="Enter your Dragonwilds Player ID" maxLength={200} autoComplete="off" />
+                  </div>
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-plum-500">Find this ID in Dragonwilds, then paste it here. Server Hub passes it to the dedicated server as the owner identifier.</p>
+                </Field>
+              )}
+
               {game.requiresPassword && (
                 <Field label="Server password" hint="minimum 5 characters · stored locally">
                   <div className="relative">
@@ -428,7 +442,7 @@ export function NewServerWizard() {
                   ["Port", String(port)],
                   ["World", world || "world"],
                   ["Seed", seed || "random"],
-                  ["PvP", pvp ? "enabled" : "disabled"],
+                  game.id === "dragonwilds" ? ["Player ID", ownerId] : ["PvP", pvp ? "enabled" : "disabled"],
                 ].map(([k, v]) => (
                   <div key={k} className="bg-white px-4 py-3.5">
                     <p className="text-[10px] font-semibold uppercase tracking-widest text-plum-400">{k}</p>
