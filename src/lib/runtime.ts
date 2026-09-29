@@ -152,6 +152,7 @@ async function initializeRuntime() {
   const shutdown = () => {
     if (state.closing) return;
     state.closing = true;
+    if (state.scheduler) { clearInterval(state.scheduler); state.scheduler = undefined; }
     for (const timer of state.restartTimers.values()) clearTimeout(timer);
     state.restartTimers.clear();
     for (const install of state.installs.values()) install.controller.abort("Server Hub is shutting down");
