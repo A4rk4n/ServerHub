@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, DatabaseBackup, Megaphone, Play, Plus, RotateCw, Terminal, Trash2, Wrench } from "lucide-react";
+import { CalendarClock, DatabaseBackup, Megaphone, Pencil, Play, Plus, RotateCw, Terminal, Trash2, Wrench } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Task, TaskRun } from "@/db/schema";
 import { cn, hexA, timeAgo } from "@/lib/format";
@@ -36,6 +36,8 @@ function inTime(d: string | Date | null): string {
   return `in ${Math.round(h / 24)}d`;
 }
 
+function localDateTime(value:string|Date){const date=new Date(value),pad=(n:number)=>String(n).padStart(2,"0");return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`}
+
 function fmtInterval(min: number) {
   return INTERVALS.find((i) => i.min === min)?.label ?? `${min}m`;
 }
@@ -43,6 +45,7 @@ function fmtInterval(min: number) {
 export function TasksManager({ serverId, accent }: { serverId: number; accent: string }) {
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [runs,setRuns]=useState<TaskRun[]>([]);
+  const [editing,setEditing]=useState<Task|null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -67,14 +70,15 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
     setBusy(true);
     setErr(null);
     try {
-      const r = await fetch(`/api/servers/${serverId}/tasks`, {
-        method: "POST",
+      const r = await fetch(editing?`/api/servers/${serverId}/tasks/${editing.id}`:`/api/servers/${serverId}/tasks`, {
+        method: editing?"PATCH":"POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({...form,confirmedCommand:form.type==="broadcast"?`say ${form.payload.trim()}`:form.type==="command"?form.payload.trim():""}),
       });
       const j = await r.json();
       if (!r.ok) return setErr(j.error ?? "Failed");
       setOpen(false);
+      setEditing(null);
       setForm({ name: "", type: "backup", payload: "", intervalMin: 360, scheduleKind: "interval", scheduledFor: "", scheduleTime: "09:00", scheduleWeekday: 1, missedPolicy: "run" });
       await load();
     } finally {
@@ -121,7 +125,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
           <p className="font-display text-[15px] font-semibold text-plum-900">Scheduler</p>
           <p className="text-[12px] text-plum-500">{tasks.filter((t) => t.enabled).length} active · runs even while you sleep</p>
         </div>
-        <Btn variant="primary" accent={accent} onClick={() => setOpen(true)}>
+        <Btn variant="primary" accent={accent} onClick={() => {setEditing(null);setOpen(true)}}>
           <Plus size={15} /> New task
         </Btn>
       </div>
@@ -155,6 +159,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
                   <Toggle checked={t.enabled} onChange={() => toggle(t)} accent={accent} />
                 </div>
                 <div className="mt-3 flex justify-end gap-1.5 border-t border-candy-200/60 pt-2.5">
+                  <button onClick={()=>{setEditing(t);setForm({name:t.name,type:t.type,payload:t.payload,intervalMin:t.intervalMin,scheduleKind:t.scheduleKind,scheduledFor:t.scheduleKind==="once"&&t.nextRunAt?localDateTime(t.nextRunAt):"",scheduleTime:t.scheduleTime,scheduleWeekday:t.scheduleWeekday,missedPolicy:t.missedPolicy});setOpen(true)}} className="flex items-center gap-1.5 rounded-lg border border-candy-200 bg-candy-50 px-2.5 py-1.5 text-[11px] font-semibold text-plum-700"><Pencil size={11}/> Edit</button>
                   <button
                     onClick={() => runNow(t)}
                     className="flex items-center gap-1.5 rounded-lg border border-candy-200 bg-candy-50 px-2.5 py-1.5 text-[11px] font-semibold text-plum-700 transition hover:bg-candy-100"
@@ -175,7 +180,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
       )}
 
       {runs.length>0&&<section className="panel p-5"><h3 className="font-display mb-3 text-sm font-semibold text-plum-900">Scheduled action history</h3><div className="max-h-72 space-y-2 overflow-auto">{runs.slice(0,30).map(run=><div key={run.id} className="rounded-xl border border-candy-100 px-3 py-2 text-xs"><div className="flex justify-between gap-2"><strong>{run.taskName}</strong><span className={run.status==="succeeded"?"text-emerald-600":"text-red-500"}>{run.status}</span></div>{run.command&&<code className="mt-1 block text-[10px] text-plum-500">{run.command}</code>}{run.error&&<p className="mt-1 text-[10px] text-red-500">{run.error}</p>}<div className="mt-1 flex items-center justify-between"><p className="text-[10px] text-plum-400">{timeAgo(run.createdAt)}{run.retryOfRunId?` · retry of #${run.retryOfRunId}`:""}</p>{run.status==="failed"&&<Btn size="sm" variant="subtle" loading={busy} onClick={()=>void retryRun(run)}>Retry</Btn>}</div></div>)}</div></section>}
-      <Modal open={open} onClose={() => setOpen(false)} title="New scheduled task">
+      <Modal open={open} onClose={() => setOpen(false)} title={editing?"Edit scheduled task":"New scheduled task"}>
         <div className="space-y-4">
           <Field label="Task name">
             <input className={inputCls} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Nightly backup" maxLength={48} />
@@ -226,7 +231,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
           <div className="flex justify-end gap-2 pt-1">
             <Btn variant="ghost" onClick={() => setOpen(false)}>Cancel</Btn>
             <Btn variant="primary" accent={accent} onClick={create} loading={busy} disabled={!form.name.trim()}>
-              <Plus size={14} /> Create task
+              <Plus size={14} /> {editing?"Save task":"Create task"}
             </Btn>
           </div>
         </div>
