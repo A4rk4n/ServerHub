@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertCircle, CheckCircle2, Circle, Download, HardDrive, Loader2, RotateCw, Wrench, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn, hexA } from "@/lib/format";
 import { Btn } from "./ui";
 
@@ -34,6 +34,8 @@ function bytes(value: number) {
   return `${(value / 1024 ** 2).toFixed(1)} MB`;
 }
 
+function duration(seconds:number){if(!Number.isFinite(seconds)||seconds<0)return "";if(seconds<60)return `${Math.ceil(seconds)}s`;const minutes=Math.ceil(seconds/60);return minutes<60?`${minutes}m`:`${Math.floor(minutes/60)}h ${minutes%60}m`}
+
 function phaseLabel(phase: string) {
   return phase.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
 }
@@ -44,6 +46,8 @@ export function InstallationProgress({ serverId, accent }: { serverId: number; a
   const [events, setEvents] = useState<InstallEvent[]>([]);
   const [acting, setActing] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [speed, setSpeed] = useState(0);
+  const sample = useRef<{bytes:number;at:number}|null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -51,7 +55,10 @@ export function InstallationProgress({ serverId, accent }: { serverId: number; a
       if (!response.ok) return;
       const data = (await response.json()) as { job: InstallJob | null; events: InstallEvent[] };
       setJob(data.job);
-      setNow(new Date().getTime());
+      const sampledAt=new Date().getTime();
+      if(data.job&&sample.current&&data.job.bytesDone>=sample.current.bytes){const elapsed=(sampledAt-sample.current.at)/1000;const instant=elapsed>0?(data.job.bytesDone-sample.current.bytes)/elapsed:0;if(instant>0)setSpeed(previous=>previous?previous*0.65+instant*0.35:instant)}
+      if(data.job)sample.current={bytes:data.job.bytesDone,at:sampledAt};
+      setNow(sampledAt);
       setEvents(data.events ?? []);
     } catch {
       // The normal server poll will recover after brief local-service restarts.
@@ -89,6 +96,7 @@ export function InstallationProgress({ serverId, accent }: { serverId: number; a
   const active = ACTIVE.has(job.status);
   const stalled = active && now - new Date(job.updatedAt).getTime() > 120_000;
   const failed = job.status === "failed" || job.status === "cancelled";
+  const eta = speed > 0 && job.bytesTotal > job.bytesDone ? duration((job.bytesTotal-job.bytesDone)/speed) : "";
   const transfer = job.bytesDone > 0
     ? job.bytesTotal > 0
       ? `${bytes(job.bytesDone)} / ${bytes(job.bytesTotal)}`
@@ -137,7 +145,7 @@ export function InstallationProgress({ serverId, accent }: { serverId: number; a
       <div className="border-t border-candy-100 px-5 py-4">
         <div className="mb-2 flex items-center justify-between text-[11px] font-semibold text-plum-500">
           <span>{job.message}</span>
-          <span className="ml-3 shrink-0 font-mono text-plum-700">{transfer ? `${transfer} · ` : ""}{job.progress}%</span>
+          <span className="ml-3 shrink-0 font-mono text-plum-700">{transfer ? `${transfer} · ` : ""}{speed > 0 && active ? `${bytes(speed)}/s${eta ? ` · ${eta} left` : ""} · ` : ""}{job.progress}%</span>
         </div>
         <div className="h-2 overflow-hidden rounded-full bg-candy-100">
           <div
