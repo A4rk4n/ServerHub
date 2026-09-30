@@ -42,6 +42,10 @@ jobs:
       - name: Run unit suites
         shell: bash
         run: |
+          # GitHub runs shell: bash with -eo pipefail; disarm errexit so a
+          # failing suite reaches the annotation block instead of aborting
+          # the script at the pipeline.
+          set +e
           npm run test:unit 2>&1 | tee unit-test-output.txt
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
