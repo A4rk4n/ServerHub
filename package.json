@@ -1,9 +1,8 @@
 {
   "name": "server-hub",
-  "version": "2.11.1",
+  "version": "2.12.0",
   "description": "Local desktop manager for real dedicated game-server processes",
   "private": true,
-  "main": "electron/main.cjs",
   "author": "Server Hub contributors",
   "license": "MIT",
   "scripts": {

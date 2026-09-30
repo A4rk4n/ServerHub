@@ -21,7 +21,7 @@ jobs:
         # migrates to Ubuntu 26.04 between 2026-10-19 and 2026-11-19
         # (actions/runner-images#14748). Pinning makes that move a reviewed,
         # bisectable commit instead of an unannounced change under a release.
-        os: [ubuntu-26.04, windows-latest]
+        os: [ubuntu-26.04, windows-2025]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -44,7 +44,7 @@ jobs:
       - run: npm run test:release-verification
       - run: npm run sbom
   windows-portable:
-    runs-on: windows-latest
+    runs-on: windows-2025
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v6

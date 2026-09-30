@@ -4,16 +4,16 @@ Server Hub is a local desktop application for installing and operating **real de
 
 There are no sample servers, simulated players, generated console lines, fake metrics, cloud nodes, or external databases. A fresh install opens with an empty fleet.
 
-## Download / run on Windows
+## Windows portable application
 
-Use one of the Windows artifacts from a release or from `release/` when it is present:
+Server Hub ships as a standalone Windows x64 portable package (`ServerHub-*-Windows-x64-Portable.zip`):
 
-- **`ServerHub-1.0.2-Windows-x64-Portable.zip`** — extract the complete `ServerHub` folder into a new location, then double-click `ServerHub.exe`. It starts without a Command Prompt and opens Server Hub in a dedicated desktop-style Edge/Chrome window.
-- **`ServerHub-Setup-1.0.2-x64.exe`** — Electron/NSIS installer target with desktop and Start Menu shortcuts (produced by `npm run dist:win` when Electron's packaging CDN is reachable).
+- **Native desktop window:** `ServerHub.exe` is a Node Single Executable Application (SEA) hosting an embedded Microsoft Edge WebView2 window. It starts without a Command Prompt and does not open an external browser or Edge/Chrome app-mode window.
+- **Graceful lifecycle:** Closing the native window gracefully stops the local management service and all running game-server child processes.
+- **Self-contained runtimes:** Server Hub embeds the Node runtime and local application server. Managed dependencies such as Eclipse Temurin Java runtimes (Java 8, 17, 21) and SteamCMD are acquired automatically into the app-data folder on demand without requiring administrator privileges.
+- **Persistent application data:** Configuration, SQLite database, server directories, tools, and backups are stored under `%APPDATA%\ServerHub` and survive application updates.
 
-The executables are not code-signed. Windows SmartScreen can therefore display an “unknown publisher” warning. Review the source and build it yourself if preferred.
-
-Server Hub itself needs no separately installed Node.js, database, Java, or SteamCMD. Both Windows packages contain the Node runtime and application server. When required, it downloads a private Java runtime or SteamCMD into the app-data folder without administrator rights.
+The executable is not code-signed with a commercial certificate; Windows SmartScreen may present a first-run prompt. Release archives include SHA-256 checksums (`SHA256SUMS`), `release-manifest.json`, and a CycloneDX SBOM for independent verification.
 
 ## Real installation support
 
@@ -26,135 +26,90 @@ Server Hub itself needs no separately installed Node.js, database, Java, or Stea
 | ARK: Survival Evolved | SteamCMD app `376030` | Official `ShooterGameServer` executable |
 | Terraria | SteamCMD app `105600` | Official Terraria server executable and generated config |
 | Rust | SteamCMD app `258550` | Official `RustDedicated` executable |
-| Dragonwilds / Hytale | Manual registration | User-supplied executable/script and arguments; no invented download URL |
+| Dragonwilds / Hytale | SteamCMD / manual registration | Managed or user-supplied executable with preflight checks and LAN binding |
 | Custom | Manual registration | Any executable, `.bat`, `.cmd`, or shell script in a managed or existing folder |
 
 Publisher availability and anonymous SteamCMD access can change. If a publisher requires an account or does not publish a compatible dedicated-server binary for your OS, Server Hub reports the real installer error rather than pretending installation succeeded.
 
 ## Features
 
-- **Recoverable installation jobs:** installation state, phases, progress, byte counts, attempts and events are persisted in SQLite. Interrupted jobs automatically return to the queue after Server Hub restarts.
-- **Safe installation activation:** managed downloads are prepared and validated in a sibling staging directory, then atomically activated so a failed installer cannot replace the current server directory.
-- **Installer controls and preflight:** cancel/retry controls, resumable HTTP downloads, disk-space checks and real TCP/UDP port-conflict checks are shown directly on the server page.
-- **Real lifecycle management:** start, graceful stop, restart, force-kill, crash detection, PID reporting, and process-tree cleanup.
-- **Bounded crash recovery:** optional automatic restart with exponential backoff, a configurable attempt/window limit, crash-loop protection, and a cancel-restart control.
-- **Launch preflight:** the configured TCP/UDP game port is checked again immediately before every process launch, not only during installation.
-- **Live console:** persisted stdout/stderr, severity detection, command history, and direct stdin commands.
-- **Real process metrics:** resident memory and CPU usage from the operating system.
-- **Player observation:** Minecraft/Bedrock join and leave messages are parsed from actual console output. Player actions issue actual server commands.
-- **Filesystem manager:** browses the real installation tree and atomically edits safe text/config formats. Path traversal and symlink escapes are rejected.
-- **Backups:** creates real `.tar.gz` archives, records a SHA-256 checksum, downloads the archive, and performs checksum-verified rollback with failure recovery.
-- **Scheduler:** runs backups, restarts, broadcasts, and raw commands in the local runtime even when the page is not open.
-- **Configuration:** writes actual Minecraft, Bedrock, and Terraria configuration files before launch.
-- **Live Fabric mods:** searches Modrinth, selects a version matching the server, installs required dependencies, verifies SHA-512, and physically enables/disables/uninstalls files.
-- **Local SQLite:** configuration and logs remain on the PC and survive application updates.
+- **Recoverable installation jobs:** Installation state, phases, progress, byte counts, attempts, and events are persisted in SQLite. Interrupted jobs automatically return to the queue when Server Hub restarts.
+- **Safe installation activation:** Managed downloads are prepared and validated in a sibling staging directory, then atomically activated so a failed installer cannot replace the current server directory.
+- **Installer preflight and controls:** Cancel/retry controls, resumable downloads, disk-space checks, and TCP/UDP port-conflict detection before installation and launch.
+- **Real lifecycle management:** Start, graceful stop, restart, force-kill, crash detection, PID reporting, and process-tree cleanup.
+- **Bounded crash recovery:** Optional automatic restart with exponential backoff (2, 4, 8... seconds, capped at 30s), configurable attempt/window limits, and crash-loop protection.
+- **Live console:** Persisted stdout/stderr, severity detection, command history, and direct stdin commands.
+- **Real process metrics:** Resident memory and CPU usage sampled directly from the operating system.
+- **Player observation & queries:** Minecraft and Bedrock join/leave events parsed from live logs; Steam A2S query protocols for player counts, server metadata, and challenge queries.
+- **Filesystem manager:** Browses the real installation tree and atomically edits safe text/config formats. Path traversal and symlink escapes outside the root are strictly rejected.
+- **Checksum-verified backups:** Creates real `.tar.gz` archives, records SHA-256 digests, and validates archives before restore with preview verification.
+- **Credential vault:** Protects server passwords and sensitive tokens using Windows DPAPI (CurrentUser scope) with recoverable migration.
+- **Windows Firewall & Network Center:** Inspects and creates required Windows Defender Firewall rules; displays LAN bind addresses and public NAT endpoints.
+- **Tool Health & repair pipeline:** Monitors managed tool inventory (SteamCMD, Java runtimes), verifies Authenticode digital signatures, and stages non-destructive repairs.
+- **Task scheduler:** Runs backups, restarts, broadcasts, and custom commands with calendar schedules, missed-run policies, and execution audit logging.
+- **Player moderation:** Whitelist, op, kick, and ban management with restart-safe temporary ban expiration and audit history.
 
-## Data locations
+## Networking and security
 
-Desktop builds use Electron's per-user app-data directory (use **Server → Open data folder** in the desktop menu to open the exact location). It is normally under `%APPDATA%` on Windows, `~/Library/Application Support` on macOS, or `~/.config` on Linux.
-
-Inside it:
-
-```text
-serverhub.db       settings, status, logs, schedules, backup metadata
-servers/<id>/      managed game-server installations and worlds
-backups/<id>/      real compressed backup archives
-tools/             private Java runtimes and SteamCMD
-downloads/         temporary downloads (removed after extraction)
-```
-
-A custom server can point at an existing absolute working directory. Removing that Server Hub entry **does not delete the external directory**. Managed directories are deleted only after the explicit name-confirmation flow.
-
-## Networking and safety
-
-- The management UI binds only to `127.0.0.1`; it has no remote authentication and must not be exposed to the internet.
-- Game processes bind according to their own configuration. To accept LAN/internet players, allow the game port in Windows Firewall/router settings as appropriate.
-- The file API is rooted to each server directory, limits editable file size, rejects traversal, and does not follow symlinks outside the root.
-- Downloads use HTTPS. Mojang, Modrinth, and backup archives are checksum verified where the upstream provides a digest.
-- Passwords are stored in the local SQLite database and are redacted from API/UI responses. Protect your OS account and app-data folder.
-- Minecraft installation requires explicit acceptance of the Minecraft EULA in the setup wizard.
+- **Local-only management:** The desktop management API binds strictly to `127.0.0.1:4321` and requires a per-launch random session token. It must never be exposed directly to the internet.
+- **LAN server binding:** Game processes bind to the server machine's locally assigned LAN address (e.g. `192.168.1.210`). Public addresses (e.g. `185.83.148.20`) are descriptive for player connection instructions and router port-forwarding.
+- **Bounded data isolation:** Support bundle exports redact passwords, tokens, and player IDs, and strictly exclude database files, worlds, credentials, and private configs.
+- **EULA enforcement:** Minecraft installation requires explicit acceptance of the Mojang EULA during the onboarding or setup flow.
 
 ## Build from source
 
 ### Requirements
 
-- Node.js **22.5 or newer** (the app uses built-in `node:sqlite`)
-- npm
-- Internet access for npm and Electron packaging downloads
+- Node.js **24.21.0** (pinned in `.node-version`; uses built-in `node:sqlite`)
+- npm **10** or newer
+- Internet access for npm dependency installation and game server downloads
+
+### Verification and testing
 
 ```bash
+# Install dependencies
 npm ci
+
+# Typecheck and linting
 npm run typecheck
 npm run lint
+
+# Build standalone application server
 npm run build:server
-npm run test:installation-jobs
+
+# Run test suite
+npm test
+
+# Verify production dependency audit
+npm audit --omit=dev
 ```
 
-Run the local web build:
+### Building the Windows portable package
 
 ```bash
-./run.sh                 # macOS / Linux
-run.bat                  # Windows
+# Build the standalone Windows x64 portable executable and release ZIP
+npm run dist:win:portable
 ```
 
-Or launch the Electron development shell:
+The resulting package is written to `release/ServerHub-<version>-Windows-x64-Portable.zip` along with `SHA256SUMS`, `release-manifest.json`, and the CycloneDX SBOM.
+
+### Running in local development mode
 
 ```bash
-npm run desktop:dev
+# Start Next.js development server
+npm run dev
+
+# Or run using local start scripts
+run.bat       # Windows
+./run.sh      # macOS / Linux
 ```
 
-Build for the current operating system:
+## Documentation
 
-```bash
-npm run dist
-```
-
-Build the Windows x64 installer from a supported host, or build the browser-based portable executable on any host running the matching Node release:
-
-```bash
-npm run dist:win             # Electron + NSIS installer
-npm run dist:win:portable    # release/ServerHub-*-Portable.zip
-```
-
-Installer artifacts are written to `dist/`; the portable ZIP and checksum are written to `release/`. Platform packaging targets are configured in `electron-builder.yml`:
-
-- Windows: NSIS installer `.exe`
-- macOS: x64 and arm64 `.dmg`
-- Linux: x64 AppImage
-
-Cross-building Windows from Linux is supported by electron-builder for the unsigned NSIS target. Build macOS artifacts on macOS.
-
-## Source layout
-
-```text
-electron/                 secure Electron shell and local server supervisor
-src/app/api/              local REST API
-src/lib/runtime.ts        installers, processes, console parsing, metrics, backups, scheduler
-src/lib/filesys.ts        rooted real-filesystem browser/editor
-src/db/                   SQLite schema and additive migrations
-scripts/prepare-standalone.mjs
-                          assembles Next.js standalone output
-build-resources/          desktop icons
-```
-
-## Environment variables (source/web mode)
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `SERVERHUB_PORT` | `4321` | Local management HTTP port |
-| `SERVERHUB_APPDATA` | `./data` in launch scripts | Runtime data root |
-| `SERVERHUB_DB` | `./data/serverhub.db` in launch scripts | SQLite database path |
-| `PORT` | derived from `SERVERHUB_PORT` | Next.js server port |
-| `HOSTNAME` | `127.0.0.1` | Management bind address |
-
-## Validation performed in this repository
-
-```bash
-npm audit             # 0 known vulnerabilities
-npm run typecheck     # strict TypeScript
-npm run lint                    # Next.js/React ESLint
-npm run build:server            # production standalone build
-npm run test:installation-jobs  # persistence, preflight, retry, cancel and restart recovery
-```
-
-An end-to-end runtime test also registers a custom shell process, starts it, sends stdin, captures real stdout, browses its files, creates a checksum-backed archive, stops it gracefully, restores the archive, and removes the Server Hub entry while confirming the external folder remains intact.
+- [Architecture Overview](docs/ARCHITECTURE.md)
+- [Provider Integration Guide](docs/PROVIDER-INTEGRATION.md)
+- [Release Runbook](RELEASE.md) and [Releasing Process](docs/RELEASING.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Security Policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
+- [Historical Records](docs/history/)
