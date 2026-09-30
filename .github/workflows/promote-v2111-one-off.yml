@@ -231,10 +231,19 @@ jobs:
             gh release create "$TAG" --draft --target "$COMMIT" --title "Server Hub v${VERSION}" --notes-file release-notes.md
             echo "Created draft release $TAG."
           fi
+          # Draft releases are not resolvable through releases/tags/{tag};
+          # resolve the release id through the list endpoint instead and
+          # upload through the direct asset endpoint.
+          release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"${TAG}\") | .id" | head -n 1)
+          if [[ -z "${release_id:-}" ]]; then
+            echo "::error::Could not resolve the release id for ${TAG}"; exit 1
+          fi
+          echo "Release ${TAG} id: ${release_id}"
           for name in "$FILENAME" SHA256SUMS release-manifest.json $(basename $(ls bundle/serverhub-*-sbom.cdx.json)); do
             path="bundle/${name}"
             expected_digest="sha256:$(sha256sum "$path" | cut -d' ' -f1)"
-            remote_digest=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+            remote_digest=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
               --jq ".assets[] | select(.name == \"${name}\") | .digest // empty")
             if [[ -n "$remote_digest" ]]; then
               if [[ "$remote_digest" == "$expected_digest" ]]; then
@@ -243,9 +252,14 @@ jobs:
                 echo "::error::Asset ${name} already exists with digest ${remote_digest} (expected ${expected_digest}); refusing to overwrite"; exit 1
               fi
             else
-              gh release upload "$TAG" "$path"
+              curl -fsSL --retry 5 --retry-delay 10 -X POST \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                -H "Content-Type: application/octet-stream" \
+                --data-binary "@${path}" \
+                "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${name}"
               echo "Attached ${name}."
             fi
           done
-          gh release view "$TAG" --json name,isDraft,isPrerelease,assets \
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
             --jq '{name, isDraft, isPrerelease, assets: [.assets[] | {name, size, digest}]}'
