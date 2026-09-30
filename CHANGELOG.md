@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.13.0] - 2026-09-30
+
+### Changed
+- Migrate all 37 test suites to Node 24's built-in test runner (`node --test` with `node:test` and `node:assert`): test files execute in parallel in isolated processes with per-test names, durations, and a structured pass/fail summary, replacing the fragile 37-step `&&` chain that halted on the first failure.
+- `npm test` now runs typecheck, lint, the parallel `test:unit` pass, and the installation-job lifecycle integration; every `npm run test:<suite>` script still runs a single suite in isolation for focused debugging.
+- CI executes the full test suite through the native runner on both `ubuntu-26.04` and `windows-2025` (the POSIX-only installation-job lifecycle integration remains Linux-gated and covered on Windows by the portable-package job).
+- Consolidate release documentation: `docs/RELEASING.md` is now the canonical release guide covering build versus promotion, provenance, smoke-test signoff, and rollback, while `RELEASE.md` becomes a concise operator runbook that links into it.
+
+### Fixed
+- Wire the `test:catalog` and `test:recovery-invariants` suites into the default test run; both existed and passed but were never invoked by `npm test`.
+
+## [2.12.0] - 2026-09-30
+
+Repository accuracy and dependency hygiene. Infrastructure-only release with no runtime changes; intentionally left untagged.
+
 ### Changed
 - Pin Windows CI runner image to `windows-2025`.
 - Add Dependabot configuration for npm and GitHub Actions with weekly schedules and grouped updates.
@@ -51,6 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.11.1...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.13.0...HEAD
+[2.13.0]: https://github.com/A4rk4n/ServerHub/compare/4cd9be85317e0b23023e9cb14c48972e3a137bc6...v2.13.0
+[2.12.0]: https://github.com/A4rk4n/ServerHub/compare/v2.11.1...4cd9be85317e0b23023e9cb14c48972e3a137bc6
 [2.11.1]: https://github.com/A4rk4n/ServerHub/compare/v2.11.0...v2.11.1
 [2.11.0]: https://github.com/A4rk4n/ServerHub/releases/tag/v2.11.0
