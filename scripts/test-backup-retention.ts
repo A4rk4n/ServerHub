@@ -4,6 +4,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   clampRetentionCount,
@@ -121,4 +122,25 @@ test("clamping bounds retention settings and rejects garbage", () => {
   assert.equal(clampRetentionDays(400), 365);
   assert.equal(clampRetentionDays(Number.POSITIVE_INFINITY), 0);
   console.log("BACKUP_RETENTION_POLICY_OK");
+});
+
+test("prune task type is wired through the scheduler stack", () => {
+  const tasksRoute = readFileSync("src/app/api/servers/[id]/tasks/route.ts", "utf8");
+  const runtime = readFileSync("src/lib/runtime.ts", "utf8");
+  const backupsRoute = readFileSync("src/app/api/servers/[id]/backups/route.ts", "utf8");
+
+  // The tasks API must accept every type the scheduler can execute.
+  for (const type of ["restart", "backup", "prune", "maintenance", "command", "broadcast"]) {
+    assert.ok(tasksRoute.includes(`"${type}"`), `tasks route accepts "${type}"`);
+  }
+  // The scheduler executes prune via the shared retention enforcement path
+  // and records a skipped run when no limits are configured.
+  assert.ok(runtime.includes('task.type === "prune"'), "sweepTasks handles prune tasks");
+  const pruneBranch = runtime.slice(runtime.indexOf('task.type === "prune"'));
+  assert.ok(pruneBranch.includes("applyBackupRetention"), "prune tasks reuse applyBackupRetention");
+  assert.ok(pruneBranch.slice(0, 1600).includes('"skipped"'), "prune without limits records a skipped run");
+  // The backups API exposes the retention policy so the UI can surface it.
+  assert.ok(backupsRoute.includes("retention:"), "backups GET returns retention policy");
+  assert.ok(backupsRoute.includes("protectedId"), "backups GET flags the protected safety backup");
+  console.log("PRUNE_TASK_WIRING_OK");
 });

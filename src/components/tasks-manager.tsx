@@ -10,6 +10,7 @@ const TYPE_META: Record<string, { label: string; icon: React.ComponentType<{ siz
   maintenance: { label: "Maintenance", icon: Wrench, color: "#fb7185", hint: "Backup, stop and update safely" },
   restart: { label: "Restart", icon: RotateCw, color: "#f5b84c", hint: "Gracefully restarts the server" },
   backup: { label: "Backup", icon: DatabaseBackup, color: "#38bdf8", hint: "Creates a world snapshot" },
+  prune: { label: "Prune backups", icon: Trash2, color: "#f97316", hint: "Applies the backup retention limits" },
   command: { label: "Command", icon: Terminal, color: "#c084fc", hint: "Runs a console command" },
   broadcast: { label: "Broadcast", icon: Megaphone, color: "#4ade80", hint: "Sends a message to chat" },
 };

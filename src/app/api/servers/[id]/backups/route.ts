@@ -11,7 +11,10 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   const [s] = await db.select().from(servers).where(eq(servers.id, Number(id)));
   if (!s) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const rows = await db.select().from(backups).where(eq(backups.serverId, s.id)).orderBy(desc(backups.id));
-  return NextResponse.json({ backups: rows });
+  return NextResponse.json({
+    backups: rows,
+    retention: { count: s.backupRetentionCount, days: s.backupRetentionDays, protectedId: s.updateSafetyBackupId ?? null },
+  });
 }
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {

@@ -12,8 +12,10 @@ function fmtSize(mb: number) {
 
 export function BackupsManager({ serverId, accent, status }: { serverId: number; accent: string; status: string }) {
   const [backups, setBackups] = useState<Backup[] | null>(null);
+  const [retention, setRetention] = useState<{ count: number; days: number; protectedId: number | null } | null>(null);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
+  const [pruning, setPruning] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<Backup | null>(null);
   const [restorePreview, setRestorePreview] = useState<{checksumValid:boolean;archiveBytes:number;entries:number;sample:string[]} | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Backup | null>(null);
@@ -25,6 +27,7 @@ export function BackupsManager({ serverId, accent, status }: { serverId: number;
       const r = await fetch(`/api/servers/${serverId}/backups`, { cache: "no-store" });
       const j = await r.json();
       if (j.backups) setBackups(j.backups);
+      if (j.retention) setRetention(j.retention);
     } catch {}
   }
   useEffect(() => {
@@ -98,8 +101,29 @@ export function BackupsManager({ serverId, accent, status }: { serverId: number;
     a.click();
   }
 
+  async function prune() {
+    setPruning(true);
+    try {
+      const r = await fetch(`/api/servers/${serverId}/backups`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "prune" }),
+      });
+      const j = await r.json();
+      if (!r.ok) setNotice(j.error ?? "Prune failed");
+      else setNotice(j.pruned > 0 ? `Retention pruned ${j.pruned} backup${j.pruned === 1 ? "" : "s"} · ${j.kept} kept` : "Nothing to prune — all backups are within the retention limits");
+      await load();
+    } finally {
+      setPruning(false);
+    }
+  }
+
   if (!backups) return <Spin label="Loading backups…" />;
   const totalMb = backups.filter((b) => b.status === "complete").reduce((a, b) => a + b.sizeMb, 0);
+  const retentionActive = !!retention && (retention.count > 0 || retention.days > 0);
+  const retentionLabel = !retentionActive
+    ? "retention off"
+    : [retention!.count > 0 ? `keep ${retention!.count}` : "", retention!.days > 0 ? `max ${retention!.days}d` : ""].filter(Boolean).join(" · ");
 
   return (
     <div className="space-y-5">
@@ -110,7 +134,7 @@ export function BackupsManager({ serverId, accent, status }: { serverId: number;
         <div className="mr-auto">
           <p className="font-display text-[15px] font-semibold text-plum-900">Snapshots</p>
           <p className="text-[12px] text-plum-500">
-            {backups.filter((b) => b.status === "complete").length} stored · {fmtSize(totalMb)} total · local archives
+            {backups.filter((b) => b.status === "complete").length} stored · {fmtSize(totalMb)} total · {retentionLabel}
           </p>
         </div>
         <input
@@ -120,6 +144,11 @@ export function BackupsManager({ serverId, accent, status }: { serverId: number;
           className={cn(inputCls, "w-52")}
           maxLength={48}
         />
+        {retentionActive && (
+          <Btn variant="subtle" onClick={prune} loading={pruning} title="Apply the retention limits from Settings now">
+            <Trash2 size={15} /> Prune now
+          </Btn>
+        )}
         <Btn variant="primary" accent={accent} onClick={create} loading={creating}>
           <Plus size={15} /> Snapshot now
         </Btn>
@@ -139,7 +168,14 @@ export function BackupsManager({ serverId, accent, status }: { serverId: number;
                 {b.status === "building" ? <RotateCcw size={15} className="animate-spin" /> : <History size={15} />}
               </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate font-mono text-[13px] font-medium text-plum-900">{b.name}.tar.gz</p>
+                <p className="flex items-center gap-1.5 truncate font-mono text-[13px] font-medium text-plum-900">
+                  {b.name}.tar.gz
+                  {retention?.protectedId === b.id && (
+                    <span title="Update safety backup — never pruned by retention" className="inline-flex items-center" style={{ color: accent }}>
+                      <ShieldCheck size={13} />
+                    </span>
+                  )}
+                </p>
                 <p className="mt-0.5 text-[11px] text-plum-400">
                   {b.note || "manual"} · {timeAgo(b.createdAt)}
                 </p>

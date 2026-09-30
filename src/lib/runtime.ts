@@ -2081,6 +2081,22 @@ export async function sweepTasks(serverId?: number) {
       const [server] = await db.select().from(servers).where(eq(servers.id, task.serverId));
       if (!server) continue;
       if (task.type === "backup") await createBackup(server.id, `auto-${safeFileName(task.name)}`, "scheduler");
+      else if (task.type === "prune") {
+        if (server.backupRetentionCount === 0 && server.backupRetentionDays === 0) {
+          await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status: "skipped", error: "No retention limits are configured in Settings" });
+          await logLine(server.id, "warn", "Backup", `Scheduled prune "${task.name}" skipped: no retention limits are configured.`);
+        } else {
+          try {
+            const result = await applyBackupRetention(server.id);
+            await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status: "succeeded", error: "" });
+            await logLine(server.id, "system", "Backup", `Scheduled prune "${task.name}" removed ${result.pruned} backup${result.pruned === 1 ? "" : "s"} (${result.kept} kept).`);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status: "failed", error: message });
+            await logLine(server.id, "error", "Backup", `Scheduled prune "${task.name}" failed: ${message}`);
+          }
+        }
+      }
       else if (task.type === "maintenance") {
         let maintenanceStatus = "failed", maintenanceError = "";
         try {
