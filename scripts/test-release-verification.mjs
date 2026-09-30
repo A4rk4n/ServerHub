@@ -3,6 +3,8 @@
 // fixture bundles (archive + manifest + sums + SBOM + tagged package.json),
 // asserts that a fully consistent bundle verifies, and that every tampered or
 // inconsistent variant is rejected.
+import assert from "node:assert/strict";
+import test from "node:test";
 import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -72,13 +74,16 @@ function verify(fixture, tag = `v${version}`, tagCommit = commit, withSbom = tru
   return spawnSync(process.execPath, [verifier, ...args], { cwd: fixture.work, encoding: "utf8" });
 }
 
+function expect(result, label, expectation) {
+  const accepted = result.status === 0 && result.stdout.includes("RELEASE_ARTIFACT_VERIFIED");
+  if (expectation === "accept") assert.ok(accepted, `${label} was not accepted: ${result.stderr || result.stdout}`);
+  else assert.equal(accepted, false, `${label} was not rejected`);
+}
+
 async function check(label, config, expectation, { tag, tagCommit, withSbom = true } = {}) {
   const fixture = await bundle(config ?? {});
   try {
-    const result = verify(fixture, tag, tagCommit, withSbom);
-    const accepted = result.status === 0 && result.stdout.includes("RELEASE_ARTIFACT_VERIFIED");
-    if (expectation === "accept" && !accepted) throw new Error(`${label} was not accepted: ${result.stderr || result.stdout}`);
-    if (expectation === "reject" && accepted) throw new Error(`${label} was not rejected`);
+    expect(verify(fixture, tag, tagCommit, withSbom), label, expectation);
   } finally {
     await fsp.rm(fixture.work, { recursive: true, force: true });
   }
@@ -88,57 +93,100 @@ async function checkPostMutate(label, mutate, expectation) {
   const fixture = await bundle();
   try {
     await mutate(fixture);
-    const result = verify(fixture);
-    const accepted = result.status === 0 && result.stdout.includes("RELEASE_ARTIFACT_VERIFIED");
-    if (expectation === "accept" && !accepted) throw new Error(`${label} was not accepted: ${result.stderr || result.stdout}`);
-    if (expectation === "reject" && accepted) throw new Error(`${label} was not rejected`);
+    expect(verify(fixture), label, expectation);
   } finally {
     await fsp.rm(fixture.work, { recursive: true, force: true });
   }
 }
 
-await check("consistent bundle", undefined, "accept");
-await checkPostMutate("corrupted artifact bytes", async (fixture) => {
-  const bytes = Buffer.from(await fsp.readFile(fixture.artifact));
-  bytes[Math.floor(bytes.length / 2)] ^= 0xff;
-  await fsp.writeFile(fixture.artifact, bytes);
-}, "reject");
-await checkPostMutate("artifact renamed to another version", async (fixture) => {
-  const renamed = path.join(fixture.work, "ServerHub-9.9.8-Windows-x64-Portable.zip");
-  await fsp.rename(fixture.artifact, renamed);
-  fixture.artifact = renamed;
-}, "reject");
-await check("embedded provenance commit mismatch", { buildInfoCommit: otherCommit }, "reject");
-await check("manifest commit mismatch", { manifest: (manifest) => { manifest.sourceCommit = otherCommit; } }, "reject");
-await check("manifest size mismatch", { manifest: (manifest) => { manifest.size += 1; } }, "reject");
-await check("manifest checksum mismatch", { manifest: (manifest) => { manifest.sha256 = "0".repeat(64); } }, "reject");
-await check("manifest build-info checksum mismatch", { manifest: (manifest) => { manifest.buildInfoChecksum = "1".repeat(64); } }, "reject");
-await check("manifest artifact name mismatch", { manifest: (manifest) => { manifest.artifact = "ServerHub-9.9.8-Windows-x64-Portable.zip"; } }, "reject");
-await check("tampered SHA256SUMS", { sums: `${"2".repeat(64)}  ServerHub-${version}-Windows-x64-Portable.zip\n` }, "reject");
-await check("SBOM mismatching the manifest", { sbomText: "{}\n" }, "reject");
-await check("tag not matching package version", undefined, "reject", { tag: "v9.9.8" });
-await check("tag commit mismatch", undefined, "reject", { tagCommit: otherCommit });
-await check("non-semantic tag", undefined, "reject", { tag: "vLatest" });
-await check("bundle without SBOM argument", undefined, "accept", { withSbom: false });
-await checkPostMutate("missing embedded build-info", async (fixture) => {
-  const replacement = path.join(fixture.work, "replaced.zip");
-  const output = fs.createWriteStream(replacement);
-  const zip = new ZipArchive({ zlib: { level: 9 } });
-  zip.pipe(output);
-  zip.append(Buffer.from("no provenance here\n"), { name: "ServerHub/ServerHub.exe" });
-  await zip.finalize();
-  await new Promise((resolve, reject) => { output.on("close", resolve); output.on("error", reject); });
-  await fsp.rm(fixture.artifact, { force: true });
-  await fsp.rename(replacement, fixture.artifact);
-  // Keep the manifest authentic for the new bytes so only the missing
-  // embedded provenance can cause the rejection.
-  const bytes = await fsp.readFile(fixture.artifact);
-  const manifest = JSON.parse(await fsp.readFile(path.join(fixture.work, "release-manifest.json"), "utf8"));
-  manifest.size = bytes.length;
-  manifest.sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
-  manifest.buildInfoChecksum = crypto.createHash("sha256").update("no provenance here\n").digest("hex");
-  await fsp.writeFile(path.join(fixture.work, "release-manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
-  await fsp.writeFile(path.join(fixture.work, "SHA256SUMS"), `${manifest.sha256}  ${manifest.artifact}\n`);
-}, "reject");
+test("a consistent bundle verifies", async () => {
+  await check("consistent bundle", undefined, "accept");
+});
 
-console.log("RELEASE_ARTIFACT_VERIFICATION_REGRESSION_OK");
+test("corrupted artifact bytes are rejected", async () => {
+  await checkPostMutate("corrupted artifact bytes", async (fixture) => {
+    const bytes = Buffer.from(await fsp.readFile(fixture.artifact));
+    bytes[Math.floor(bytes.length / 2)] ^= 0xff;
+    await fsp.writeFile(fixture.artifact, bytes);
+  }, "reject");
+});
+
+test("an artifact renamed to another version is rejected", async () => {
+  await checkPostMutate("artifact renamed to another version", async (fixture) => {
+    const renamed = path.join(fixture.work, "ServerHub-9.9.8-Windows-x64-Portable.zip");
+    await fsp.rename(fixture.artifact, renamed);
+    fixture.artifact = renamed;
+  }, "reject");
+});
+
+test("an embedded provenance commit mismatch is rejected", async () => {
+  await check("embedded provenance commit mismatch", { buildInfoCommit: otherCommit }, "reject");
+});
+
+test("a manifest commit mismatch is rejected", async () => {
+  await check("manifest commit mismatch", { manifest: (manifest) => { manifest.sourceCommit = otherCommit; } }, "reject");
+});
+
+test("a manifest size mismatch is rejected", async () => {
+  await check("manifest size mismatch", { manifest: (manifest) => { manifest.size += 1; } }, "reject");
+});
+
+test("a manifest checksum mismatch is rejected", async () => {
+  await check("manifest checksum mismatch", { manifest: (manifest) => { manifest.sha256 = "0".repeat(64); } }, "reject");
+});
+
+test("a manifest build-info checksum mismatch is rejected", async () => {
+  await check("manifest build-info checksum mismatch", { manifest: (manifest) => { manifest.buildInfoChecksum = "1".repeat(64); } }, "reject");
+});
+
+test("a manifest artifact name mismatch is rejected", async () => {
+  await check("manifest artifact name mismatch", { manifest: (manifest) => { manifest.artifact = "ServerHub-9.9.8-Windows-x64-Portable.zip"; } }, "reject");
+});
+
+test("tampered SHA256SUMS are rejected", async () => {
+  await check("tampered SHA256SUMS", { sums: `${"2".repeat(64)}  ServerHub-${version}-Windows-x64-Portable.zip\n` }, "reject");
+});
+
+test("an SBOM mismatching the manifest is rejected", async () => {
+  await check("SBOM mismatching the manifest", { sbomText: "{}\n" }, "reject");
+});
+
+test("a tag not matching the package version is rejected", async () => {
+  await check("tag not matching package version", undefined, "reject", { tag: "v9.9.8" });
+});
+
+test("a tag commit mismatch is rejected", async () => {
+  await check("tag commit mismatch", undefined, "reject", { tagCommit: otherCommit });
+});
+
+test("a non-semantic tag is rejected", async () => {
+  await check("non-semantic tag", undefined, "reject", { tag: "vLatest" });
+});
+
+test("a bundle without the SBOM argument verifies", async () => {
+  await check("bundle without SBOM argument", undefined, "accept", { withSbom: false });
+});
+
+test("missing embedded build-info is rejected even when the manifest is authentic", async () => {
+  await checkPostMutate("missing embedded build-info", async (fixture) => {
+    const replacement = path.join(fixture.work, "replaced.zip");
+    const output = fs.createWriteStream(replacement);
+    const zip = new ZipArchive({ zlib: { level: 9 } });
+    zip.pipe(output);
+    zip.append(Buffer.from("no provenance here\n"), { name: "ServerHub/ServerHub.exe" });
+    await zip.finalize();
+    await new Promise((resolve, reject) => { output.on("close", resolve); output.on("error", reject); });
+    await fsp.rm(fixture.artifact, { force: true });
+    await fsp.rename(replacement, fixture.artifact);
+    // Keep the manifest authentic for the new bytes so only the missing
+    // embedded provenance can cause the rejection.
+    const bytes = await fsp.readFile(fixture.artifact);
+    const manifest = JSON.parse(await fsp.readFile(path.join(fixture.work, "release-manifest.json"), "utf8"));
+    manifest.size = bytes.length;
+    manifest.sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
+    manifest.buildInfoChecksum = crypto.createHash("sha256").update("no provenance here\n").digest("hex");
+    await fsp.writeFile(path.join(fixture.work, "release-manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+    await fsp.writeFile(path.join(fixture.work, "SHA256SUMS"), `${manifest.sha256}  ${manifest.artifact}\n`);
+  }, "reject");
+  console.log("RELEASE_ARTIFACT_VERIFICATION_REGRESSION_OK");
+});

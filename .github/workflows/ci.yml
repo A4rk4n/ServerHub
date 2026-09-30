@@ -34,14 +34,13 @@ jobs:
       - run: npm run lint
       - run: npm audit --omit=dev
       - run: npm run build:server
-      - run: npm run test:security
-      - run: npm run test:extraction
+      # Single native test-runner pass over every suite (parallel test files,
+      # per-test durations, and a pass/fail summary).
+      - run: npm run test:unit
       # This lifecycle integration relies on POSIX process signals; Windows is
       # covered by the native portable-package job below.
       - if: runner.os != 'Windows'
         run: npm run test:installation-jobs
-      - run: npm run test:package-integrity
-      - run: npm run test:release-verification
       - run: npm run sbom
   windows-portable:
     runs-on: windows-2025
