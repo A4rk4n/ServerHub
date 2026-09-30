@@ -1146,6 +1146,9 @@ async function validateInstalledArtifacts(server: Server, root: string) {
       : ["ShooterGame/Binaries/Linux/ShooterGameServer", "ShooterGameServer"],
     terraria: platform === "win32" ? ["TerrariaServer.exe"] : ["TerrariaServer.bin.x86_64", "TerrariaServer"],
     rust: platform === "win32" ? ["RustDedicated.exe"] : ["RustDedicated"],
+    satisfactory: platform === "win32"
+      ? ["FactoryServer.exe", "FactoryGame/Binaries/Win64/FactoryServer-Win64-Shipping-Cmd.exe"]
+      : ["FactoryServer.sh"],
     dragonwilds: platform === "win32"
       ? ["RSDragonwilds.exe", "RSDragonwildsServer.exe"]
       : ["RSDragonwildsServer.sh", "RSDragonwildsServer"],
@@ -1529,6 +1532,16 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
       "+server.maxplayers", String(server.maxPlayers), "+server.seed", server.seed || "0",
       "+server.description", server.motd,
     ] };
+  }
+  if (server.gameId === "satisfactory") {
+    const executable = await findExecutable(root, hostPlatform() === "win32"
+      ? ["FactoryServer.exe", "FactoryGame/Binaries/Win64/FactoryServer-Win64-Shipping-Cmd.exe"]
+      : ["FactoryServer.sh"]);
+    if (!executable) throw new Error("The Satisfactory dedicated-server launcher was not found after SteamCMD installation.");
+    if (hostPlatform() !== "win32") await fsp.chmod(executable, 0o755).catch(() => {});
+    // Unreal Engine dedicated server: -multihome binds the configured LAN
+    // address; -unattended prevents interactive error dialogs.
+    return { executable, args: ["-log", "-unattended", `-Port=${server.port}`, `-multihome=${server.bindAddress}`] };
   }
   if (server.gameId === "dragonwilds") {
     const executable = await findExecutable(root, hostPlatform() === "win32"

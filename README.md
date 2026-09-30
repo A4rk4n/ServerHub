@@ -26,6 +26,7 @@ The executable is not code-signed with a commercial certificate; Windows SmartSc
 | ARK: Survival Evolved | SteamCMD app `376030` | Official `ShooterGameServer` executable |
 | Terraria | SteamCMD app `105600` | Official Terraria server executable and generated config |
 | Rust | SteamCMD app `258550` | Official `RustDedicated` executable |
+| Satisfactory | SteamCMD app `1690800` | Official `FactoryServer` launcher with `-multihome` LAN binding |
 | Dragonwilds / Hytale | SteamCMD / manual registration | Managed or user-supplied executable with preflight checks and LAN binding |
 | Custom | Manual registration | Any executable, `.bat`, `.cmd`, or shell script in a managed or existing folder |
 

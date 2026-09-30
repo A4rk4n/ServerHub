@@ -16,6 +16,8 @@ test("parseMojangVersions maps releases and snapshots to channels", () => {
 test("the server catalog flags automatic providers and validates versions", () => {
   const catalog = serverCatalog();
   assert.ok(catalog.find((x) => x.id === "minecraft")?.automatic);
+  assert.ok(catalog.find((x) => x.id === "satisfactory")?.automatic);
+  assert.equal(catalog.find((x) => x.id === "satisfactory")?.installerLabel.includes("1690800"), true);
   assert.equal(catalog.find((x) => x.id === "custom")?.automatic, false);
   assert.equal(validCatalogVersion("minecraft", "1.22.1"), true);
   assert.equal(validCatalogVersion("minecraft", "../../evil"), false);

@@ -4,7 +4,7 @@ export function readinessProbeFor(gameId: string, protocol: "TCP" | "UDP"): Read
   if (["ark","rust","valheim"].includes(gameId)) return "steam-a2s";
   return protocol === "UDP" ? "process-stability" : "tcp-connect";
 }
-export function minimumProcessStabilityMs(gameId: string) { return gameId === "dragonwilds" ? 15_000 : 10_000; }
+export function minimumProcessStabilityMs(gameId: string) { return ["dragonwilds", "satisfactory"].includes(gameId) ? 15_000 : 10_000; }
 export function processStabilityReady(startedAtMs: number, now = Date.now(), minimumMs = 10_000) { return Number.isFinite(startedAtMs) && now - startedAtMs >= minimumMs; }
 export function readinessWaitingReason(gameId: string, probe: ReadinessProbe) {
   if (probe === "process-stability") return `Waiting for ${gameId === "dragonwilds" ? "Dragonwilds" : "provider"} process stability (${minimumProcessStabilityMs(gameId) / 1000} seconds)`;
