@@ -1,5 +1,6 @@
 import { selectBackupsToPrune } from "./backup-retention";
 import { palworldGracefulStop, palworldRestPort } from "./palworld-api";
+import { notify } from "./notifications";
 import { hostPlatform } from "./host-platform";
 import { diagnoseInstallationFailure, installationFailureMessage } from "./installation-diagnostics";
 import { waitForManagedExecutableExit } from "./managed-process";
@@ -1743,6 +1744,7 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
     if(server.gameId === "minecraft" || server.gameId === "minecraft-modded") await recordSuccessfulToolUse("java","Started a Minecraft server and passed its readiness probe");
     await logLine(id, "success", "Runtime", `Process started with PID ${child.pid}.`);
     await act(id, "power", `${server.name} started (PID ${child.pid})`);
+    void notify({ kind: "online", serverName: server.name });
     return { ok: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1763,6 +1765,11 @@ async function handleExit(entry: RuntimeEntry, code: number | null, signal: Node
   await setStatus(id, expected ? "offline" : "crashed").catch(() => {});
   await logLine(id, expected ? "system" : "error", "Runtime", `Process exited (code ${code ?? "none"}, signal ${signal ?? "none"}).`).catch(() => {});
   await act(id, "power", `${entry.server.name} ${expected ? "stopped" : "crashed"}`).catch(() => {});
+  void notify(
+    expected
+      ? { kind: "offline", serverName: entry.server.name }
+      : { kind: "crash", serverName: entry.server.name, detail: `exit code ${code ?? "none"}, signal ${signal ?? "none"}` }
+  );
   if (entry.restarting && !state.closing) {
     setTimeout(() => void startFlow(id), 900);
   } else if (!expected && !state.closing) {
@@ -1787,6 +1794,7 @@ async function scheduleCrashRestart(entry: RuntimeEntry) {
     await setStatus(id, "crashed");
     await logLine(id, "error", "Watchdog", `Automatic restart limit reached (${limit} within ${Math.round(windowMs / 1000)} seconds). Manual intervention is required.`);
     await act(id, "power", `${server.name} restart limit reached`);
+    void notify({ kind: "restart-limit", serverName: server.name });
     return;
   }
 
@@ -1794,6 +1802,7 @@ async function scheduleCrashRestart(entry: RuntimeEntry) {
   await setStatus(id, "restarting");
   await logLine(id, "warn", "Watchdog", `Unexpected exit detected. Automatic restart ${history.length} of ${limit} begins in ${delaySeconds} seconds.`);
   await act(id, "power", `${server.name} scheduled for automatic restart`);
+  void notify({ kind: "auto-restart", serverName: server.name, detail: `attempt ${history.length} of ${limit}, in ${delaySeconds}s` });
   const timer = setTimeout(() => {
     if (state.restartTimers.get(id) !== timer) return;
     state.restartTimers.delete(id);
@@ -2014,12 +2023,14 @@ export async function createBackup(id: number, label?: string, by = "you") {
       await db.update(backups).set({ status: "complete", sizeMb, archivePath: archive, checksum }).where(eq(backups.id, row.id));
       await logLine(id, "success", "Backup", `Backup complete: ${path.basename(archive)} (${sizeMb} MB, SHA-256 ${checksum.slice(0, 12)}…).`);
       await act(id, "backup", `Backup "${name}" completed (${sizeMb} MB)`);
+      void notify({ kind: "backup-complete", serverName: server.name, detail: `${name}, ${sizeMb} MB` });
       await applyBackupRetention(id).catch(() => {});
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await db.update(backups).set({ status: "failed", note: message, archivePath: archive }).where(eq(backups.id, row.id));
       await fsp.rm(archive, { force: true }).catch(() => {});
       await logLine(id, "error", "Backup", `Backup failed: ${message}`);
+      void notify({ kind: "backup-failed", serverName: server.name, detail: message });
     }
   })();
   return row;
