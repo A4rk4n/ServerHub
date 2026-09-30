@@ -34,14 +34,36 @@ jobs:
       - run: npm run lint
       - run: npm audit --omit=dev
       - run: npm run build:server
-      - run: npm run test:security
-      - run: npm run test:extraction
+      # Single native test-runner pass over every suite (parallel test files,
+      # per-test durations, and a pass/fail summary). On failure the spec
+      # reporter's failing-test block is re-emitted as check annotations so
+      # the failing suites are visible in the run summary without downloading
+      # the log archive.
+      - name: Run unit suites
+        shell: bash
+        run: |
+          # GitHub runs shell: bash with -eo pipefail; disarm errexit so a
+          # failing suite reaches the annotation block instead of aborting
+          # the script at the pipeline.
+          set +e
+          npm run test:unit 2>&1 | tee unit-test-output.txt
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            printf '::error title=test:unit-exit::exit=%s bytes=%s failblock=%s xchar=%s\n' "$status" "$(wc -c < unit-test-output.txt | tr -d ' ')" "$(grep -c 'failing tests' unit-test-output.txt || true)" "$(grep -c '✖' unit-test-output.txt || true)"
+            while IFS= read -r line; do
+              printf '::error title=test:unit::%s\n' "${line//'%'/'%25'}"
+            done < <(sed -n '/failing tests:/,$p' unit-test-output.txt | head -40)
+            if ! grep -q 'failing tests' unit-test-output.txt; then
+              tail -n 30 unit-test-output.txt | while IFS= read -r line; do
+                printf '::error title=test:unit-tail::%s\n' "${line//'%'/'%25'}"
+              done
+            fi
+            exit "$status"
+          fi
       # This lifecycle integration relies on POSIX process signals; Windows is
       # covered by the native portable-package job below.
       - if: runner.os != 'Windows'
         run: npm run test:installation-jobs
-      - run: npm run test:package-integrity
-      - run: npm run test:release-verification
       - run: npm run sbom
   windows-portable:
     runs-on: windows-2025

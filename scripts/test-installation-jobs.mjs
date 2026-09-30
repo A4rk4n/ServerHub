@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+// Lifecycle integration for the built standalone server: durable installation
+// jobs, staged updates, the crash watchdog, port preflight, retry/cancel
+// semantics, and in-place recovery across a service restart.
+import assert from "node:assert/strict";
+import { after, before, test } from "node:test";
 import { spawn } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import dgram from "node:dgram";
@@ -11,8 +16,15 @@ const root = process.cwd();
 const serverEntry = path.join(root, "build", "server", "server.js");
 const data = path.join(root, "build", "installation-job-integration");
 const dbPath = path.join(data, "serverhub.db");
+const crashCounter = path.join(data, "watchdog-counter.txt");
+const crashScript = path.join(data, "crash-fixture.mjs");
+
 let service = null;
 let logs = "";
+let base = "";
+let servicePort = 0;
+let db = null;
+const summary = {};
 
 async function freeTcpPort() {
   return new Promise((resolve, reject) => {
@@ -20,7 +32,7 @@ async function freeTcpPort() {
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
       const port = typeof address === "object" && address ? address.port : 0;
-      server.close((error) => error ? reject(error) : resolve(port));
+      server.close((error) => (error ? reject(error) : resolve(port)));
     });
     server.once("error", reject);
   });
@@ -55,13 +67,13 @@ async function startService(port) {
   child.stdout.on("data", (chunk) => { logs += chunk; });
   child.stderr.on("data", (chunk) => { logs += chunk; });
   service = child;
-  const base = `http://127.0.0.1:${port}`;
+  const serviceBase = `http://127.0.0.1:${port}`;
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`Service exited during startup (${child.exitCode}).\n${logs}`);
     try {
-      const response = await fetch(`${base}/api/health`);
-      if (response.ok) return base;
+      const response = await fetch(`${serviceBase}/api/health`);
+      if (response.ok) return serviceBase;
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
@@ -80,15 +92,15 @@ async function stopService(force = false) {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
-async function json(base, pathname, init) {
-  const response = await fetch(`${base}${pathname}`, init);
+async function json(serviceBase, pathname, init) {
+  const response = await fetch(`${serviceBase}${pathname}`, init);
   const body = await response.json();
   if (!response.ok) throw new Error(`${init?.method ?? "GET"} ${pathname}: ${response.status} ${JSON.stringify(body)}`);
   return body;
 }
 
-async function createCustom(base, port, name, launch = {}) {
-  const body = await json(base, "/api/servers", {
+async function createCustom(serviceBase, port, name, launch = {}) {
+  const body = await json(serviceBase, "/api/servers", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -107,11 +119,11 @@ async function createCustom(base, port, name, launch = {}) {
   return body.server.id;
 }
 
-async function waitForJob(base, serverId, expected, timeout = 10_000) {
+async function waitForJob(serviceBase, serverId, expected, timeout = 10_000) {
   const deadline = Date.now() + timeout;
   let body;
   while (Date.now() < deadline) {
-    body = await json(base, `/api/servers/${serverId}/installation`);
+    body = await json(serviceBase, `/api/servers/${serverId}/installation`);
     if (body.job?.status === expected) return body;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
@@ -119,27 +131,38 @@ async function waitForJob(base, serverId, expected, timeout = 10_000) {
 }
 
 function openDb() {
-  const db = new DatabaseSync(dbPath);
-  db.exec("PRAGMA busy_timeout = 5000");
-  return db;
+  const handle = new DatabaseSync(dbPath);
+  handle.exec("PRAGMA busy_timeout = 5000");
+  return handle;
 }
 
-async function main() {
+before(async () => {
   await fs.access(serverEntry).catch(() => {
     throw new Error("build/server/server.js is missing. Run npm run build:server first.");
   });
   await fs.rm(data, { recursive: true, force: true });
   await fs.mkdir(data, { recursive: true });
-  const servicePort = await freeTcpPort();
-  let base = await startService(servicePort);
+  servicePort = await freeTcpPort();
+  base = await startService(servicePort);
+});
 
+after(async () => {
+  await stopService();
+});
+
+let firstId = 0;
+
+test("a completed installation job retains structured progress and phase events", async () => {
   const firstPort = (await udpPort()).port;
-  const firstId = await createCustom(base, firstPort, "Durable installation smoke test");
+  firstId = await createCustom(base, firstPort, "Durable installation smoke test");
   const completed = await waitForJob(base, firstId, "succeeded");
   if (completed.job.progress !== 100 || !completed.events.some((event) => event.phase === "preflight") || !completed.events.some((event) => event.phase === "completed")) {
     throw new Error(`Completed job did not retain structured progress: ${JSON.stringify(completed)}`);
   }
+  summary.completedJob = completed.job.id;
+});
 
+test("a staged update preserves files from the active installation", async () => {
   const preservedFile = path.join(data, "servers", String(firstId), "world-preservation.fixture");
   await fs.writeFile(preservedFile, "world data must survive staged updates", "utf8");
   await json(base, `/api/servers/${firstId}/power`, {
@@ -148,12 +171,12 @@ async function main() {
     body: JSON.stringify({ action: "install" }),
   });
   const updated = await waitForJob(base, firstId, "succeeded");
-  if (updated.job.kind !== "update" || await fs.readFile(preservedFile, "utf8") !== "world data must survive staged updates") {
+  if (updated.job.kind !== "update" || (await fs.readFile(preservedFile, "utf8")) !== "world data must survive staged updates") {
     throw new Error("Staged update did not preserve files from the active installation.");
   }
+});
 
-  const crashCounter = path.join(data, "watchdog-counter.txt");
-  const crashScript = path.join(data, "crash-fixture.mjs");
+test("the watchdog stops a crash loop at the configured restart limit", async () => {
   await fs.writeFile(crashScript, `import fs from "node:fs";\nconst file=${JSON.stringify(crashCounter)};\nconst count=Number(fs.existsSync(file)?fs.readFileSync(file,"utf8"):0)+1;\nfs.writeFileSync(file,String(count));\nprocess.exit(17);\n`, "utf8");
   const crashPort = (await udpPort()).port;
   const crashId = await createCustom(base, crashPort, "Watchdog smoke test", { command: process.execPath, args: crashScript });
@@ -183,7 +206,10 @@ async function main() {
   if (afterLimit !== 3 || crashServer.server.status !== "crashed" || !crashConsole.logs.some((line) => line.message.includes("restart limit reached"))) {
     throw new Error(`Watchdog did not stop the crash loop: count=${afterLimit}, status=${crashServer.server.status}`);
   }
+  summary.watchdogLaunches = crashCount;
+});
 
+test("disabling the watchdog cancels a queued restart", async () => {
   await fs.writeFile(crashCounter, "0", "utf8");
   const cancelPort = (await udpPort()).port;
   const cancelId = await createCustom(base, cancelPort, "Watchdog cancellation test", { command: process.execPath, args: crashScript });
@@ -217,9 +243,14 @@ async function main() {
   if (cancelledLaunches !== 1 || cancelledServer.server.status !== "offline") {
     throw new Error(`Disabling watchdog did not cancel the queued restart: count=${cancelledLaunches}, status=${cancelledServer.server.status}`);
   }
+  summary.cancelledWatchdogLaunches = cancelledLaunches;
+});
 
+let retryId = 0;
+
+test("a port preflight conflict fails the job and the retry reuses it", async () => {
   const blocker = await udpPort(true);
-  const retryId = await createCustom(base, blocker.port, "Retry installation smoke test");
+  retryId = await createCustom(base, blocker.port, "Retry installation smoke test");
   const failed = await waitForJob(base, retryId, "failed");
   if (!failed.job.error.includes("currently in use")) throw new Error(`Port preflight did not report the conflict: ${failed.job.error}`);
   await new Promise((resolve) => blocker.socket.close(resolve));
@@ -230,8 +261,13 @@ async function main() {
   });
   const retried = await waitForJob(base, retryId, "succeeded");
   if (retried.job.id !== failed.job.id || retried.job.attempt !== 2) throw new Error("Retry did not reuse the recoverable job and increment its attempt.");
+  summary.retryJob = retried.job.id;
+});
 
-  const db = openDb();
+let recoveryJobId = 0;
+
+test("cancelling a directly queued recovery job targets the active row", async () => {
+  db = openDb();
   const now = Math.floor(Date.now() / 1000);
   const inserted = db.prepare(`
     INSERT INTO installation_jobs (
@@ -239,7 +275,7 @@ async function main() {
       message, error, attempt, cancel_requested, created_at, updated_at
     ) VALUES (?, 'install', 'queued', 'queued', 0, 0, 0, 'Waiting', '', 1, 0, ?, ?)
   `).run(retryId, now, now);
-  const recoveryJobId = Number(inserted.lastInsertRowid);
+  recoveryJobId = Number(inserted.lastInsertRowid);
   db.prepare("UPDATE servers SET status = 'installing', updated_at = ? WHERE id = ?").run(now, retryId);
   await json(base, `/api/servers/${retryId}/installation`, {
     method: "POST",
@@ -248,7 +284,10 @@ async function main() {
   });
   const cancelled = await waitForJob(base, retryId, "cancelled");
   if (cancelled.job.id !== recoveryJobId) throw new Error("Queued cancellation targeted the wrong job.");
+});
 
+test("an interrupted job recovers in place across a service restart", async () => {
+  const now = Math.floor(Date.now() / 1000);
   db.prepare(`
     UPDATE installation_jobs
     SET status = 'running', phase = 'installing', progress = 42,
@@ -258,24 +297,13 @@ async function main() {
   `).run(now, recoveryJobId);
   db.prepare("UPDATE servers SET status = 'installing', updated_at = ? WHERE id = ?").run(now, retryId);
   db.close();
+  db = null;
 
   await stopService(true);
   base = await startService(servicePort);
   const recovered = await waitForJob(base, retryId, "succeeded");
   if (recovered.job.id !== recoveryJobId || recovered.job.attempt !== 2) throw new Error("Interrupted job was not recovered in place.");
   if (!recovered.events.some((event) => event.message.includes("restarted"))) throw new Error("Recovery event was not retained in job history.");
-
-  console.log("INSTALLATION_JOB_INTEGRATION_OK", {
-    watchdogLaunches: crashCount,
-    cancelledWatchdogLaunches: cancelledLaunches,
-    completedJob: completed.job.id,
-    retryJob: retried.job.id,
-    recoveredJob: recovered.job.id,
-  });
-}
-
-try {
-  await main();
-} finally {
-  await stopService();
-}
+  summary.recoveredJob = recovered.job.id;
+  console.log("INSTALLATION_JOB_INTEGRATION_OK", summary);
+});
