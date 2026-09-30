@@ -84,6 +84,8 @@ npm test
 npm audit --omit=dev
 ```
 
+`npm test` runs every suite on Node 24's built-in test runner (`node --test`): test files execute in parallel with per-test timing and a pass/fail summary. Use `npm run test:unit` for everything except the POSIX-only installation-job lifecycle integration, and `npm run test:<suite>` (for example `npm run test:security`) to run a single suite in isolation.
+
 ### Building the Windows portable package
 
 ```bash
@@ -108,7 +110,7 @@ run.bat       # Windows
 
 - [Architecture Overview](docs/ARCHITECTURE.md)
 - [Provider Integration Guide](docs/PROVIDER-INTEGRATION.md)
-- [Release Runbook](RELEASE.md) and [Releasing Process](docs/RELEASING.md)
+- [Releasing Guide](docs/RELEASING.md) (canonical) and the condensed [Release Runbook](RELEASE.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Security Policy](SECURITY.md)
 - [Changelog](CHANGELOG.md)
