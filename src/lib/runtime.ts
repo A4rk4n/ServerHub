@@ -1,4 +1,5 @@
 import { selectBackupsToPrune } from "./backup-retention";
+import { flushMetricsHistory, recordMetricsSample } from "./metrics-history";
 import { palworldGracefulStop, palworldRestPort } from "./palworld-api";
 import { notify } from "./notifications";
 import { hostPlatform } from "./host-platform";
@@ -1760,6 +1761,7 @@ async function handleExit(entry: RuntimeEntry, code: number | null, signal: Node
   const id = entry.server.id;
   clearInterval(entry.monitor);
   if (state.processes.get(id) === entry) state.processes.delete(id);
+  void flushMetricsHistory(id);
   await db.update(players).set({ isOnline: false }).where(eq(players.serverId, id)).catch(() => {});
   const expected = entry.stopping;
   await setStatus(id, expected ? "offline" : "crashed").catch(() => {});
@@ -1943,8 +1945,10 @@ async function sampleEntry(entry: RuntimeEntry) {
   const proc = await processUsage(entry.child.pid, entry.sample);
   if (proc.sample) entry.sample = proc.sample;
   const online = await db.select({ id: players.id }).from(players).where(and(eq(players.serverId, entry.server.id), eq(players.isOnline, true)));
-  entry.metrics.push({ t: Date.now(), cpu: proc.cpu, ram: proc.ram, players: online.length, tps: null });
+  const sample = { t: Date.now(), cpu: proc.cpu, ram: proc.ram, players: online.length, tps: null };
+  entry.metrics.push(sample);
   if (entry.metrics.length > 240) entry.metrics.shift();
+  void recordMetricsSample(entry.server.id, sample);
 }
 
 async function processUsage(pid: number, previous?: ProcSample): Promise<{ cpu: number; ram: number; sample?: ProcSample }> {

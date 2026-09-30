@@ -64,6 +64,8 @@ export function ConsoleView({
   const [filter, setFilter] = useState<ConsoleFilter>("all");
   const [search, setSearch] = useState("");
   const [history, setHistory] = useState<number[]>([]);
+  const [chartRange, setChartRange] = useState<"live" | "24h">("live");
+  const [dayHistory, setDayHistory] = useState<{ t: number; cpu: number; ram: number; players: number }[]>([]);
   const [uptime, setUptime] = useState("—");
   const lastId = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -124,6 +126,25 @@ export function ConsoleView({
       clearInterval(t);
     };
   }, [serverId]);
+
+  useEffect(() => {
+    if (chartRange !== "24h") return;
+    let dead = false;
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/servers/${serverId}/stats/history?hours=24`, { cache: "no-store" });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!dead && Array.isArray(j.points)) setDayHistory(j.points);
+      } catch {}
+    };
+    poll();
+    const t = setInterval(poll, 60_000);
+    return () => {
+      dead = true;
+      clearInterval(t);
+    };
+  }, [serverId, chartRange]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -353,8 +374,33 @@ export function ConsoleView({
             <MiniStat icon={<Wifi size={11} />} label="uptime" value={uptime} />
           </div>
           <div className="mt-4 border-t border-candy-200/70 pt-3">
-            <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-plum-400">cpu · last 8 min</p>
-            <AreaChart id="rail-cpu" values={history.length ? history : [0]} color={accent} height={72} unit="%" />
+            <div className="mb-1 flex items-center justify-between">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-plum-400">{chartRange === "live" ? "cpu · last 8 min" : "cpu · last 24 h"}</p>
+              <div className="flex gap-1">
+                {(["live", "24h"] as const).map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => setChartRange(r)}
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition ${chartRange === r ? "bg-candy-100 text-candy-700" : "text-plum-300 hover:text-plum-500"}`}
+                  >
+                    {r === "live" ? "Live" : "24 h"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {chartRange === "live" ? (
+              <AreaChart id="rail-cpu" values={history.length ? history : [0]} color={accent} height={72} unit="%" />
+            ) : dayHistory.length === 0 ? (
+              <p className="py-4 text-center text-[11px] text-plum-400">No history yet — it builds up while the server runs.</p>
+            ) : (
+              <div className="space-y-3">
+                <AreaChart id="day-cpu" values={dayHistory.map((p) => p.cpu)} color={accent} height={72} unit="%" />
+                <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-plum-400">ram · last 24 h</p>
+                <AreaChart id="day-ram" values={dayHistory.map((p) => p.ram)} color="#c77dff" height={56} unit=" MB" />
+                <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-plum-400">players · last 24 h</p>
+                <AreaChart id="day-players" values={dayHistory.map((p) => p.players)} color="#22c58b" height={56} unit="" />
+              </div>
+            )}
           </div>
         </div>
 
