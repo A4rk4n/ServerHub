@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.16.0] - 2026-09-30
+
+### Added
+- Configurable backup retention per server: keep at most N completed backups and/or delete completed backups older than D days (0 disables a limit; both default to 0, preserving existing unlimited behavior). Retention runs automatically after every completed backup — manual, scheduled, and update backups alike — and can be triggered on demand (`POST /api/servers/:id/backups {"action":"prune"}`). The active pre-update safety backup and in-progress or failed backup records are never pruned. Settings are exposed in the server Settings UI, carried by clones and templates, and enforced with clamped ranges (count 0–100, age 0–365 days).
+
+### Changed
+- Additive schema migration 21600 adds `backup_retention_count` and `backup_retention_days` to the `servers` table; the migration worker and version assertions now track `SCHEMA_VERSION` instead of a hardcoded version.
+
 ## [2.15.0] - 2026-09-30
 
 ### Added
@@ -95,7 +103,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.15.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.16.0...HEAD
+[2.16.0]: https://github.com/A4rk4n/ServerHub/compare/v2.15.0...v2.16.0
 [2.15.0]: https://github.com/A4rk4n/ServerHub/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/A4rk4n/ServerHub/compare/v2.13.1...v2.14.0
 [2.13.1]: https://github.com/A4rk4n/ServerHub/compare/v2.13.0...v2.13.1

@@ -1,6 +1,6 @@
 {
   "name": "server-hub",
-  "version": "2.15.0",
+  "version": "2.16.0",
   "description": "Local desktop manager for real dedicated game-server processes",
   "private": true,
   "author": "Server Hub contributors",
