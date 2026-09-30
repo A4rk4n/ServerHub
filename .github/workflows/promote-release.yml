@@ -243,6 +243,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          exec 2> >(tee /tmp/publish-step-stderr.log >&2)
+          trap 'echo "::error::Publish step failed: $(tail -c 500 /tmp/publish-step-stderr.log | tr "\n" " ")"; exit 1' ERR
           flags=()
           if [[ "$DRAFT" == "true" ]]; then flags+=(--draft); fi
           if [[ "$PRERELEASE" == "true" ]]; then flags+=(--prerelease); fi
@@ -264,28 +266,46 @@ jobs:
               --notes-file release-notes.md "${flags[@]}"
             echo "Created release $TAG (draft=${DRAFT}, prerelease=${PRERELEASE})."
           fi
+          # Draft releases are not resolvable through releases/tags/{tag};
+          # resolve the release id through the list endpoint instead and
+          # upload through the direct release-asset endpoint.
+          release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"${TAG}\") | .id" | head -n 1)
+          if [[ -z "${release_id:-}" ]]; then
+            echo "::error::Could not resolve the release id for ${TAG}"; exit 1
+          fi
+          echo "Release ${TAG} id: ${release_id}"
           # Never overwrite an existing asset: identical digests are skipped,
           # anything else aborts the promotion.
-          for file in "$FILENAME" SHA256SUMS release-manifest.json bundle/serverhub-*-sbom.cdx.json; do
-            name=$(basename "$file")
-            path="bundle/$file"
-            if [[ "$file" == "$FILENAME" || "$file" == "SHA256SUMS" || "$file" == "release-manifest.json" ]]; then path="bundle/$name"; fi
-            local_digest="sha256:$(sha256sum "$path" | cut -d' ' -f1)"
-            remote_digest=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+          for name in "$FILENAME" SHA256SUMS release-manifest.json $(basename $(ls bundle/serverhub-*-sbom.cdx.json)); do
+            path="bundle/${name}"
+            expected_digest="sha256:$(sha256sum "$path" | cut -d' ' -f1)"
+            remote_digest=$(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
               --jq ".assets[] | select(.name == \"${name}\") | .digest // empty")
             if [[ -n "$remote_digest" ]]; then
-              if [[ "$remote_digest" == "$local_digest" ]]; then
+              if [[ "$remote_digest" == "$expected_digest" ]]; then
                 echo "Asset ${name} is already attached with the verified digest; skipping."
               else
-                echo "::error::Asset ${name} already exists with digest ${remote_digest} (expected ${local_digest}); refusing to overwrite"
+                echo "::error::Asset ${name} already exists with digest ${remote_digest} (expected ${expected_digest}); refusing to overwrite"
                 exit 1
               fi
             else
-              gh release upload "$TAG" "$path"
+              curl -fsSL --retry 5 --retry-delay 10 -X POST \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                -H "Content-Type: application/octet-stream" \
+                --data-binary "@${path}" \
+                "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?name=${name}"
               echo "Attached ${name}."
             fi
           done
-          gh release view "$TAG" --json name,isDraft,isPrerelease,assets \
+          # Always re-assert the tag with the notes: patching a draft release
+          # without tag_name can drop its tag association.
+          notes_body=$(cat release-notes.md)
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+            -f tag_name="$TAG" -f body="$notes_body" > /dev/null
+          echo "Release notes refreshed with the verified provenance."
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
             --jq '{name, isDraft, isPrerelease, assets: [.assets[] | {name, size, digest}]}'
       - name: Summarize
         run: |
