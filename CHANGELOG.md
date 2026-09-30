@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.27.0] - 2026-09-30
+
+### Added
+- Metrics history that outlives the 8-minute live window: while a server runs, its 2-second samples are rolled into one-minute buckets (average CPU/RAM, peak players) and persisted per server, so charts survive both game-server restarts and Hub restarts. The console's vitals panel gains a Live / 24 h toggle — the 24-hour view shows CPU, RAM, and player-count charts side by side. History is capped at 48 hours with automatic compaction, collection is strictly best-effort (it can never slow down or destabilize a running server), and corrupt history files degrade gracefully instead of breaking charts.
+
 ## [2.26.0] - 2026-09-30
 
 ### Added
@@ -160,7 +165,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.26.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.27.0...HEAD
+[2.27.0]: https://github.com/A4rk4n/ServerHub/compare/v2.26.0...v2.27.0
 [2.26.0]: https://github.com/A4rk4n/ServerHub/compare/v2.25.0...v2.26.0
 [2.25.0]: https://github.com/A4rk4n/ServerHub/compare/v2.24.0...v2.25.0
 [2.24.0]: https://github.com/A4rk4n/ServerHub/compare/v2.23.0...v2.24.0
