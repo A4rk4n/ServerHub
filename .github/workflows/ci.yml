@@ -35,8 +35,21 @@ jobs:
       - run: npm audit --omit=dev
       - run: npm run build:server
       # Single native test-runner pass over every suite (parallel test files,
-      # per-test durations, and a pass/fail summary).
-      - run: npm run test:unit
+      # per-test durations, and a pass/fail summary). On failure the spec
+      # reporter's failing-test block is re-emitted as check annotations so
+      # the failing suites are visible in the run summary without downloading
+      # the log archive.
+      - name: Run unit suites
+        shell: bash
+        run: |
+          npm run test:unit 2>&1 | tee unit-test-output.txt
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            while IFS= read -r line; do
+              printf '::error title=test:unit::%s\n' "${line//'%'/'%25'}"
+            done < <(sed -n '/^✖ failing tests:/,$p' unit-test-output.txt | head -40)
+            exit "$status"
+          fi
       # This lifecycle integration relies on POSIX process signals; Windows is
       # covered by the native portable-package job below.
       - if: runner.os != 'Windows'
