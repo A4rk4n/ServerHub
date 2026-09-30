@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.24.0] - 2026-09-30
+
+### Added
+- Webhook notifications for fleet events: configure a webhook URL (Tool Health page) and Server Hub reports servers coming online, stopping, or crashing (with exit details), automatic-restart scheduling and limit exhaustion, and backup outcomes — each group individually toggleable. Discord webhook URLs are detected and receive ready-to-read messages with @-mentions suppressed; any other http(s) endpoint receives structured JSON. A send-test button verifies delivery end to end. Delivery is bounded and best-effort — a dead webhook never slows down or breaks server management — and the configuration lives in a restricted-permission local file that is excluded from support bundles, since Discord webhook URLs embed a capability token.
+
 ## [2.23.0] - 2026-09-30
 
 ### Added
@@ -145,7 +150,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.23.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.24.0...HEAD
+[2.24.0]: https://github.com/A4rk4n/ServerHub/compare/v2.23.0...v2.24.0
 [2.23.0]: https://github.com/A4rk4n/ServerHub/compare/v2.22.0...v2.23.0
 [2.22.0]: https://github.com/A4rk4n/ServerHub/compare/v2.21.0...v2.22.0
 [2.21.0]: https://github.com/A4rk4n/ServerHub/compare/v2.20.0...v2.21.0
