@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Migrate all 37 test suites to Node 24's built-in test runner (`node --test` with `node:test` and `node:assert`): test files execute in parallel in isolated processes with per-test names, durations, and a structured pass/fail summary, replacing the fragile 37-step `&&` chain that halted on the first failure.
 - `npm test` now runs typecheck, lint, the parallel `test:unit` pass, and the installation-job lifecycle integration; every `npm run test:<suite>` script still runs a single suite in isolation for focused debugging.
-- CI executes the full test suite through the native runner on both `ubuntu-26.04` and `windows-2025` (the POSIX-only installation-job lifecycle integration remains Linux-gated and covered on Windows by the portable-package job).
+- CI executes the full test suite through the native runner on both `ubuntu-26.04` and `windows-2025` (the POSIX-only installation-job lifecycle integration remains Linux-gated and covered on Windows by the portable-package job), and surfaces failing-test summaries as check annotations so failures are visible without downloading log archives.
 - Consolidate release documentation: `docs/RELEASING.md` is now the canonical release guide covering build versus promotion, provenance, smoke-test signoff, and rollback, while `RELEASE.md` becomes a concise operator runbook that links into it.
 
 ### Fixed
