@@ -6,12 +6,14 @@ import { useEffect, useState } from "react";
 import { Boxes, Heart, LayoutDashboard, Plus, Sparkles, Server as ServerIcon, Wrench } from "lucide-react";
 import { cn, hexA } from "@/lib/format";
 import { STATUS_META } from "./ui";
+import { UpdateBanner, useUpdateCheck } from "./update-banner";
 
 type FleetItem = { id: number; name: string; status: string; game: { accent: string; short: string } };
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [fleet, setFleet] = useState<FleetItem[]>([]);
+  const update = useUpdateCheck();
 
   useEffect(() => {
     let dead = false;
@@ -134,8 +136,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
               </div>
             </div>
             <p className="mt-3 flex items-center justify-center gap-1.5 text-[10px] font-medium text-plum-400">
-              Server Hub v1.0.2 <Heart size={9} fill="currentColor" className="text-candy-400" /> MIT
+              Server Hub {update.status ? `v${update.status.current}` : ""} <Heart size={9} fill="currentColor" className="text-candy-400" /> MIT
             </p>
+            {update.muted && (
+              <button
+                onClick={update.unmute}
+                className="mt-1 block w-full text-center text-[9.5px] font-medium text-plum-300 underline-offset-2 transition hover:text-plum-500 hover:underline"
+              >
+                update checks muted · unmute
+              </button>
+            )}
           </div>
         </div>
       </aside>
@@ -165,7 +175,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
       </div>
 
       <main className="relative z-10 md:pl-[248px]">
-        <div className="mx-auto max-w-[1400px] px-4 pb-24 pt-6 sm:px-7 md:pt-8">{children}</div>
+        <div className="mx-auto max-w-[1400px] px-4 pb-24 pt-6 sm:px-7 md:pt-8">
+          <UpdateBanner update={update} />
+          {children}
+        </div>
       </main>
     </div>
   );
