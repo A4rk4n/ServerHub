@@ -116,6 +116,8 @@ jobs:
           node-version-file: .node-version
       - name: Check Markdown relative links and anchors
         run: node scripts/check-docs.mjs
+      - name: Check release metadata consistency
+        run: node scripts/release-notes.mjs check
       - name: Validate workflow YAML
         run: |
           for f in .github/workflows/*.yml .github/dependabot.yml; do

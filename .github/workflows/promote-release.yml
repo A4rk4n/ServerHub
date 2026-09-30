@@ -117,6 +117,24 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      # The published release notes are the tagged source's CHANGELOG.md
+      # section, so promotion also enforces changelog/version consistency.
+      - name: Extract release notes from the tagged changelog
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          node scripts/release-notes.mjs check
+          node scripts/release-notes.mjs extract "$VERSION" > changelog-notes.md
+          echo "Extracted $(wc -c < changelog-notes.md) bytes of release notes for ${VERSION}."
+
+      - name: Stage the changelog notes for publication
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-changelog-notes
+          path: changelog-notes.md
+          if-no-files-found: error
+
       - name: Validate the referenced CI run
         env:
           GH_TOKEN: ${{ github.token }}
@@ -223,6 +241,12 @@ jobs:
           name: verified-release-bundle
           path: bundle
 
+      - name: Download the changelog notes
+        uses: actions/download-artifact@v8
+        with:
+          name: release-changelog-notes
+          path: notes
+
       - name: Re-verify the staged checksums
         run: |
           set -euo pipefail
@@ -250,17 +274,19 @@ jobs:
           flags=()
           if [[ "$DRAFT" == "true" ]]; then flags+=(--draft); fi
           if [[ "$PRERELEASE" == "true" ]]; then flags+=(--prerelease); fi
-          cat > release-notes.md <<EOF
-          ## Server Hub v${VERSION}
-
-          Promoted from CI run ${CI_RUN_ID} at commit ${COMMIT} without rebuilding.
-
-          - Artifact: \`${FILENAME}\` (${SIZE} bytes)
-          - SHA-256: \`${SHA256}\`
-
-          Verify \`SHA256SUMS\` before running ServerHub.exe. See docs/RELEASING.md for the
-          build-versus-promotion model, provenance chain, and rollback procedure.
-          EOF
+          # The changelog section is concatenated verbatim (no heredoc:
+          # changelog text legitimately contains backticks, which an
+          # unquoted heredoc would treat as command substitution).
+          {
+            printf '## Server Hub v%s\n\n' "$VERSION"
+            cat notes/changelog-notes.md
+            printf '\n\n### Provenance\n\n'
+            printf 'Promoted from CI run %s at commit %s without rebuilding.\n\n' "$CI_RUN_ID" "$COMMIT"
+            printf -- '- Artifact: `%s` (%s bytes)\n' "$FILENAME" "$SIZE"
+            printf -- '- SHA-256: `%s`\n\n' "$SHA256"
+            printf 'Verify `SHA256SUMS` before running ServerHub.exe. See docs/RELEASING.md for the\n'
+            printf 'build-versus-promotion model, provenance chain, and rollback procedure.\n'
+          } > release-notes.md
           if gh release view "$TAG" > /dev/null 2>&1; then
             echo "Release $TAG already exists; checking assets before attaching."
           else

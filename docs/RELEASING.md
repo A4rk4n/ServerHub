@@ -72,10 +72,16 @@ A release tag must point at a commit that passed CI on `main`.
    the ZIP records the same version, the same source commit, a clean source
    tree, and the win32/x64 target; and the SBOM checksum matches. The bundle
    is downloaded from the referenced CI run only — no file paths are accepted.
-4. Promotion defaults to creating a **draft** release. Review the draft, then
+4. The release notes are generated automatically: the workflow extracts the
+   tagged version's `CHANGELOG.md` section (`scripts/release-notes.mjs`) and
+   appends the verified provenance block (artifact name, size, SHA-256,
+   source commit, CI run). Promotion fails if `package.json`,
+   `package-lock.json`, and `CHANGELOG.md` disagree about the version — the
+   same `release-notes.mjs check` gate CI runs on every commit.
+5. Promotion defaults to creating a **draft** release. Review the draft, then
    publish it. Prerelease marking is a workflow input. The workflow refuses to
    overwrite an existing asset.
-5. Record the artifact size, SHA-256, source commit, SBOM checksum, and the CI
+6. Record the artifact size, SHA-256, source commit, SBOM checksum, and the CI
    run that built the artifact.
 
 ## Artifact provenance
