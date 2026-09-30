@@ -42,7 +42,7 @@ Publisher availability and anonymous SteamCMD access can change. If a publisher 
 - **Real process metrics:** Resident memory and CPU usage sampled directly from the operating system.
 - **Player observation & queries:** Minecraft and Bedrock join/leave events parsed from live logs; Steam A2S query protocols for player counts, server metadata, and challenge queries.
 - **Filesystem manager:** Browses the real installation tree and atomically edits safe text/config formats. Path traversal and symlink escapes outside the root are strictly rejected.
-- **Checksum-verified backups:** Creates real `.tar.gz` archives, records SHA-256 digests, and validates archives before restore with preview verification.
+- **Checksum-verified backups:** Creates real `.tar.gz` archives, records SHA-256 digests, and validates archives before restore with preview verification. Configurable retention (count and age limits) prunes old completed backups automatically and never removes the active pre-update safety backup.
 - **Credential vault:** Protects server passwords and sensitive tokens using Windows DPAPI (CurrentUser scope) with recoverable migration.
 - **Windows Firewall & Network Center:** Inspects and creates required Windows Defender Firewall rules; displays LAN bind addresses and public NAT endpoints.
 - **Tool Health & repair pipeline:** Monitors managed tool inventory (SteamCMD, Java runtimes), verifies Authenticode digital signatures, and stages non-destructive repairs.

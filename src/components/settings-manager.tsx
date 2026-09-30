@@ -40,6 +40,8 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
     restartWindowSec: initial.restartWindowSec,
     autoBackupBeforeUpdate: initial.autoBackupBeforeUpdate,
     updateBackupRetention: initial.updateBackupRetention,
+    backupRetentionCount: initial.backupRetentionCount,
+    backupRetentionDays: initial.backupRetentionDays,
     serverPassword: initial.serverPassword,
     launchCommand: initial.launchCommand,
     launchArgs: initial.launchArgs,
@@ -76,6 +78,8 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
     form.restartWindowSec !== initial.restartWindowSec ||
     form.autoBackupBeforeUpdate !== initial.autoBackupBeforeUpdate ||
     form.updateBackupRetention !== initial.updateBackupRetention ||
+    form.backupRetentionCount !== initial.backupRetentionCount ||
+    form.backupRetentionDays !== initial.backupRetentionDays ||
     form.serverPassword !== initial.serverPassword ||
     form.launchCommand !== initial.launchCommand ||
     form.launchArgs !== initial.launchArgs ||
@@ -341,6 +345,38 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
           </div>
           <p className="mt-3 text-[11.5px] leading-relaxed text-plum-500">
             Restarts use exponential backoff and stop at the configured limit to prevent crash loops. A manual start resets the counter.
+          </p>
+        </section>
+
+        {/* backup retention */}
+        <section className="panel p-5">
+          <h3 className="font-display mb-4 flex items-center gap-2 text-[14px] font-semibold text-plum-900">
+            <Save size={14} style={{ color: accent }} /> Backup retention
+          </h3>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Backups to keep" hint="0 = unlimited, max 100">
+              <input
+                className={cn(inputCls, "font-mono")}
+                type="number"
+                min={0}
+                max={100}
+                value={form.backupRetentionCount}
+                onChange={(event) => setForm({ ...form, backupRetentionCount: Number(event.target.value) })}
+              />
+            </Field>
+            <Field label="Maximum age" hint="days, 0 = unlimited, max 365">
+              <input
+                className={cn(inputCls, "font-mono")}
+                type="number"
+                min={0}
+                max={365}
+                value={form.backupRetentionDays}
+                onChange={(event) => setForm({ ...form, backupRetentionDays: Number(event.target.value) })}
+              />
+            </Field>
+          </div>
+          <p className="mt-3 text-[11.5px] leading-relaxed text-plum-500">
+            Older completed backups beyond these limits are deleted automatically after each new backup finishes. The active pre-update safety backup is never pruned.
           </p>
         </section>
 

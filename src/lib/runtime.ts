@@ -1,3 +1,4 @@
+import { selectBackupsToPrune } from "./backup-retention";
 import { hostPlatform } from "./host-platform";
 import { diagnoseInstallationFailure, installationFailureMessage } from "./installation-diagnostics";
 import { waitForManagedExecutableExit } from "./managed-process";
@@ -1943,6 +1944,7 @@ export async function createBackup(id: number, label?: string, by = "you") {
       await db.update(backups).set({ status: "complete", sizeMb, archivePath: archive, checksum }).where(eq(backups.id, row.id));
       await logLine(id, "success", "Backup", `Backup complete: ${path.basename(archive)} (${sizeMb} MB, SHA-256 ${checksum.slice(0, 12)}…).`);
       await act(id, "backup", `Backup "${name}" completed (${sizeMb} MB)`);
+      await applyBackupRetention(id).catch(() => {});
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await db.update(backups).set({ status: "failed", note: message, archivePath: archive }).where(eq(backups.id, row.id));
@@ -1965,6 +1967,44 @@ export async function createBackupAndWait(id: number, label?: string, by = "you"
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error("Safety backup timed out");
+}
+
+/**
+ * Enforce the server's general backup retention policy (count and age
+ * limits). Runs automatically after every completed backup and can be
+ * invoked on demand. The active update safety backup is never pruned.
+ * Returns the number of pruned backups.
+ */
+export async function applyBackupRetention(serverId: number): Promise<{ pruned: number; kept: number }> {
+  await ensureRuntimeInitialized();
+  const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
+  if (!server) return { pruned: 0, kept: 0 };
+  const rows = await db.select().from(backups).where(eq(backups.serverId, serverId));
+  if (server.backupRetentionCount === 0 && server.backupRetentionDays === 0) {
+    return { pruned: 0, kept: rows.length };
+  }
+  const protectedIds = server.updateSafetyBackupId ? [server.updateSafetyBackupId] : [];
+  const pruneIds = selectBackupsToPrune({
+    backups: rows,
+    retentionCount: server.backupRetentionCount,
+    retentionDays: server.backupRetentionDays,
+    protectedIds,
+  });
+  if (pruneIds.length === 0) return { pruned: 0, kept: rows.length };
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  for (const backupId of pruneIds) {
+    const backup = byId.get(backupId);
+    if (!backup) continue;
+    await deleteBackupFile(backup);
+    await db.delete(backups).where(eq(backups.id, backupId));
+  }
+  const limits = [
+    server.backupRetentionCount > 0 ? `keep ${server.backupRetentionCount}` : "",
+    server.backupRetentionDays > 0 ? `max age ${server.backupRetentionDays}d` : "",
+  ].filter(Boolean).join(", ");
+  await logLine(serverId, "system", "Backup", `Retention pruned ${pruneIds.length} backup${pruneIds.length === 1 ? "" : "s"} (${limits}).`);
+  await act(serverId, "backup", `Retention pruned ${pruneIds.length} backup${pruneIds.length === 1 ? "" : "s"} (${limits})`);
+  return { pruned: pruneIds.length, kept: rows.length - pruneIds.length };
 }
 
 export function backupArchivePath(backup: Backup): string {
