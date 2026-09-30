@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.28.2] - 2026-09-30
+
+### Fixed
+- Modern Minecraft servers (26.1 and newer, including Fabric) crashed on startup with "UnsupportedClassVersionError … class file version 69.0 … only recognizes … up to 52.0": the Java selector predated Mojang's 2026 switch to calendar versioning, parsed "26.x" as an ancient 1.x release, and launched the server under Java 8. Calendar versions now correctly get Java 25, weekly snapshots are mapped by development era, legacy 1.x boundaries are unchanged (1.16 → Java 8, 1.18–1.20.4 → Java 17, 1.20.5–1.21.x → Java 21), and any unrecognized version now defaults to the newest runtime instead of the oldest — a modern JVM runs older servers, while the reverse always fails.
+
 ## [2.28.1] - 2026-09-30
 
 ### Fixed
@@ -175,7 +180,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.28.1...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.28.2...HEAD
+[2.28.2]: https://github.com/A4rk4n/ServerHub/compare/v2.28.1...v2.28.2
 [2.28.1]: https://github.com/A4rk4n/ServerHub/compare/v2.28.0...v2.28.1
 [2.28.0]: https://github.com/A4rk4n/ServerHub/compare/v2.27.0...v2.28.0
 [2.27.0]: https://github.com/A4rk4n/ServerHub/compare/v2.26.0...v2.27.0
