@@ -1,4 +1,5 @@
 import { selectBackupsToPrune } from "./backup-retention";
+import { palworldGracefulStop, palworldRestPort } from "./palworld-api";
 import { hostPlatform } from "./host-platform";
 import { diagnoseInstallationFailure, installationFailureMessage } from "./installation-diagnostics";
 import { waitForManagedExecutableExit } from "./managed-process";
@@ -1370,6 +1371,11 @@ export async function writeServerConfig(storedServer: Server, rootOverride?: str
       `PublicPort=${server.port}`,
       `ServerPassword="${clean(server.serverPassword)}"`,
       `AdminPassword="${clean(server.adminPassword)}"`,
+      // The REST API (loopback graceful stop) authenticates with the
+      // admin password; without one it stays disabled. Its TCP port is
+      // derived from the game port and never gets a firewall rule.
+      clean(server.adminPassword) ? "RESTAPIEnabled=True" : "RESTAPIEnabled=False",
+      `RESTAPIPort=${palworldRestPort(server.port)}`,
       "RCONEnabled=False",
     ].join(",");
     const config = ["[/Script/Pal.PalGameWorldSettings]", `OptionSettings=(${options})`, ""].join("\n");
@@ -1839,7 +1845,25 @@ export async function stopFlow(id: number, reason = "Panel"): Promise<{ ok: bool
   entry.stopping = true;
   await setStatus(id, "stopping");
   await logLine(id, "system", "Runtime", `Graceful stop requested by ${reason}.`);
-  try { entry.child.stdin.write(`${stopCommand(entry.server)}\n`); } catch { /* process may have closed */ }
+  let useStdinStop = true;
+  if (entry.server.gameId === "palworld") {
+    // Palworld ignores stdin. Its official REST API (loopback, Basic
+    // auth with AdminPassword) saves the world and shuts down with an
+    // in-game countdown. If the API declines — REST disabled or no
+    // admin password — fall through to the stdin write (harmless) and
+    // the 30-second force-kill backstop below.
+    const adminPassword = await revealSecret(entry.server.adminPassword);
+    const result = await palworldGracefulStop({ gamePort: entry.server.port, adminPassword, waitSeconds: 10 });
+    if (result.shutdown) {
+      useStdinStop = false;
+      await logLine(id, "system", "Runtime", `Palworld accepted the REST shutdown${result.saved ? " after a world save" : ""}; the server exits within 10 seconds.`);
+    } else {
+      await logLine(id, "warn", "Runtime", "The Palworld REST API did not accept the shutdown (AdminPassword unset, or an older build); the process will be terminated instead.");
+    }
+  }
+  if (useStdinStop) {
+    try { entry.child.stdin.write(`${stopCommand(entry.server)}\n`); } catch { /* process may have closed */ }
+  }
   const timer = setTimeout(() => {
     if (state.processes.get(id) === entry) {
       void logLine(id, "warn", "Runtime", "Graceful stop timed out after 30 seconds; terminating the process tree.").catch(() => {});
