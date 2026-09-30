@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.22.0] - 2026-09-30
+
+### Added
+- In-app update notification: Server Hub checks GitHub Releases (bounded lookup, cached six hours; failures cached ten minutes and never surfaced as errors) and shows a dismissible banner when a newer published release exists, with a link to the release page. Dismissing hides that specific version and re-arms for the next release; a mute control opts out of checks entirely (per browser) and can be re-enabled from the sidebar footer. Only published, non-prerelease versions with strict semver tags are ever surfaced.
+
+### Fixed
+- The sidebar footer displayed a hardcoded, stale version string (`v1.0.2`); it now shows the actual running version.
+
 ## [2.21.0] - 2026-09-30
 
 ### Added
@@ -132,7 +140,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.21.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.22.0...HEAD
+[2.22.0]: https://github.com/A4rk4n/ServerHub/compare/v2.21.0...v2.22.0
 [2.21.0]: https://github.com/A4rk4n/ServerHub/compare/v2.20.0...v2.21.0
 [2.20.0]: https://github.com/A4rk4n/ServerHub/compare/v2.19.0...v2.20.0
 [2.19.0]: https://github.com/A4rk4n/ServerHub/compare/v2.18.0...v2.19.0
