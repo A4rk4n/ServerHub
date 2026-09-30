@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.18.0] - 2026-09-30
+
+### Added
+- Scheduled `prune` task type: applies the server's backup retention limits on a schedule through the same enforcement path as automatic pruning. Runs are recorded in the task history — including a skipped run with a hint when no retention limits are configured — and the outcome (backups removed, backups kept) is logged to the server console.
+- Backups tab retention controls: the header now shows the active retention policy (`keep N · max Dd`, or `retention off`), a **Prune now** button applies the limits on demand and reports how many backups were removed, and the pre-update safety backup is marked with a shield badge to show it is protected from pruning. `GET /api/servers/:id/backups` now returns the retention policy alongside the backup list.
+
+### Fixed
+- Maintenance tasks can now actually be created: the scheduler executed the `maintenance` task type and the task form offered it, but the tasks API rejected it, so creating one silently failed.
+
 ## [2.17.0] - 2026-09-30
 
 ### Added
@@ -108,7 +117,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.17.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.18.0...HEAD
+[2.18.0]: https://github.com/A4rk4n/ServerHub/compare/v2.17.0...v2.18.0
 [2.17.0]: https://github.com/A4rk4n/ServerHub/compare/v2.16.0...v2.17.0
 [2.16.0]: https://github.com/A4rk4n/ServerHub/compare/v2.15.0...v2.16.0
 [2.15.0]: https://github.com/A4rk4n/ServerHub/compare/v2.14.0...v2.15.0
