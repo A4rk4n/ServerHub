@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.20.0] - 2026-09-30
+
+### Added
+- Palworld dedicated-server provider: installed anonymously through SteamCMD (app `2394010`) with the staged, recoverable installation pipeline, launched through the official `PalServer` launcher with `-port` and `-players`, and covered by the 15-second Unreal Engine process-stability readiness window. Palworld has no bind-address launch flag (the server listens on every interface), so managed settings — server name, player cap, public port, join and admin passwords, RCON disabled — are written to `Pal/Saved/Config/<platform>/PalWorldSettings.ini` (mode 0600, quote-safe values) before every launch; settings not managed by Server Hub keep the game's defaults.
+
 ## [2.19.0] - 2026-09-30
 
 ### Added
@@ -122,7 +127,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.19.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.20.0...HEAD
+[2.20.0]: https://github.com/A4rk4n/ServerHub/compare/v2.19.0...v2.20.0
 [2.19.0]: https://github.com/A4rk4n/ServerHub/compare/v2.18.0...v2.19.0
 [2.18.0]: https://github.com/A4rk4n/ServerHub/compare/v2.17.0...v2.18.0
 [2.17.0]: https://github.com/A4rk4n/ServerHub/compare/v2.16.0...v2.17.0
