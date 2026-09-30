@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Copy,
   Cpu,
+  Download,
   Eraser,
   Gauge,
   Globe,
@@ -14,11 +15,14 @@ import {
   MemoryStick,
   Pause,
   Play,
+  Search,
   ShieldCheck,
   Users,
   Wifi,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CONSOLE_FILTERS, type ConsoleFilter, consoleSliceFileName, filterConsoleLines, formatConsoleSlice } from "@/lib/console-filter";
 import { clamp, cn, fmtRam, formatClock, initialAvatarHue } from "@/lib/format";
 import { AreaChart, Meter } from "./charts";
 
@@ -33,8 +37,6 @@ const LEVEL_COLOR: Record<string, string> = {
   command: "#8ad8ff",
   system: "#ffa9e0",
 };
-
-const FILTERS = ["all", "info", "warn", "error", "command", "system"] as const;
 
 export function ConsoleView({
   serverId,
@@ -59,7 +61,8 @@ export function ConsoleView({
   const [onlinePlayers, setOnlinePlayers] = useState<OnlineP[]>([]);
   const [lastStartedAt, setLastStartedAt] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]>("all");
+  const [filter, setFilter] = useState<ConsoleFilter>("all");
+  const [search, setSearch] = useState("");
   const [history, setHistory] = useState<number[]>([]);
   const [uptime, setUptime] = useState("—");
   const lastId = useRef(0);
@@ -167,8 +170,20 @@ export function ConsoleView({
     });
   }, [cmd, serverId]);
 
-  const filtered = logs.filter((l) => filter === "all" || l.level === filter || (filter === "warn" && l.level === "error"));
+  const filtered = filterConsoleLines(logs, filter, search);
+  const searching = search.trim().length > 0;
   const addr = `127.0.0.1:${port}`;
+
+  const downloadSlice = useCallback(() => {
+    if (filtered.length === 0) return;
+    const blob = new Blob([formatConsoleSlice(filtered)], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = consoleSliceFileName(serverId);
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }, [filtered, serverId]);
 
   return (
     <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
@@ -193,8 +208,8 @@ export function ConsoleView({
             </span>
           </div>
 
-          <div className="flex items-center gap-1 border-b border-white/10 px-3 py-2">
-            {FILTERS.map((f) => (
+          <div className="flex flex-wrap items-center gap-1 border-b border-white/10 px-3 py-2">
+            {CONSOLE_FILTERS.map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
@@ -206,9 +221,34 @@ export function ConsoleView({
                 {f}
               </button>
             ))}
+            <div className="ml-2 flex min-w-[140px] flex-1 items-center gap-1.5 rounded-full bg-white/[0.07] px-2.5 py-1">
+              <Search size={11} className="shrink-0 text-white/35" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setSearch("");
+                }}
+                placeholder="search output…"
+                className="w-full min-w-0 bg-transparent font-mono text-[11px] text-white placeholder:text-white/30 outline-none"
+              />
+              {searching && (
+                <>
+                  <span className="shrink-0 whitespace-nowrap font-mono text-[10px] text-white/45">
+                    {filtered.length} match{filtered.length === 1 ? "" : "es"}
+                  </span>
+                  <button onClick={() => setSearch("")} title="Clear search" className="shrink-0 text-white/40 transition hover:text-white">
+                    <X size={11} />
+                  </button>
+                </>
+              )}
+            </div>
             <div className="ml-auto flex items-center gap-1">
               <ToolBtn title={paused ? "Resume stream" : "Pause stream"} onClick={() => setPaused((p) => !p)}>
                 {paused ? <Play size={13} /> : <Pause size={13} />}
+              </ToolBtn>
+              <ToolBtn title={`Download the ${filtered.length} visible line${filtered.length === 1 ? "" : "s"} as a .log file`} onClick={downloadSlice}>
+                <Download size={13} />
               </ToolBtn>
               <ToolBtn title="Clear view" onClick={() => setLogs([])}>
                 <Eraser size={13} />
@@ -236,7 +276,13 @@ export function ConsoleView({
           >
             {filtered.length === 0 && (
               <p className="py-8 text-center text-white/30">
-                {status === "offline" ? "— server is offline · start it to stream the console —" : "waiting for output…"}
+                {logs.length > 0
+                  ? searching
+                    ? `— no lines match “${search.trim()}”${filter === "all" ? "" : ` in ${filter}`} —`
+                    : `— no ${filter} lines yet —`
+                  : status === "offline"
+                    ? "— server is offline · start it to stream the console —"
+                    : "waiting for output…"}
               </p>
             )}
             {filtered.map((l) => (
