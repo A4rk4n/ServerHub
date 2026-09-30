@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.26.0] - 2026-09-30
+
+### Added
+- Game-server update alerts for SteamCMD titles: each server page now compares the installed build (from SteamCMD's local app manifest) against the latest public build and shows an amber "game update available" badge — with installed → latest build ids in the tooltip — linking to the Settings tab where updates run. The comparison is deliberately conservative: it alerts only when the reported latest build is strictly newer, so a lagging metadata mirror can never raise a false alarm, and any missing information reads as "unknown" rather than a warning. Lookups are cached per Steam app (six hours; failures retried after fifteen minutes) and bounded, keeping the check invisible in day-to-day use.
+
 ## [2.25.0] - 2026-09-30
 
 ### Added
@@ -155,7 +160,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.25.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.26.0...HEAD
+[2.26.0]: https://github.com/A4rk4n/ServerHub/compare/v2.25.0...v2.26.0
 [2.25.0]: https://github.com/A4rk4n/ServerHub/compare/v2.24.0...v2.25.0
 [2.24.0]: https://github.com/A4rk4n/ServerHub/compare/v2.23.0...v2.24.0
 [2.23.0]: https://github.com/A4rk4n/ServerHub/compare/v2.22.0...v2.23.0
