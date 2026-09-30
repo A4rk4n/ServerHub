@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.17.0] - 2026-09-30
+
+### Added
+- Satisfactory dedicated-server provider: installed anonymously through SteamCMD (app `1690800`) with the existing staged, recoverable installation pipeline, launched through the official `FactoryServer` launcher with `-multihome` LAN binding and `-unattended` operation, validated after installation, and covered by the 15-second Unreal Engine process-stability readiness window.
+
 ## [2.16.0] - 2026-09-30
 
 ### Added
@@ -103,7 +108,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.16.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.17.0...HEAD
+[2.17.0]: https://github.com/A4rk4n/ServerHub/compare/v2.16.0...v2.17.0
 [2.16.0]: https://github.com/A4rk4n/ServerHub/compare/v2.15.0...v2.16.0
 [2.15.0]: https://github.com/A4rk4n/ServerHub/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/A4rk4n/ServerHub/compare/v2.13.1...v2.14.0
