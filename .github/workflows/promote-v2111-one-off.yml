@@ -263,7 +263,7 @@ jobs:
             fi
           done
           notes_body=$(cat release-notes.md)
-          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" -f body="$notes_body" > /dev/null
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" -f tag_name="$TAG" -f body="$notes_body" > /dev/null
           echo "Release notes refreshed with the verified provenance."
           gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
             --jq '{name, isDraft, isPrerelease, assets: [.assets[] | {name, size, digest}]}'
