@@ -45,9 +45,15 @@ jobs:
           npm run test:unit 2>&1 | tee unit-test-output.txt
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
+            printf '::error title=test:unit-exit::exit=%s bytes=%s failblock=%s xchar=%s\n' "$status" "$(wc -c < unit-test-output.txt | tr -d ' ')" "$(grep -c 'failing tests' unit-test-output.txt || true)" "$(grep -c '✖' unit-test-output.txt || true)"
             while IFS= read -r line; do
               printf '::error title=test:unit::%s\n' "${line//'%'/'%25'}"
-            done < <(sed -n '/^✖ failing tests:/,$p' unit-test-output.txt | head -40)
+            done < <(sed -n '/failing tests:/,$p' unit-test-output.txt | head -40)
+            if ! grep -q 'failing tests' unit-test-output.txt; then
+              tail -n 30 unit-test-output.txt | while IFS= read -r line; do
+                printf '::error title=test:unit-tail::%s\n' "${line//'%'/'%25'}"
+              done
+            fi
             exit "$status"
           fi
       # This lifecycle integration relies on POSIX process signals; Windows is
