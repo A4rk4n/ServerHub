@@ -1,4 +1,5 @@
 import { selectBackupsToPrune } from "./backup-retention";
+import { FABRIC_INSTALLER_LIST_URL, fabricLoaderListUrl, fabricServerJarUrl, pickFabricInstaller, pickFabricLoader } from "./fabric-meta";
 import { flushMetricsHistory, recordMetricsSample } from "./metrics-history";
 import { palworldGracefulStop, palworldRestPort } from "./palworld-api";
 import { notify } from "./notifications";
@@ -722,14 +723,18 @@ async function installMojang(server: Server, root: string, context: InstallConte
 
 async function installFabric(server: Server, root: string, context: InstallContext) {
   await context.report("downloading", 15, "Resolving the latest stable Fabric loader");
-  const response = await fetch(`https://meta.fabricmc.net/v2/versions/loader/${encodeURIComponent(server.version)}`, { signal: context.signal });
+  const response = await fetch(fabricLoaderListUrl(server.version), { signal: context.signal });
   if (!response.ok) throw new Error(`Fabric does not publish a loader for Minecraft ${server.version} (HTTP ${response.status}).`);
-  const versions = (await response.json()) as { loader: { version: string; stable: boolean }; installer: { version: string; stable: boolean } }[];
-  const choice = versions.find((item) => item.loader.stable && item.installer.stable) ?? versions[0];
-  if (!choice) throw new Error(`No Fabric loader is available for Minecraft ${server.version}.`);
-  const url = `https://meta.fabricmc.net/v2/versions/loader/${encodeURIComponent(server.version)}/${encodeURIComponent(choice.loader.version)}/${encodeURIComponent(choice.installer.version)}/server/jar`;
-  await downloadFile(url, path.join(root, "server.jar"), server.id, `Fabric loader ${choice.loader.version}`, context, [20, 76]);
-  await logLine(server.id, "success", "Installer", `Fabric ${choice.loader.version} installed for Minecraft ${server.version}.`);
+  const loaderVersion = pickFabricLoader(await response.json().catch(() => null));
+  if (!loaderVersion) throw new Error(`No Fabric loader is available for Minecraft ${server.version}.`);
+  await context.report("downloading", 17, "Resolving the latest stable Fabric installer");
+  const installerResponse = await fetch(FABRIC_INSTALLER_LIST_URL, { signal: context.signal });
+  if (!installerResponse.ok) throw new Error(`The Fabric installer list failed: HTTP ${installerResponse.status}.`);
+  const installerVersion = pickFabricInstaller(await installerResponse.json().catch(() => null));
+  if (!installerVersion) throw new Error("Fabric's installer list came back empty. Please retry in a moment.");
+  const url = fabricServerJarUrl(server.version, loaderVersion, installerVersion);
+  await downloadFile(url, path.join(root, "server.jar"), server.id, `Fabric loader ${loaderVersion}`, context, [20, 76]);
+  await logLine(server.id, "success", "Installer", `Fabric ${loaderVersion} installed for Minecraft ${server.version}.`);
 }
 
 async function installBedrock(server: Server, root: string, context: InstallContext) {
