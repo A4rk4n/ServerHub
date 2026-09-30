@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.21.0] - 2026-09-30
+
+### Added
+- Console search and export: a search box in the console toolbar filters the stream case-insensitively across message text and source tags, composes with the existing severity pills (the warn pill still includes errors), and shows a live match counter; a new download button exports exactly the visible slice — filtered and searched — as a timestamped per-server `.log` file. Empty states now distinguish "no matches" from "no output yet". The filtering and export logic lives in a pure module covered by a dedicated unit suite.
+
 ## [2.20.0] - 2026-09-30
 
 ### Added
@@ -127,7 +132,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.20.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.21.0...HEAD
+[2.21.0]: https://github.com/A4rk4n/ServerHub/compare/v2.20.0...v2.21.0
 [2.20.0]: https://github.com/A4rk4n/ServerHub/compare/v2.19.0...v2.20.0
 [2.19.0]: https://github.com/A4rk4n/ServerHub/compare/v2.18.0...v2.19.0
 [2.18.0]: https://github.com/A4rk4n/ServerHub/compare/v2.17.0...v2.18.0
