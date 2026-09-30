@@ -27,6 +27,7 @@ The executable is not code-signed with a commercial certificate; Windows SmartSc
 | Terraria | SteamCMD app `105600` | Official Terraria server executable and generated config |
 | Rust | SteamCMD app `258550` | Official `RustDedicated` executable |
 | Satisfactory | SteamCMD app `1690800` | Official `FactoryServer` launcher with `-multihome` LAN binding |
+| Palworld | SteamCMD app `2394010` | Official `PalServer` launcher; managed `PalWorldSettings.ini` (no bind-address flag — listens on all interfaces) |
 | Dragonwilds / Hytale | SteamCMD / manual registration | Managed or user-supplied executable with preflight checks and LAN binding |
 | Custom | Manual registration | Any executable, `.bat`, `.cmd`, or shell script in a managed or existing folder |
 

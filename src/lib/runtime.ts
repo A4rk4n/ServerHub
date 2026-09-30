@@ -1149,6 +1149,9 @@ async function validateInstalledArtifacts(server: Server, root: string) {
     satisfactory: platform === "win32"
       ? ["FactoryServer.exe", "FactoryGame/Binaries/Win64/FactoryServer-Win64-Shipping-Cmd.exe"]
       : ["FactoryServer.sh"],
+    palworld: platform === "win32"
+      ? ["PalServer.exe", "Pal/Binaries/Win64/PalServer-Win64-Shipping-Cmd.exe"]
+      : ["PalServer.sh"],
     dragonwilds: platform === "win32"
       ? ["RSDragonwilds.exe", "RSDragonwildsServer.exe"]
       : ["RSDragonwildsServer.sh", "RSDragonwildsServer"],
@@ -1353,6 +1356,25 @@ export async function writeServerConfig(storedServer: Server, rootOverride?: str
       "",
     ].join("\n");
     await fsp.writeFile(path.join(root, "serverconfig.txt"), config, "utf8");
+  } else if (server.gameId === "palworld") {
+    // Palworld reads a single OptionSettings tuple; keys omitted from the
+    // tuple fall back to the game's defaults, so only managed settings are
+    // written. Double quotes are stripped from values because they would
+    // terminate the quoted tuple fields.
+    const clean = (value: string) => value.replace(/[\r\n"]/g, " ").trim();
+    const platformFolder = hostPlatform() === "win32" ? "WindowsServer" : "LinuxServer";
+    const configFile = path.join(root, "Pal", "Saved", "Config", platformFolder, "PalWorldSettings.ini");
+    const options = [
+      `ServerName="${clean(server.name).slice(0, 48) || "Server Hub"}"`,
+      `ServerPlayerMaxNum=${server.maxPlayers}`,
+      `PublicPort=${server.port}`,
+      `ServerPassword="${clean(server.serverPassword)}"`,
+      `AdminPassword="${clean(server.adminPassword)}"`,
+      "RCONEnabled=False",
+    ].join(",");
+    const config = ["[/Script/Pal.PalGameWorldSettings]", `OptionSettings=(${options})`, ""].join("\n");
+    await fsp.mkdir(path.dirname(configFile), { recursive: true });
+    await fsp.writeFile(configFile, config, { encoding: "utf8", mode: 0o600 });
   } else if (server.gameId === "dragonwilds") {
     const clean = (value: string) => value.replace(/[\r\n]/g, " ").trim();
     if (!clean(server.ownerId)) throw new Error("Dragonwilds requires the owner's in-game Player ID.");
@@ -1542,6 +1564,17 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
     // Unreal Engine dedicated server: -multihome binds the configured LAN
     // address; -unattended prevents interactive error dialogs.
     return { executable, args: ["-log", "-unattended", `-Port=${server.port}`, `-multihome=${server.bindAddress}`] };
+  }
+  if (server.gameId === "palworld") {
+    const executable = await findExecutable(root, hostPlatform() === "win32"
+      ? ["PalServer.exe", "Pal/Binaries/Win64/PalServer-Win64-Shipping-Cmd.exe"]
+      : ["PalServer.sh"]);
+    if (!executable) throw new Error("The Palworld dedicated-server launcher was not found after SteamCMD installation.");
+    if (hostPlatform() !== "win32") await fsp.chmod(executable, 0o755).catch(() => {});
+    // Palworld has no bind-address flag (it listens on every interface):
+    // only the listen port and player cap are command-line options; all
+    // remaining settings are written to PalWorldSettings.ini beforehand.
+    return { executable, args: [`-port=${server.port}`, `-players=${server.maxPlayers}`] };
   }
   if (server.gameId === "dragonwilds") {
     const executable = await findExecutable(root, hostPlatform() === "win32"
