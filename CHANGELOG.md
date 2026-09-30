@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.13.1] - 2026-09-30
+
+### Changed
+- Adopt the safe members of the weekly Dependabot npm group (drizzle-orm 0.45.3, Next.js/eslint-config-next 16.3.7, React 19.3.0 with matching types, framer-motion 13.4.6, lucide-react 1.49.0, Tailwind CSS 4.3.3, tsx 4.23.15, `@types/yauzl` 3.4.0) and move `@types/node` to the 24.x line matching the pinned Node 24 runtime. TypeScript stays at 5.9.3: the grouped Dependabot PR is unmergeable because `typescript@7` conflicts with `@typescript-eslint/parser`'s peer range (`>=4.8.4 <6.1.0`) and fails `npm ci`.
+- Configure Dependabot to ignore TypeScript and `@types/node` major updates so one unmergeable major no longer poisons the whole weekly npm group.
+- Bound every CI and release-promotion job with `timeout-minutes` so hung steps fail fast instead of consuming the six-hour default.
+
+### Added
+- Dependency-free Markdown link checker (`scripts/check-docs.mjs`) validating relative links and GitHub-slug anchors across all tracked documentation, with a dedicated unit suite in the parallel `test:unit` pass.
+- New `docs` CI job enforcing the Markdown link check, workflow YAML parsing, and shell-script syntax checks that were previously manual pre-push steps.
+
 ## [2.13.0] - 2026-09-30
 
 ### Changed
@@ -66,7 +77,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.13.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.13.1...HEAD
+[2.13.1]: https://github.com/A4rk4n/ServerHub/compare/v2.13.0...v2.13.1
 [2.13.0]: https://github.com/A4rk4n/ServerHub/compare/4cd9be85317e0b23023e9cb14c48972e3a137bc6...v2.13.0
 [2.12.0]: https://github.com/A4rk4n/ServerHub/compare/v2.11.1...4cd9be85317e0b23023e9cb14c48972e3a137bc6
 [2.11.1]: https://github.com/A4rk4n/ServerHub/compare/v2.11.0...v2.11.1
