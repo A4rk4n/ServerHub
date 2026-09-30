@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.15.0] - 2026-09-30
+
+### Added
+- Automated release notes: the release promotion workflow now extracts the tagged version's `CHANGELOG.md` section (`scripts/release-notes.mjs`) and publishes it ahead of the verified provenance block, instead of provenance-only notes.
+- Release-metadata consistency gate: `node scripts/release-notes.mjs check` verifies that `package.json`, `package-lock.json`, and `CHANGELOG.md` agree on the current version (dated entry, non-empty body, link definitions). CI enforces it on every commit, promotion enforces it against the tagged source, and the unit suite asserts it locally.
+
+### Fixed
+- Release-note assembly in the promotion workflow no longer uses an unquoted heredoc, which would have executed backticks in changelog text as shell command substitutions.
+
 ## [2.14.0] - 2026-09-30
 
 ### Added
@@ -86,7 +95,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.14.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.15.0...HEAD
+[2.15.0]: https://github.com/A4rk4n/ServerHub/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/A4rk4n/ServerHub/compare/v2.13.1...v2.14.0
 [2.13.1]: https://github.com/A4rk4n/ServerHub/compare/v2.13.0...v2.13.1
 [2.13.0]: https://github.com/A4rk4n/ServerHub/compare/4cd9be85317e0b23023e9cb14c48972e3a137bc6...v2.13.0
