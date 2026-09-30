@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.28.1] - 2026-09-30
+
+### Fixed
+- Minecraft Fabric installation crashed at 15% with "Cannot read properties of undefined (reading 'stable')": the Fabric metadata service lists loader versions and installer versions on two separate endpoints, but the installer version was read from the loader list, where it does not exist. The installer is now resolved from its own endpoint, the newest stable loader/installer pair is preferred (with sensible fallbacks for pre-release-only game versions), and malformed metadata produces a clear error message instead of a crash.
+
 ## [2.28.0] - 2026-09-30
 
 ### Added
@@ -170,7 +175,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.28.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.28.1...HEAD
+[2.28.1]: https://github.com/A4rk4n/ServerHub/compare/v2.28.0...v2.28.1
 [2.28.0]: https://github.com/A4rk4n/ServerHub/compare/v2.27.0...v2.28.0
 [2.27.0]: https://github.com/A4rk4n/ServerHub/compare/v2.26.0...v2.27.0
 [2.26.0]: https://github.com/A4rk4n/ServerHub/compare/v2.25.0...v2.26.0
