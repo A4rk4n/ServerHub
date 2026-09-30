@@ -26,9 +26,9 @@ tested bytes without rebuilding.
   npm audit --omit=dev     # must report zero vulnerabilities
   ```
 
-  On Windows, `npm run test:unit` runs everything except the POSIX-only
-  installation-job lifecycle integration; every `npm run test:<suite>` script
-  runs one suite in isolation for focused debugging.
+  The installation-job lifecycle integration runs natively on both Linux
+  and Windows; every `npm run test:<suite>` script runs one suite in
+  isolation for focused debugging.
 
 ## Ship it
 

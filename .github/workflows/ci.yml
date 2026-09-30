@@ -62,10 +62,12 @@ jobs:
             fi
             exit "$status"
           fi
-      # This lifecycle integration relies on POSIX process signals; Windows is
-      # covered by the native portable-package job below.
-      - if: runner.os != 'Windows'
-        run: npm run test:installation-jobs
+      # The lifecycle integration runs natively on both platforms: the
+      # runtime kills process trees with taskkill on Windows and process
+      # groups on POSIX, and the suite's fixtures are platform-neutral. The
+      # portable-package job below additionally covers the packaged Windows
+      # launcher lifecycle.
+      - run: npm run test:installation-jobs
       - run: npm run sbom
   windows-portable:
     runs-on: windows-2025

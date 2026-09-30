@@ -1373,6 +1373,11 @@ export async function writeServerConfig(storedServer: Server, rootOverride?: str
 }
 
 function parseArgs(input: string): string[] {
+  // Backslash escaping is a POSIX shell convention. On Windows the backslash
+  // is the path separator (cmd.exe escapes with ^), so treating it as an
+  // escape character would corrupt launch arguments containing paths such as
+  // C:\servers\world — they must pass through literally.
+  const backslashEscapes = hostPlatform() !== "win32";
   const args: string[] = [];
   let current = "";
   let quote: "'" | '"' | null = null;
@@ -1381,7 +1386,7 @@ function parseArgs(input: string): string[] {
     if (escaping) {
       current += char;
       escaping = false;
-    } else if (char === "\\" && quote !== "'") escaping = true;
+    } else if (char === "\\" && quote !== "'" && backslashEscapes) escaping = true;
     else if (quote) {
       if (char === quote) quote = null;
       else current += char;

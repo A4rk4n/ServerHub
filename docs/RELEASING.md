@@ -95,9 +95,9 @@ A release tag must point at a commit that passed CI on `main`.
 - Use the Node version in [`.node-version`](../.node-version) and run
   `npm ci`, `npm run build:server`, `npm test`, and `npm audit --omit=dev`.
   `npm test` drives the native Node test runner; `npm run test:unit` alone
-  skips the POSIX-only installation-job lifecycle integration (useful on
-  Windows), and every `npm run test:<suite>` script runs one suite in
-  isolation for focused debugging.
+  skips the installation-job lifecycle integration (which itself runs
+  natively on both Linux and Windows), and every `npm run test:<suite>`
+  script runs one suite in isolation for focused debugging.
 - To check an arbitrary artifact locally:
   `node scripts/verify-release-artifact.mjs --artifact <zip> --manifest <release-manifest.json> --sums <SHA256SUMS> --tag <vX.Y.Z> --commit <sha> [--sbom <sbom.cdx.json>]`
   from the tagged checkout. It performs the same identity, provenance, and
