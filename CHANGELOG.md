@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.19.0] - 2026-09-30
+
+### Added
+- Packaged-app boot smoke test in CI: the Windows portable job now boots the exact server bundle extracted from the shipped ZIP, waits for `/api/health` to report a healthy runtime and database, verifies the game catalog is served, and then exercises the native launcher's graceful-shutdown path (`serverhub:shutdown`), requiring a clean self-driven exit — a regression gate that catches packaging defects a static file-list validation cannot (missing runtime modules, broken Next standalone output, database bootstrap failures). Also runnable locally via `npm run smoke:package` (defaults to `build/server`).
+
 ## [2.18.0] - 2026-09-30
 
 ### Added
@@ -117,7 +122,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.18.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.19.0...HEAD
+[2.19.0]: https://github.com/A4rk4n/ServerHub/compare/v2.18.0...v2.19.0
 [2.18.0]: https://github.com/A4rk4n/ServerHub/compare/v2.17.0...v2.18.0
 [2.17.0]: https://github.com/A4rk4n/ServerHub/compare/v2.16.0...v2.17.0
 [2.16.0]: https://github.com/A4rk4n/ServerHub/compare/v2.15.0...v2.16.0
