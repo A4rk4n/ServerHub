@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.23.0] - 2026-09-30
+
+### Added
+- Palworld graceful stop through the official REST API: stopping or restarting a Palworld server now saves the world and requests a shutdown with a 10-second in-game countdown over the loopback-only REST API (Basic auth with the server's admin password), instead of force-killing a process that ignores stdin — eliminating the routine risk of world-save corruption. The managed `PalWorldSettings.ini` enables the REST API automatically when an admin password is set, on a per-server port derived from the game port (8211 → 8212); the port is never exposed or given a firewall rule. If the API declines — no admin password, or an older server build — the previous termination path with its 30-second force-kill backstop still applies, and the console explains what happened.
+
 ## [2.22.0] - 2026-09-30
 
 ### Added
@@ -140,7 +145,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.22.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.23.0...HEAD
+[2.23.0]: https://github.com/A4rk4n/ServerHub/compare/v2.22.0...v2.23.0
 [2.22.0]: https://github.com/A4rk4n/ServerHub/compare/v2.21.0...v2.22.0
 [2.21.0]: https://github.com/A4rk4n/ServerHub/compare/v2.20.0...v2.21.0
 [2.20.0]: https://github.com/A4rk4n/ServerHub/compare/v2.19.0...v2.20.0
