@@ -95,6 +95,11 @@ jobs:
           if (Test-Path smoke/ServerHub/resources/server/build) { throw "Recursive build directory packaged" }
           Write-Host "NODE24_SEA_NATIVE_LIFECYCLE_OK"
           Write-Host "FINAL_NATIVE_PACKAGE_INTEGRITY_OK"
+      # Boot the exact server bundle end users receive: wait for /api/health,
+      # probe the catalog, then exercise the native launcher's graceful
+      # shutdown path (serverhub:shutdown) and require a clean exit 0.
+      - name: Boot packaged server and verify graceful shutdown
+        run: node scripts/package-smoke.mjs smoke/ServerHub/resources/server
       - uses: actions/upload-artifact@v6
         with:
           name: ServerHub-Windows-x64

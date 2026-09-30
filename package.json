@@ -10,6 +10,7 @@
     "build": "next build",
     "build:server": "next build && node scripts/prepare-standalone.mjs",
     "dist:win:portable": "npm run build:server && node scripts/build-windows-portable.mjs",
+    "smoke:package": "node scripts/package-smoke.mjs",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
