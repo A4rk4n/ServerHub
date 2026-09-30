@@ -1,0 +1,298 @@
+name: Promote release
+
+# Manual, least-privilege promotion of an artifact that CI already built and
+# validated. The workflow never rebuilds anything and never accepts a file
+# path: the only artifact it can publish is the "ServerHub-Windows-x64"
+# bundle uploaded by the referenced CI run, re-verified end to end.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (must already exist, for example v2.11.1)"
+        required: true
+        type: string
+      ci_run_id:
+        description: "ID of the successful CI run that built and validated the artifact"
+        required: true
+        type: string
+      draft:
+        description: "Create the GitHub release as a draft for review before publication"
+        required: false
+        default: true
+        type: boolean
+      prerelease:
+        description: "Mark the release as a prerelease"
+        required: false
+        default: false
+        type: boolean
+
+permissions: {}
+
+# Promotions are deliberate manual actions: queue them instead of cancelling.
+concurrency:
+  group: promote-release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify validated artifact
+    runs-on: ubuntu-latest
+    # Promotion must be dispatched from the default branch so that the
+    # workflow definition and the tagged source are the reviewed ones.
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      commit: ${{ steps.identity.outputs.commit }}
+      filename: ${{ steps.identity.outputs.filename }}
+      size: ${{ steps.identity.outputs.size }}
+      sha256: ${{ steps.identity.outputs.sha256 }}
+    steps:
+      - name: Validate inputs and resolve the tag commit
+        id: identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_CI_RUN_ID: ${{ inputs.ci_run_id }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$INPUT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Refusing tag '$INPUT_TAG': expected a semantic version tag such as v2.11.1"
+            exit 1
+          fi
+          if [[ ! "$INPUT_CI_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::Refusing CI run id '$INPUT_CI_RUN_ID': expected a numeric run id"
+            exit 1
+          fi
+          object_type=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${INPUT_TAG}" --jq '.object.type')
+          object_sha=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${INPUT_TAG}" --jq '.object.sha')
+          case "$object_type" in
+            commit) commit="$object_sha" ;;
+            tag) commit=$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${object_sha}" --jq '.object.sha') ;;
+            *) echo "::error::Tag ${INPUT_TAG} is a ${object_type} object, not a commit"; exit 1 ;;
+          esac
+          if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Could not resolve tag ${INPUT_TAG} to a full commit id"
+            exit 1
+          fi
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the tagged source (immutable provenance source)
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.identity.outputs.commit }}
+
+      - name: Confirm the tag is part of the default branch history
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+          TAG_COMMIT: ${{ steps.identity.outputs.commit }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          status=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TAG_COMMIT}...${DEFAULT_BRANCH}" --jq .status)
+          case "$status" in
+            behind|identical) echo "Tag ${INPUT_TAG} at ${TAG_COMMIT} is part of ${DEFAULT_BRANCH} (${status})." ;;
+            *) echo "::error::Tag ${INPUT_TAG} commit ${TAG_COMMIT} is not part of ${DEFAULT_BRANCH} (compare status: ${status})"; exit 1 ;;
+          esac
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Confirm the tag version matches the source
+        id: version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          if [[ "v${version}" != "$INPUT_TAG" ]]; then
+            echo "::error::Tag $INPUT_TAG does not match package.json version ${version}"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Validate the referenced CI run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_CI_RUN_ID: ${{ inputs.ci_run_id }}
+          TAG_COMMIT: ${{ steps.identity.outputs.commit }}
+        run: |
+          set -euo pipefail
+          run_json=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${INPUT_CI_RUN_ID}")
+          check() { actual=$(printf '%s' "$run_json" | jq -r "$1"); if [[ "$actual" != "$2" ]]; then
+            echo "::error::CI run ${INPUT_CI_RUN_ID} ${1} is '${actual}', expected '$2'"; exit 1; fi }
+          check '.path' '.github/workflows/ci.yml'
+          check '.status' 'completed'
+          check '.conclusion' 'success'
+          check '.head_sha' "$TAG_COMMIT"
+          event=$(printf '%s' "$run_json" | jq -r '.event')
+          if [[ "$event" != "push" && "$event" != "pull_request" ]]; then
+            echo "::error::CI run ${INPUT_CI_RUN_ID} was triggered by '${event}', expected push or pull_request"
+            exit 1
+          fi
+          echo "CI run ${INPUT_CI_RUN_ID} is a successful run of this repository's CI at ${TAG_COMMIT}."
+
+      - name: Download the artifact bundle built by that CI run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_CI_RUN_ID: ${{ inputs.ci_run_id }}
+        run: |
+          set -euo pipefail
+          artifact_id=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${INPUT_CI_RUN_ID}/artifacts" \
+            --jq '[.artifacts[] | select(.name == "ServerHub-Windows-x64" and .expired == false) | .id] | first // empty')
+          if [[ -z "$artifact_id" ]]; then
+            echo "::error::CI run ${INPUT_CI_RUN_ID} has no unexpired ServerHub-Windows-x64 artifact"
+            exit 1
+          fi
+          curl -fL --retry 5 --retry-delay 10 \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
+            -o bundle.zip
+          rm -rf bundle && mkdir bundle
+          unzip -o bundle.zip -d bundle
+          test -f bundle/release-manifest.json && test -f bundle/SHA256SUMS
+          echo "Downloaded artifact ${artifact_id} from CI run ${INPUT_CI_RUN_ID}:"
+          ls -la bundle
+
+      - run: npm ci
+
+      - name: Verify artifact identity, provenance, and checksums
+        id: verify
+        env:
+          TAG: ${{ inputs.tag }}
+          TAG_COMMIT: ${{ steps.identity.outputs.commit }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mapfile -t sbom_files < <(ls bundle/serverhub-*-sbom.cdx.json)
+          if [[ ${#sbom_files[@]} -ne 1 ]]; then
+            echo "::error::Expected exactly one SBOM in the bundle, found ${#sbom_files[@]}"
+            exit 1
+          fi
+          node scripts/verify-release-artifact.mjs \
+            --artifact "bundle/ServerHub-${VERSION}-Windows-x64-Portable.zip" \
+            --manifest bundle/release-manifest.json \
+            --sums bundle/SHA256SUMS \
+            --sbom "${sbom_files[0]}" \
+            --tag "$TAG" \
+            --commit "$TAG_COMMIT"
+          echo "filename=ServerHub-${VERSION}-Windows-x64-Portable.zip" >> "$GITHUB_OUTPUT"
+          echo "size=$(jq -r .size bundle/release-manifest.json)" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(jq -r .sha256 bundle/release-manifest.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Stage the verified bundle for publication
+        uses: actions/upload-artifact@v6
+        with:
+          name: verified-release-bundle
+          path: |
+            bundle/ServerHub-*-Windows-x64-Portable.zip
+            bundle/SHA256SUMS
+            bundle/release-manifest.json
+            bundle/serverhub-*-sbom.cdx.json
+          if-no-files-found: error
+
+  publish:
+    name: Publish verified release
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    env:
+      TAG: ${{ inputs.tag }}
+      VERSION: ${{ needs.verify.outputs.version }}
+      COMMIT: ${{ needs.verify.outputs.commit }}
+      FILENAME: ${{ needs.verify.outputs.filename }}
+      SIZE: ${{ needs.verify.outputs.size }}
+      SHA256: ${{ needs.verify.outputs.sha256 }}
+      CI_RUN_ID: ${{ inputs.ci_run_id }}
+      DRAFT: ${{ inputs.draft }}
+      PRERELEASE: ${{ inputs.prerelease }}
+    steps:
+      - name: Download the verified bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: verified-release-bundle
+          path: bundle
+
+      - name: Re-verify the staged checksums
+        run: |
+          set -euo pipefail
+          expected="${SHA256}  ${FILENAME}"
+          actual="$(cd bundle && sha256sum "${FILENAME}" | sed 's/ \+/  /')"
+          if [[ "$actual" != *"$expected"* ]]; then
+            echo "::error::Staged artifact checksum does not match the verified SHA-256"
+            exit 1
+          fi
+          manifest_sha=$(jq -r .sha256 bundle/release-manifest.json)
+          if [[ "$manifest_sha" != "$SHA256" ]]; then
+            echo "::error::Staged manifest checksum does not match the verified SHA-256"
+            exit 1
+          fi
+          (cd bundle && sha256sum -c SHA256SUMS)
+
+      - name: Create the release and attach assets without overwriting
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          flags=()
+          if [[ "$DRAFT" == "true" ]]; then flags+=(--draft); fi
+          if [[ "$PRERELEASE" == "true" ]]; then flags+=(--prerelease); fi
+          cat > release-notes.md <<EOF
+          ## Server Hub v${VERSION}
+
+          Promoted from CI run ${CI_RUN_ID} at commit ${COMMIT} without rebuilding.
+
+          - Artifact: \`${FILENAME}\` (${SIZE} bytes)
+          - SHA-256: \`${SHA256}\`
+
+          Verify \`SHA256SUMS\` before running ServerHub.exe. See docs/RELEASING.md for the
+          build-versus-promotion model, provenance chain, and rollback procedure.
+          EOF
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG already exists; checking assets before attaching."
+          else
+            gh release create "$TAG" --target "$COMMIT" --title "Server Hub v${VERSION}" \
+              --notes-file release-notes.md "${flags[@]}"
+            echo "Created release $TAG (draft=${DRAFT}, prerelease=${PRERELEASE})."
+          fi
+          # Never overwrite an existing asset: identical digests are skipped,
+          # anything else aborts the promotion.
+          for file in "$FILENAME" SHA256SUMS release-manifest.json bundle/serverhub-*-sbom.cdx.json; do
+            name=$(basename "$file")
+            path="bundle/$file"
+            if [[ "$file" == "$FILENAME" || "$file" == "SHA256SUMS" || "$file" == "release-manifest.json" ]]; then path="bundle/$name"; fi
+            local_digest="sha256:$(sha256sum "$path" | cut -d' ' -f1)"
+            remote_digest=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+              --jq ".assets[] | select(.name == \"${name}\") | .digest // empty")
+            if [[ -n "$remote_digest" ]]; then
+              if [[ "$remote_digest" == "$local_digest" ]]; then
+                echo "Asset ${name} is already attached with the verified digest; skipping."
+              else
+                echo "::error::Asset ${name} already exists with digest ${remote_digest} (expected ${local_digest}); refusing to overwrite"
+                exit 1
+              fi
+            else
+              gh release upload "$TAG" "$path"
+              echo "Attached ${name}."
+            fi
+          done
+          gh release view "$TAG" --json name,isDraft,isPrerelease,assets \
+            --jq '{name, isDraft, isPrerelease, assets: [.assets[] | {name, size, digest}]}'
+      - name: Summarize
+        run: |
+          echo "## Promotion summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Release: ${TAG} (draft=${DRAFT}, prerelease=${PRERELEASE})" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Artifact: ${FILENAME} (${SIZE} bytes)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- SHA-256: \`${SHA256}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source commit: ${COMMIT}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Built by CI run: ${CI_RUN_ID}" >> "$GITHUB_STEP_SUMMARY"

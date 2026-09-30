@@ -1,7 +1,16 @@
 name: CI
 on:
   push:
+    branches: [main]
+    tags: ["v*"]
   pull_request:
+# One CI execution per commit: pull_request events cover commits pushed to
+# open pull-request branches, push events cover main and release tags. The
+# concurrency group cancels only superseded pull-request runs; main and tag
+# runs always run to completion.
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
 jobs:
@@ -11,8 +20,8 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
           cache: npm
@@ -28,12 +37,13 @@ jobs:
       - if: runner.os != 'Windows'
         run: npm run test:installation-jobs
       - run: npm run test:package-integrity
+      - run: npm run test:release-verification
       - run: npm run sbom
   windows-portable:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
           cache: npm
@@ -54,10 +64,11 @@ jobs:
           if (Test-Path smoke/ServerHub/resources/server/build) { throw "Recursive build directory packaged" }
           Write-Host "NODE24_SEA_NATIVE_LIFECYCLE_OK"
           Write-Host "FINAL_NATIVE_PACKAGE_INTEGRITY_OK"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: ServerHub-Windows-x64
           path: |
             release/ServerHub-*-Windows-x64-Portable.zip
             release/SHA256SUMS
             release/release-manifest.json
+            release/serverhub-*-sbom.cdx.json
