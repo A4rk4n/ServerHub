@@ -1,6 +1,7 @@
 import { selectBackupsToPrune } from "./backup-retention";
 import { FABRIC_INSTALLER_LIST_URL, fabricLoaderListUrl, fabricServerJarUrl, pickFabricInstaller, pickFabricLoader } from "./fabric-meta";
 import { flushMetricsHistory, recordMetricsSample } from "./metrics-history";
+import { javaMajorForMinecraft } from "./minecraft-java";
 import { palworldGracefulStop, palworldRestPort } from "./palworld-api";
 import { notify } from "./notifications";
 import { hostPlatform } from "./host-platform";
@@ -1461,15 +1462,6 @@ async function findExecutable(root: string, candidates: string[]): Promise<strin
     }
   }
   return null;
-}
-
-function javaMajorForMinecraft(version: string): number {
-  const parts = version.split(".").map(Number);
-  const minor = parts[1] || 0;
-  const patch = parts[2] || 0;
-  if (minor <= 16) return 8;
-  if (minor < 20 || (minor === 20 && patch <= 4)) return 17;
-  return 21;
 }
 
 async function ensureJava(serverId: number, major: number, context?: InstallContext): Promise<string> {
