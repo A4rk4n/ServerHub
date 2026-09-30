@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.25.0] - 2026-09-30
+
+### Added
+- Bulk fleet power actions: the Servers view gains Start / Restart / Stop buttons that act on the currently filtered list, with live eligible counts and a two-click confirmation. Starts are staggered 2.5 seconds apart so launching a whole fleet cannot spike CPU or disk; stops and restarts run concurrently and report per-server outcomes (including skip reasons). Eligibility is conservative and shared between the UI and the API: bulk start only touches stopped, crashed, or failed servers; bulk restart only touches servers that are actually online; servers that are installing, updating, or already stopping are never affected.
+
 ## [2.24.0] - 2026-09-30
 
 ### Added
@@ -150,7 +155,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.24.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.25.0...HEAD
+[2.25.0]: https://github.com/A4rk4n/ServerHub/compare/v2.24.0...v2.25.0
 [2.24.0]: https://github.com/A4rk4n/ServerHub/compare/v2.23.0...v2.24.0
 [2.23.0]: https://github.com/A4rk4n/ServerHub/compare/v2.22.0...v2.23.0
 [2.22.0]: https://github.com/A4rk4n/ServerHub/compare/v2.21.0...v2.22.0
