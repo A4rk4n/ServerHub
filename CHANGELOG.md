@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.28.0] - 2026-09-30
+
+### Added
+- Import/adopt an existing server directory: the Servers view gains an "Import existing" flow that points Server Hub at a folder you already have on disk. Inspection fingerprints the folder against the executables of all ten supported games (nested Unreal-style layouts included) and reports what it found; adoption then registers the server as-is — nothing is downloaded, moved, or reinstalled, the folder stays unmanaged, and deleting the server later leaves it untouched. Game-specific rules still apply on adoption (Minecraft EULA, Valheim password, Dragonwilds owner and admin password), folders without a recognized game can be adopted as custom servers with a launch command, and folders inside Server Hub's own data directory or already claimed by another server are refused.
+
 ## [2.27.0] - 2026-09-30
 
 ### Added
@@ -165,7 +170,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.27.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.28.0...HEAD
+[2.28.0]: https://github.com/A4rk4n/ServerHub/compare/v2.27.0...v2.28.0
 [2.27.0]: https://github.com/A4rk4n/ServerHub/compare/v2.26.0...v2.27.0
 [2.26.0]: https://github.com/A4rk4n/ServerHub/compare/v2.25.0...v2.26.0
 [2.25.0]: https://github.com/A4rk4n/ServerHub/compare/v2.24.0...v2.25.0
