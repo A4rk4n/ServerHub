@@ -1,19 +1,30 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Boxes, Plus, Search } from "lucide-react";
+import { Boxes, Play, Plus, RotateCw, Search, Square } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { type BulkAction, partitionBulkAction } from "@/lib/bulk-power";
 import type { CardServer } from "./server-card";
 import { ServerCard } from "./server-card";
 import { Btn, Empty, inputCls } from "./ui";
 
 const FILTERS = ["all", "online", "offline"] as const;
 
+const BULK_META: Record<BulkAction, { label: string; icon: React.ComponentType<{ size?: number | string }>; danger: boolean }> = {
+  start: { label: "Start", icon: Play, danger: false },
+  restart: { label: "Restart", icon: RotateCw, danger: false },
+  stop: { label: "Stop", icon: Square, danger: true },
+};
+
 export function ServersView({ initial }: { initial: CardServer[] }) {
   const [servers, setServers] = useState(initial);
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("all");
+  const [arming, setArming] = useState<BulkAction | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let dead = false;
@@ -31,6 +42,12 @@ export function ServersView({ initial }: { initial: CardServer[] }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(""), 6000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
   const filtered = useMemo(() => {
     return servers.filter((s) => {
       if (filter === "online" && s.status !== "online") return false;
@@ -39,6 +56,50 @@ export function ServersView({ initial }: { initial: CardServer[] }) {
       return true;
     });
   }, [servers, q, filter]);
+
+  async function runBulk(action: BulkAction) {
+    const { eligible } = partitionBulkAction(filtered, action);
+    if (eligible.length === 0) return;
+    // Two-click confirmation: the first click arms the button for 4s.
+    if (arming !== action) {
+      setArming(action);
+      if (armTimer.current) clearTimeout(armTimer.current);
+      armTimer.current = setTimeout(() => setArming(null), 4000);
+      return;
+    }
+    setArming(null);
+    setBusy(true);
+    try {
+      const r = await fetch("/api/servers/bulk-power", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ids: eligible.map((s) => s.id) }),
+      });
+      const j = await r.json();
+      if (!r.ok) setNotice(j.error ?? "Bulk action failed");
+      else {
+        const results = j.results as Array<{ outcome: string }>;
+        const done = results.filter((x) => x.outcome === "ok").length;
+        const scheduled = results.filter((x) => x.outcome === "scheduled").length;
+        const failed = results.filter((x) => x.outcome === "failed").length;
+        const skipped = results.filter((x) => x.outcome === "skipped").length;
+        setNotice(
+          [
+            scheduled ? `${scheduled} start${scheduled === 1 ? "" : "s"} scheduled (2.5s apart)` : "",
+            done ? `${done} ${action === "stop" ? "stopping" : "restarting"}` : "",
+            failed ? `${failed} failed` : "",
+            skipped ? `${skipped} skipped` : "",
+          ]
+            .filter(Boolean)
+            .join(" · ")
+        );
+      }
+    } catch {
+      setNotice("Bulk action failed");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -64,7 +125,7 @@ export function ServersView({ initial }: { initial: CardServer[] }) {
         </div>
       </div>
 
-      <div className="flex gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
         {FILTERS.map((f) => (
           <button
             key={f}
@@ -76,6 +137,31 @@ export function ServersView({ initial }: { initial: CardServer[] }) {
             {f}
           </button>
         ))}
+        {servers.length > 1 && (
+          <div className="ml-auto flex items-center gap-1.5">
+            <span className="mr-1 text-[10px] font-bold uppercase tracking-wider text-plum-400">
+              fleet{filter !== "all" || q ? " (filtered)" : ""}
+            </span>
+            {(Object.keys(BULK_META) as BulkAction[]).map((action) => {
+              const meta = BULK_META[action];
+              const count = partitionBulkAction(filtered, action).eligible.length;
+              const armed = arming === action;
+              return (
+                <Btn
+                  key={action}
+                  size="sm"
+                  variant={armed ? (meta.danger ? "danger" : "primary") : "subtle"}
+                  disabled={count === 0 || busy}
+                  onClick={() => void runBulk(action)}
+                  title={`${meta.label} the ${count} eligible server${count === 1 ? "" : "s"} shown`}
+                >
+                  <meta.icon size={13} /> {armed ? `Confirm ${meta.label.toLowerCase()} ${count}?` : `${meta.label} ${count > 0 ? count : ""}`}
+                </Btn>
+              );
+            })}
+            {notice && <span className="ml-1 text-[11.5px] font-semibold text-plum-500">{notice}</span>}
+          </div>
+        )}
       </div>
 
       {filtered.length === 0 ? (
