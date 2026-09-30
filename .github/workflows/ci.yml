@@ -23,6 +23,8 @@ jobs:
         # bisectable commit instead of an unannounced change under a release.
         os: [ubuntu-26.04, windows-2025]
     runs-on: ${{ matrix.os }}
+    # A hung suite must fail fast instead of consuming the 6-hour default.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v6
@@ -67,6 +69,7 @@ jobs:
       - run: npm run sbom
   windows-portable:
     runs-on: windows-2025
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v6
@@ -98,3 +101,28 @@ jobs:
             release/SHA256SUMS
             release/release-manifest.json
             release/serverhub-*-sbom.cdx.json
+  # Cheap documentation and workflow hygiene: Markdown relative links and
+  # anchors must resolve, workflow YAML must parse, and shell scripts must
+  # pass a syntax check. These were previously manual pre-push steps only.
+  docs:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+      - name: Check Markdown relative links and anchors
+        run: node scripts/check-docs.mjs
+      - name: Validate workflow YAML
+        run: |
+          for f in .github/workflows/*.yml .github/dependabot.yml; do
+            npx --yes js-yaml@4 "$f" > /dev/null
+            echo "parsed: $f"
+          done
+      - name: Shell script syntax check
+        run: |
+          git ls-files '*.sh' | while IFS= read -r f; do
+            bash -n "$f"
+            echo "syntax ok: $f"
+          done
