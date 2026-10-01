@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.39.0] - 2026-10-01
+
+### Added
+- Activity digest: an optional daily or weekly summary of your whole fleet, delivered to your notification webhook at a local hour you choose (weekly digests go out on Mondays). Each digest covers uptime percentage, unique players and peak concurrency, total playtime, backup successes and failures, crashes, guardrail trips, and pending game updates — per server and as fleet totals. Configure it in Settings → Notifications, where a "Send digest now" button delivers one immediately. If the panel was off at send time, the digest catches up on the next sweep.
+
 ## [2.38.0] - 2026-10-01
 
 ### Added
@@ -230,7 +235,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.38.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.39.0...HEAD
+[2.39.0]: https://github.com/A4rk4n/ServerHub/compare/v2.38.0...v2.39.0
 [2.38.0]: https://github.com/A4rk4n/ServerHub/compare/v2.37.0...v2.38.0
 [2.37.0]: https://github.com/A4rk4n/ServerHub/compare/v2.36.0...v2.37.0
 [2.36.0]: https://github.com/A4rk4n/ServerHub/compare/v2.35.0...v2.36.0
