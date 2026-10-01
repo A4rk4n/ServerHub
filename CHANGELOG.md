@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.40.0] - 2026-10-01
+
+### Added
+- Server export bundles: pack any server into a portable `.tar.gz` from the Backups page — all files plus a manifest recording the game, version, and launch settings, protected by a verification checksum. Passwords are never included. Extract the bundle anywhere and the Import flow recognizes it: the manifest is read back automatically so the game and settings are prefilled, making export/import a true round trip between machines.
+
 ## [2.39.0] - 2026-10-01
 
 ### Added
@@ -235,7 +240,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.39.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.40.0...HEAD
+[2.40.0]: https://github.com/A4rk4n/ServerHub/compare/v2.39.0...v2.40.0
 [2.39.0]: https://github.com/A4rk4n/ServerHub/compare/v2.38.0...v2.39.0
 [2.38.0]: https://github.com/A4rk4n/ServerHub/compare/v2.37.0...v2.38.0
 [2.37.0]: https://github.com/A4rk4n/ServerHub/compare/v2.36.0...v2.37.0
