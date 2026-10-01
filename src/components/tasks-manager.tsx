@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, DatabaseBackup, DownloadCloud, Megaphone, Pencil, Play, Plus, RotateCw, Terminal, Trash2, Wrench } from "lucide-react";
+import { CalendarClock, DatabaseBackup, DownloadCloud, ListChecks, Megaphone, Pencil, Play, Plus, RotateCw, Terminal, Trash2, Wrench } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Task, TaskRun } from "@/db/schema";
 import { cn, hexA, timeAgo } from "@/lib/format";
@@ -14,6 +14,7 @@ const TYPE_META: Record<string, { label: string; icon: React.ComponentType<{ siz
   prune: { label: "Prune backups", icon: Trash2, color: "#f97316", hint: "Applies the backup retention limits" },
   command: { label: "Command", icon: Terminal, color: "#c084fc", hint: "Runs a console command" },
   broadcast: { label: "Broadcast", icon: Megaphone, color: "#4ade80", hint: "Sends a message to chat" },
+  macro: { label: "Macro", icon: ListChecks, color: "#818cf8", hint: "Runs a saved command sequence" },
 };
 
 const INTERVALS = [
@@ -53,6 +54,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", type: "backup", payload: "", intervalMin: 360, scheduleKind: "interval", scheduledFor: "", scheduleTime: "09:00", scheduleWeekday: 1, missedPolicy: "run" });
+  const [macros, setMacros] = useState<Array<{ id: string; name: string; steps: Array<{ command: string; delaySec: number }> }>>([]);
 
   async function load() {
     try {
@@ -60,6 +62,8 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
       const j = await r.json();
       if (j.tasks) setTasks(j.tasks);
       if (j.runs) setRuns(j.runs);
+      const m = await fetch(`/api/servers/${serverId}/macros`, { cache: "no-store" }).then((res) => res.json());
+      if (m.macros) setMacros(m.macros);
     } catch {}
   }
   useEffect(() => {
@@ -76,7 +80,7 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
       const r = await fetch(editing?`/api/servers/${serverId}/tasks/${editing.id}`:`/api/servers/${serverId}/tasks`, {
         method: editing?"PATCH":"POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({...form,confirmedCommand:form.type==="broadcast"?`say ${form.payload.trim()}`:form.type==="command"?form.payload.trim():""}),
+        body: JSON.stringify({...form,confirmedCommand:form.type==="broadcast"?`say ${form.payload.trim()}`:form.type==="command"?form.payload.trim():form.type==="macro"?(macros.find(m=>m.id===form.payload)?.steps.map(s=>s.command).join("\n")??""):""}),
       });
       const j = await r.json();
       if (!r.ok) return setErr(j.error ?? "Failed");
@@ -222,6 +226,28 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
             </Field>
           )}
           {needsPayload&&form.payload.trim()&&<div className="rounded-xl border border-candy-200 bg-plum-900 p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-candy-200">Exact command preview</p><code className="mt-1 block break-all text-xs text-white">{form.type==="broadcast"?`say ${form.payload.trim()}`:form.payload.trim()}</code></div>}
+          {form.type === "macro" && (
+            <Field label="Macro">
+              {macros.length === 0 ? (
+                <p className="text-xs text-plum-500">No macros yet — create one on the Console tab first.</p>
+              ) : (
+                <select className={inputCls} value={form.payload} onChange={(e) => setForm({ ...form, payload: e.target.value })}>
+                  <option value="">Pick a macro…</option>
+                  {macros.map((m) => (
+                    <option key={m.id} value={m.id} className="bg-white">{m.name} ({m.steps.length} steps)</option>
+                  ))}
+                </select>
+              )}
+            </Field>
+          )}
+          {form.type === "macro" && form.payload && macros.find((m) => m.id === form.payload) && (
+            <div className="rounded-xl border border-candy-200 bg-plum-900 p-3">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-candy-200">Exact commands that will run</p>
+              {macros.find((m) => m.id === form.payload)!.steps.map((s, i) => (
+                <code key={i} className="mt-1 block break-all text-xs text-white">{s.command}{s.delaySec ? <span className="text-candy-200"> · then wait {s.delaySec}s</span> : null}</code>
+              ))}
+            </div>
+          )}
           <Field label="Schedule"><div className="grid grid-cols-2 gap-2"><button className={cn("rounded-xl border p-2 text-xs font-semibold",form.scheduleKind==="interval"?"border-candy-400 bg-candy-50":"border-candy-200")} onClick={()=>setForm({...form,scheduleKind:"interval"})}>Recurring interval</button><button className={cn("rounded-xl border p-2 text-xs font-semibold",form.scheduleKind==="once"?"border-candy-400 bg-candy-50":"border-candy-200")} onClick={()=>setForm({...form,scheduleKind:"once"})}>One-time action</button><button className={cn("rounded-xl border p-2 text-xs font-semibold",form.scheduleKind==="daily"?"border-candy-400 bg-candy-50":"border-candy-200")} onClick={()=>setForm({...form,scheduleKind:"daily"})}>Daily time</button><button className={cn("rounded-xl border p-2 text-xs font-semibold",form.scheduleKind==="weekly"?"border-candy-400 bg-candy-50":"border-candy-200")} onClick={()=>setForm({...form,scheduleKind:"weekly"})}>Weekly time</button></div></Field>
           {form.scheduleKind==="once"?<Field label="Run at"><input className={inputCls} type="datetime-local" value={form.scheduledFor} onChange={event=>setForm({...form,scheduledFor:event.target.value})}/></Field>:form.scheduleKind==="daily"||form.scheduleKind==="weekly"?<div className="grid grid-cols-2 gap-2">{form.scheduleKind==="weekly"&&<Field label="Weekday"><select className={inputCls} value={form.scheduleWeekday} onChange={event=>setForm({...form,scheduleWeekday:Number(event.target.value)})}>{["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"].map((day,index)=><option key={day} value={index}>{day}</option>)}</select></Field>}<Field label="Local time"><input className={inputCls} type="time" value={form.scheduleTime} onChange={event=>setForm({...form,scheduleTime:event.target.value})}/></Field></div>:<Field label="Repeat every">
             <select className={inputCls} value={form.intervalMin} onChange={(e) => setForm({ ...form, intervalMin: Number(e.target.value) })}>

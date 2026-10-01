@@ -14,9 +14,11 @@ import {
   Heart,
   MemoryStick,
   Pause,
+  Pencil,
   Play,
   Search,
   ShieldCheck,
+  Trash2,
   Users,
   Wifi,
   X,
@@ -25,6 +27,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CONSOLE_FILTERS, type ConsoleFilter, consoleSliceFileName, filterConsoleLines, formatConsoleSlice } from "@/lib/console-filter";
 import { clamp, cn, fmtRam, formatClock, initialAvatarHue } from "@/lib/format";
 import { AreaChart, Meter } from "./charts";
+import { Btn, Field, Modal, inputCls } from "./ui";
 
 type LogLine = { id: number; ts: string; level: string; source: string; message: string };
 type OnlineP = { name: string; ping: number; isOp: boolean };
@@ -345,6 +348,7 @@ export function ConsoleView({
             {!cmd && <span className="caret-blink h-4 w-2 rounded-sm bg-candy-300" />}
           </div>
         </div>
+        <MacrosBar serverId={serverId} accent={accent} online={status === "online"} />
       </div>
 
       {/* ------------------------------ vitals rail ------------------------------ */}
@@ -479,6 +483,135 @@ function MiniStat({ icon, label, value }: { icon: React.ReactNode; label: string
     <div className="rounded-2xl bg-candy-50 px-3 py-2">
       <p className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-plum-400">{icon} {label}</p>
       <p className="mt-0.5 truncate font-mono text-[12.5px] font-semibold text-plum-800">{value}</p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Command macros: saved sequences runnable with one click.
+// ---------------------------------------------------------------------------
+
+type MacroRecord = { id: string; name: string; steps: Array<{ command: string; delaySec: number }> };
+
+function MacrosBar({ serverId, accent, online }: { serverId: number; accent: string; online: boolean }) {
+  const [macros, setMacros] = useState<MacroRecord[] | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editing, setEditing] = useState<MacroRecord | null>(null);
+  const [name, setName] = useState("");
+  const [steps, setSteps] = useState<Array<{ command: string; delaySec: number }>>([{ command: "", delaySec: 0 }]);
+  const [running, setRunning] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/servers/${serverId}/macros`, { cache: "no-store" });
+      const j = await r.json();
+      if (j.macros) setMacros(j.macros);
+    } catch {}
+  }, [serverId]);
+  useEffect(() => { void load(); }, [load]);
+
+  function openEditor(macro: MacroRecord | null) {
+    setEditing(macro);
+    setName(macro?.name ?? "");
+    setSteps(macro ? macro.steps.map((s) => ({ ...s })) : [{ command: "", delaySec: 0 }]);
+    setNote("");
+    setEditorOpen(true);
+  }
+
+  async function save() {
+    setBusy(true);
+    setNote("");
+    try {
+      const r = await fetch(editing ? `/api/servers/${serverId}/macros/${editing.id}` : `/api/servers/${serverId}/macros`, {
+        method: editing ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, steps }),
+      });
+      const j = await r.json();
+      if (!r.ok) return setNote(j.error ?? "Could not save the macro");
+      setEditorOpen(false);
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(macro: MacroRecord) {
+    if (!window.confirm(`Delete macro "${macro.name}"?`)) return;
+    await fetch(`/api/servers/${serverId}/macros/${macro.id}`, { method: "DELETE" });
+    await load();
+  }
+
+  async function run(macro: MacroRecord) {
+    const preview = macro.steps.map((s) => s.command).join("\n");
+    if (!window.confirm(`Run macro "${macro.name}"? These exact commands will be sent:\n\n${preview}`)) return;
+    setRunning(macro.id);
+    try {
+      const r = await fetch(`/api/servers/${serverId}/macros/${macro.id}/run`, { method: "POST" });
+      const j = await r.json();
+      if (!r.ok) window.alert(j.error ?? "Macro failed");
+    } finally {
+      setRunning(null);
+    }
+  }
+
+  if (macros === null) return null;
+  return (
+    <div className="panel mt-4 p-4">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="font-display flex items-center gap-2 text-[13px] font-bold text-plum-900">
+          <ChevronRight size={14} style={{ color: accent }} /> Command macros
+        </h3>
+        <Btn size="sm" variant="subtle" onClick={() => openEditor(null)}>New macro</Btn>
+      </div>
+      {macros.length === 0 ? (
+        <p className="text-xs text-plum-500">Save command sequences — like “announce, wait, save, restart” — and fire them with one click or on a schedule from the Tasks tab.</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {macros.map((macro) => (
+            <span key={macro.id} className="inline-flex items-center overflow-hidden rounded-xl border border-candy-200">
+              <button
+                onClick={() => void run(macro)}
+                disabled={!online || running !== null}
+                title={macro.steps.map((s) => s.command).join(" · ")}
+                className={cn("flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold", online ? "text-plum-800 hover:bg-candy-50" : "cursor-not-allowed text-plum-400")}
+              >
+                <Play size={11} style={{ color: accent }} />
+                {running === macro.id ? "Running…" : `${macro.name} (${macro.steps.length})`}
+              </button>
+              <button onClick={() => openEditor(macro)} className="border-l border-candy-200 px-2 py-1.5 text-plum-500 hover:bg-candy-50" title="Edit"><Pencil size={11} /></button>
+              <button onClick={() => void remove(macro)} className="border-l border-candy-200 px-2 py-1.5 text-plum-500 hover:bg-candy-50" title="Delete"><Trash2 size={11} /></button>
+            </span>
+          ))}
+        </div>
+      )}
+      {!online && macros.length > 0 && <p className="mt-2 text-[10px] text-plum-400">Macros run against the live console — start the server to use them.</p>}
+      {editorOpen && (
+        <Modal open={editorOpen} title={editing ? "Edit macro" : "New macro"} onClose={() => setEditorOpen(false)}>
+          <div className="space-y-3">
+            <Field label="Name"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder="Nightly restart warning" /></Field>
+            <Field label="Steps (commands run in order; the pause waits before the next step)">
+              <div className="space-y-2">
+                {steps.map((step, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <input className={cn(inputCls, "flex-1 font-mono")} value={step.command} maxLength={200} placeholder={`Step ${index + 1} — e.g. say Restarting in 30s`} onChange={(e) => setSteps(steps.map((s, i) => (i === index ? { ...s, command: e.target.value } : s)))} />
+                    <input className={cn(inputCls, "w-20")} type="number" min={0} max={120} value={step.delaySec} title="Pause after this step (seconds, 0-120)" onChange={(e) => setSteps(steps.map((s, i) => (i === index ? { ...s, delaySec: Number(e.target.value) } : s)))} />
+                    <button onClick={() => setSteps(steps.filter((_, i) => i !== index))} disabled={steps.length === 1} className="text-plum-400 hover:text-plum-700 disabled:opacity-30"><X size={14} /></button>
+                  </div>
+                ))}
+                {steps.length < 12 && <Btn size="sm" variant="subtle" onClick={() => setSteps([...steps, { command: "", delaySec: 0 }])}>Add step</Btn>}
+              </div>
+            </Field>
+            {note && <p className="text-xs text-red-500">{note}</p>}
+            <div className="flex justify-end gap-2">
+              <Btn variant="subtle" onClick={() => setEditorOpen(false)}>Cancel</Btn>
+              <Btn variant="primary" accent={accent} loading={busy} onClick={() => void save()}>{editing ? "Save changes" : "Create macro"}</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

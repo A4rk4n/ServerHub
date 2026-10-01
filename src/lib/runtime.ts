@@ -33,6 +33,7 @@ import { activity, backups, consoleLogs, incidents, installationEvents, installa
 import type { Backup, InstallationJob, Server } from "@/db/schema";
 import { getGame, type InstallerKind } from "./games";
 import { observationKey, reconcileObservationKeys } from "./player-observations";
+import { findMacro, macroSummary, type Macro } from "./macros";
 import { nextCalendarRun } from "./calendar-schedule";
 import { scheduledCommand } from "./scheduled-actions";
 import { queryA2sInfo, queryA2sPlayers, queryMinecraftStatus } from "./query-protocols";
@@ -1977,6 +1978,27 @@ export async function runCommand(server: Server, raw: string, issuer = "you") {
   return { ok: true };
 }
 
+// Runs a macro's steps in order, honoring per-step pauses. The first
+// failing step aborts the rest — a stopped server never receives the
+// tail of a sequence meant for a running one.
+export async function executeMacro(server: Server, macro: Macro, issuer = "you"): Promise<{ ok: boolean; stepsRun: number; error?: string }> {
+  await logLine(server.id, "system", "Macro", `Running macro "${macro.name}" (${macroSummary(macro)}).`);
+  for (let index = 0; index < macro.steps.length; index++) {
+    const step = macro.steps[index];
+    const result = await runCommand(server, step.command, issuer);
+    if (!result.ok) {
+      const error = `Step ${index + 1} of ${macro.steps.length} failed: ${result.reason ?? "Command failed"}`;
+      await logLine(server.id, "warn", "Macro", `Macro "${macro.name}" aborted. ${error}`);
+      return { ok: false, stepsRun: index, error };
+    }
+    if (step.delaySec > 0 && index < macro.steps.length - 1) {
+      await new Promise((resolve) => setTimeout(resolve, step.delaySec * 1000));
+    }
+  }
+  await act(server.id, "task", `${server.name}: macro "${macro.name}" completed (${macro.steps.length} steps)`);
+  return { ok: true, stepsRun: macro.steps.length };
+}
+
 async function sampleEntry(entry: RuntimeEntry) {
   if (!entry.child.pid || !state.processes.has(entry.server.id)) return;
   const proc = await processUsage(entry.child.pid, entry.sample);
@@ -2319,6 +2341,16 @@ export async function sweepTasks(serverId?: number) {
       else if (task.type === "restart") {
         if (state.processes.has(server.id)) await restartFlow(server.id);
         else await logLine(server.id, "warn", "Scheduler", `Skipped "${task.name}": server is offline.`);
+      } else if (task.type === "macro") {
+        const macro = await findMacro(server.id, task.payload);
+        if (!macro) {
+          await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status: "failed", error: "Macro no longer exists" });
+          await logLine(server.id, "error", "Scheduler", `Scheduled macro failed: the macro referenced by "${task.name}" was deleted.`);
+          continue;
+        }
+        const result = await executeMacro(server, macro, "Scheduler");
+        await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: macro.steps.map((step) => step.command).join(" ; "), status: result.ok ? "succeeded" : "failed", error: result.error ?? "" });
+        if (!result.ok) await logLine(server.id, "error", "Scheduler", `Scheduled macro "${macro.name}" failed: ${result.error}`);
       } else if (task.type === "broadcast" || task.type === "command") {let command="";try{command=scheduledCommand(server.gameId,task.type,task.payload);const result=await runCommand(server,command,"Scheduler");await db.insert(taskRuns).values({taskId:task.id,serverId:server.id,taskName:task.name,type:task.type,command,status:result.ok?"succeeded":"failed",error:result.reason??""});if(!result.ok)throw new Error(result.reason??"Command failed")}catch(error){if(!command)await db.insert(taskRuns).values({taskId:task.id,serverId:server.id,taskName:task.name,type:task.type,command,status:"failed",error:error instanceof Error?error.message:String(error)});await logLine(server.id,"error","Scheduler",`Scheduled action failed: ${error instanceof Error?error.message:String(error)}`);continue}}
       await act(server.id, "task", `Scheduled task "${task.name}" executed`);
     }

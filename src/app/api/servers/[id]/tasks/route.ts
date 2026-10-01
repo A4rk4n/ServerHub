@@ -4,10 +4,11 @@ import { db } from "@/db";
 import { servers, taskRuns, tasks } from "@/db/schema";
 import { nextCalendarRun } from "@/lib/calendar-schedule";
 import { scheduledCommand } from "@/lib/scheduled-actions";
+import { findMacro, macroConfirmation } from "@/lib/macros";
 
 export const dynamic = "force-dynamic";
 
-const TYPES = ["restart", "backup", "prune", "maintenance", "update", "command", "broadcast"];
+const TYPES = ["restart", "backup", "prune", "maintenance", "update", "command", "broadcast", "macro"];
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -28,6 +29,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const type = TYPES.includes(body.type ?? "") ? body.type! : "command";
   if ((type === "command" || type === "broadcast") && !body.payload?.trim()) return NextResponse.json({ error: "This task type needs a payload (command / message)" }, { status: 400 });
   if(type === "command" || type === "broadcast"){let expected:string;try{expected=scheduledCommand(s.gameId,type,body.payload??"")}catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Invalid scheduled action"},{status:400})}if(body.confirmedCommand!==expected)return NextResponse.json({error:"Exact command confirmation does not match",command:expected},{status:409});}
+  if (type === "macro") {
+    const macro = await findMacro(s.id, body.payload?.trim() ?? "");
+    if (!macro) return NextResponse.json({ error: "Pick an existing macro for this server" }, { status: 400 });
+    const expected = macroConfirmation(macro);
+    if (body.confirmedCommand !== expected) return NextResponse.json({ error: "Exact command confirmation does not match", command: expected }, { status: 409 });
+  }
   const missedPolicy=["run","skip","reschedule"].includes(body.missedPolicy??"")?body.missedPolicy!:"run";
   const scheduleKind=["once","daily","weekly"].includes(body.scheduleKind??"")?body.scheduleKind!:"interval";
   const intervalMin = Math.min(10080, Math.max(5, Math.round(Number(body.intervalMin ?? 360))));
