@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.33.0] - 2026-10-01
+
+### Added
+- Backup browser: every completed backup now has a Browse button that lists the files inside the archive without unpacking it. Search the list, preview configuration files as text (server.properties, YAML, JSON, logs and more), download any single file, or restore just one file back into the server directory — perfect for recovering a config you broke without rolling back the whole world. Single-file restore sits behind the same safety gates as a full restore: the server must be stopped and the archive checksum is verified first, and archive paths are strictly validated so a crafted backup can never write outside the server directory.
+
 ## [2.32.0] - 2026-10-01
 
 ### Added
@@ -200,7 +205,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.32.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.33.0...HEAD
+[2.33.0]: https://github.com/A4rk4n/ServerHub/compare/v2.32.0...v2.33.0
 [2.32.0]: https://github.com/A4rk4n/ServerHub/compare/v2.31.0...v2.32.0
 [2.31.0]: https://github.com/A4rk4n/ServerHub/compare/v2.30.0...v2.31.0
 [2.30.0]: https://github.com/A4rk4n/ServerHub/compare/v2.29.0...v2.30.0
