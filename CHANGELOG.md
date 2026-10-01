@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.31.0] - 2026-10-01
+
+### Added
+- Player analytics on the Players tab: a new panel shows unique players, total playtime, peak concurrent players, and average session length over a selectable 7/14/30-day window, plus a daily playtime chart, a busy-hours histogram (which hours of the day your server is actually played), and a top-players leaderboard with live online markers. Powered by the session journal, which now also records joins and leaves observed through the server console (Minecraft Java and Bedrock, Palworld) — previously only Steam query-based games tracked sessions. Open sessions count toward playtime in real time, and all sessions close when the server stops or the panel restarts, so downtime is never counted as playtime.
+
 ## [2.30.0] - 2026-10-01
 
 ### Added
@@ -190,7 +195,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.30.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.31.0...HEAD
+[2.31.0]: https://github.com/A4rk4n/ServerHub/compare/v2.30.0...v2.31.0
 [2.30.0]: https://github.com/A4rk4n/ServerHub/compare/v2.29.0...v2.30.0
 [2.29.0]: https://github.com/A4rk4n/ServerHub/compare/v2.28.2...v2.29.0
 [2.28.2]: https://github.com/A4rk4n/ServerHub/compare/v2.28.1...v2.28.2
