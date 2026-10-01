@@ -78,7 +78,8 @@
     "test:config-editor": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-config-editor.ts",
     "test:roster": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-roster.ts",
     "test:digest": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-digest.ts",
-    "test:server-export": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-server-export.ts"
+    "test:server-export": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-server-export.ts",
+    "test:restart-warnings": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-restart-warnings.ts"
   },
   "dependencies": {
     "clsx": "2.1.1",

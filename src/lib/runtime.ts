@@ -37,6 +37,7 @@ import { observationKey, reconcileObservationKeys } from "./player-observations"
 import { findMacro, macroSummary, type Macro } from "./macros";
 import { listBackupEntries, sanitizeArchiveEntryPath } from "./backup-browser";
 import { powerTaskDecision } from "./power-schedule";
+import { broadcastCommand, countdownPlan, normalizeWarningConfig, warningMessage, type WarningAction, type WarningConfig } from "./restart-warnings";
 import { analyzeCrash } from "./crash-analyzer";
 import { nextCalendarRun } from "./calendar-schedule";
 import { scheduledCommand } from "./scheduled-actions";
@@ -1798,6 +1799,7 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
 }
 
 async function handleExit(entry: RuntimeEntry, code: number | null, signal: NodeJS.Signals | null) {
+  await cancelCountdown(entry.server.id, "the server process exited").catch(() => {});
   const id = entry.server.id;
   clearInterval(entry.monitor);
   if (state.processes.get(id) === entry) state.processes.delete(id);
@@ -1898,8 +1900,86 @@ export async function cancelPendingRestart(id: number, reason = "Panel") {
   return true;
 }
 
+// ---- restart countdown warnings ------------------------------------------
+
+const countdowns = new Map<number, { action: WarningAction; timers: NodeJS.Timeout[]; endsAt: number; label: string }>();
+
+function warningConfigFile() { return path.join(appDataDir(), "restart-warnings.json"); }
+
+export async function readWarningConfigFor(serverId: number): Promise<WarningConfig> {
+  try {
+    const raw = JSON.parse(await fsp.readFile(warningConfigFile(), "utf8")) as Record<string, unknown>;
+    return normalizeWarningConfig(raw[String(serverId)]);
+  } catch { return normalizeWarningConfig(undefined); }
+}
+
+export async function writeWarningConfigFor(serverId: number, config: WarningConfig): Promise<void> {
+  let all: Record<string, unknown> = {};
+  try { all = JSON.parse(await fsp.readFile(warningConfigFile(), "utf8")) as Record<string, unknown>; } catch { /* fresh file */ }
+  all[String(serverId)] = config;
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(warningConfigFile(), JSON.stringify(all, null, 2), "utf8");
+}
+
+export function getCountdown(serverId: number): { active: boolean; action?: WarningAction; endsAt?: string; label?: string } {
+  const pending = countdowns.get(serverId);
+  return pending ? { active: true, action: pending.action, endsAt: new Date(pending.endsAt).toISOString(), label: pending.label } : { active: false };
+}
+
+export async function cancelCountdown(serverId: number, reason = ""): Promise<boolean> {
+  const pending = countdowns.get(serverId);
+  if (!pending) return false;
+  for (const timer of pending.timers) clearTimeout(timer);
+  countdowns.delete(serverId);
+  await logLine(serverId, "system", "Scheduler", `Restart countdown cancelled${reason ? `: ${reason}` : "."}`).catch(() => {});
+  return true;
+}
+
+/**
+ * Scheduled stop/restart with player warnings. Runs the action immediately
+ * when warnings are disabled, the server is offline, or the game has no
+ * broadcast channel; otherwise broadcasts the countdown and performs the
+ * action when it reaches zero.
+ */
+export async function warnedPower(serverId: number, action: WarningAction, label: string): Promise<{ ok: boolean; mode: "immediate" | "countdown"; seconds?: number; reason?: string }> {
+  await ensureRuntimeInitialized();
+  const entry = state.processes.get(serverId);
+  const immediate = async () => {
+    const result = action === "stop" ? await stopFlow(serverId, "Scheduler") : await restartFlow(serverId);
+    return { ok: result.ok, mode: "immediate" as const, reason: result.reason };
+  };
+  if (!entry || entry.stopping) return immediate();
+  const config = await readWarningConfigFor(serverId);
+  if (!config.enabled || !broadcastCommand(entry.server.gameId, config.template, "x")) return immediate();
+  if (countdowns.has(serverId)) return { ok: false, mode: "countdown", reason: "A shutdown countdown is already running" };
+  const plan = countdownPlan(config.intervalsSec, Date.now());
+  const timers: NodeJS.Timeout[] = [];
+  for (const step of plan.steps) {
+    const fire = () => {
+      const current = state.processes.get(serverId);
+      if (!current || !countdowns.has(serverId)) return;
+      const command = broadcastCommand(current.server.gameId, config.template, warningMessage(action, step.secondsLeft));
+      if (command) void runCommand(current.server, command, "Scheduler").catch(() => {});
+    };
+    const delay = step.atMs - Date.now();
+    if (delay <= 0) fire();
+    else timers.push(setTimeout(fire, delay));
+  }
+  timers.push(setTimeout(() => {
+    void (async () => {
+      countdowns.delete(serverId);
+      const result = action === "stop" ? await stopFlow(serverId, "Scheduler") : await restartFlow(serverId);
+      if (!result.ok) await logLine(serverId, "error", "Scheduler", `Countdown ${action} failed: ${result.reason ?? "unknown error"}`);
+    })().catch(() => {});
+  }, plan.actionAtMs - Date.now()));
+  countdowns.set(serverId, { action, timers, endsAt: plan.actionAtMs, label });
+  await logLine(serverId, "system", "Scheduler", `${action === "stop" ? "Shutdown" : "Restart"} countdown started by "${label}": ${plan.totalSec} seconds, warnings at ${config.intervalsSec.join("s, ")}s.`);
+  return { ok: true, mode: "countdown", seconds: plan.totalSec };
+}
+
 export async function stopFlow(id: number, reason = "Panel"): Promise<{ ok: boolean; reason?: string }> {
   await ensureRuntimeInitialized();
+  await cancelCountdown(id, reason === "Scheduler" ? "" : `superseded by ${reason} stop`).catch(() => {});
   if (await cancelPendingRestart(id, reason)) return { ok: true };
   const entry = state.processes.get(id);
   if (!entry) {
@@ -2480,7 +2560,10 @@ export async function sweepTasks(serverId?: number) {
         }
       }
       else if (task.type === "restart") {
-        if (state.processes.has(server.id)) await restartFlow(server.id);
+        if (state.processes.has(server.id)) {
+          const warned = await warnedPower(server.id, "restart", task.name);
+          await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status: warned.ok ? (warned.mode === "countdown" ? "countdown-started" : "succeeded") : "failed", error: warned.reason ?? "" });
+        }
         else await logLine(server.id, "warn", "Scheduler", `Skipped "${task.name}": server is offline.`);
       } else if (task.type === "start" || task.type === "stop") {
         const decision = powerTaskDecision(task.type, state.processes.has(server.id), state.processes.get(server.id)?.stopping ?? false);
@@ -2488,8 +2571,9 @@ export async function sweepTasks(serverId?: number) {
           await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status: "skipped", error: decision.reason });
           await logLine(server.id, "system", "Scheduler", `Skipped "${task.name}": ${decision.reason}.`);
         } else {
-          const result = task.type === "start" ? await startFlow(server.id) : await stopFlow(server.id, "Scheduler");
-          await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status: result.ok ? "succeeded" : "failed", error: result.reason ?? "" });
+          const result = task.type === "start" ? await startFlow(server.id) : await warnedPower(server.id, "stop", task.name);
+          const status = result.ok ? ("mode" in result && result.mode === "countdown" ? "countdown-started" : "succeeded") : "failed";
+          await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status, error: result.reason ?? "" });
           if (!result.ok) await logLine(server.id, "error", "Scheduler", `Scheduled ${task.type} failed: ${result.reason ?? "unknown error"}`);
         }
       } else if (task.type === "macro") {

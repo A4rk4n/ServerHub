@@ -44,9 +44,12 @@ test("the scheduler executes power tasks through the real flows and records hist
   const branch = runtime.slice(runtime.indexOf('task.type === "start" || task.type === "stop"'));
   assert.ok(branch.includes("powerTaskDecision"), "skip semantics come from the pure decision");
   assert.ok(branch.includes("await startFlow(server.id)"), "scheduled starts use the validated start flow");
-  assert.ok(branch.includes('await stopFlow(server.id, "Scheduler")'), "scheduled stops are attributed to the scheduler");
+  // Since v2.41 scheduled stops route through the countdown-aware wrapper,
+  // which still performs the real stopFlow attributed to the scheduler.
+  assert.ok(branch.includes('warnedPower(server.id, "stop", task.name)'), "scheduled stops go through the warned power wrapper");
+  assert.ok(/warnedPower[\s\S]{0,900}stopFlow\(serverId, "Scheduler"\)/.test(runtime), "the wrapper's stop is attributed to the scheduler");
   assert.ok(branch.includes('status: "skipped", error: decision.reason'), "skips land in task history with the reason");
-  assert.ok(branch.includes('status: result.ok ? "succeeded" : "failed"'), "real runs record their outcome");
+  assert.ok(branch.includes('"countdown-started" : "succeeded"') && branch.includes(': "failed"'), "real runs record their outcome, including countdowns");
 });
 
 test("the API and UI offer the new types and the power-window helper", () => {
