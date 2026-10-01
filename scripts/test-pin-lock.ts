@@ -85,10 +85,10 @@ test("the config persists at 0600, corrupt files fail closed to disabled", async
 });
 
 test("exempt paths keep the lock screen and launcher reachable; everything else is gated", () => {
-  for (const open of ["/lock", "/api/security/pin/unlock", "/api/security/pin/status", "/api/health", "/_next/whatever", "/favicon.ico"]) {
+  for (const open of ["/lock", "/api/security/pin/unlock", "/api/security/pin/status", "/api/health", "/_next/whatever", "/favicon.ico", "/status", "/api/status"]) {
     assert.ok(pinExemptPath(open), `${open} stays reachable while locked`);
   }
-  for (const gated of ["/", "/servers/1", "/tools", "/api/servers", "/api/security/pin", "/api/servers/1/backups"]) {
+  for (const gated of ["/", "/servers/1", "/tools", "/api/servers", "/api/security/pin", "/api/servers/1/backups", "/api/status-page", "/status-admin"]) {
     assert.ok(!pinExemptPath(gated), `${gated} is gated`);
   }
 });

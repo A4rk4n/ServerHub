@@ -82,7 +82,8 @@
     "test:restart-warnings": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-restart-warnings.ts",
     "test:console-search": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-console-search.ts",
     "test:backup-mirror": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-backup-mirror.ts",
-    "test:disk-usage": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-disk-usage.ts"
+    "test:disk-usage": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-disk-usage.ts",
+    "test:status-page": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-status-page.ts"
   },
   "dependencies": {
     "clsx": "2.1.1",

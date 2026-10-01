@@ -138,6 +138,11 @@ export function pinExemptPath(pathname: string): boolean {
     pathname.startsWith("/api/security/pin/status") ||
     pathname.startsWith("/api/security/pin/unlock") ||
     pathname.startsWith("/api/health") ||
+    // The public status page is guarded by its own bearer token, never by
+    // the PIN. Exact matches only — /api/status-page (the admin settings
+    // route) stays behind the lock.
+    pathname === "/status" ||
+    pathname === "/api/status" ||
     pathname.startsWith("/_next/") ||
     pathname === "/favicon.ico"
   );

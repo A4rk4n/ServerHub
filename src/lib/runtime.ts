@@ -38,6 +38,7 @@ import { findMacro, macroSummary, type Macro } from "./macros";
 import { listBackupEntries, sanitizeArchiveEntryPath } from "./backup-browser";
 import { MIRROR_ARCHIVE_PATTERN, formatMirrorNote, mirrorRelativePath, normalizeMirrorConfig, normalizeMirrorState, planMirrorSync, summarizeMirrorHealth, type MirrorConfig, type MirrorState } from "./backup-mirror";
 import { MAX_SCAN_ENTRIES, buildUsageReport, cleanupHints, computeGrowth, normalizeUsageHistory, recordUsageSnapshot, type UsageFile, type UsageGrowth, type UsageReport } from "./disk-usage";
+import { buildStatusSnapshot, normalizeStatusConfig, type StatusPageConfig, type StatusSnapshot } from "./status-page";
 import { powerTaskDecision } from "./power-schedule";
 import { broadcastCommand, countdownPlan, normalizeWarningConfig, warningMessage, type WarningAction, type WarningConfig } from "./restart-warnings";
 import { analyzeCrash } from "./crash-analyzer";
@@ -2493,6 +2494,46 @@ export async function scanServerDiskUsage(serverId: number): Promise<DiskUsageRe
     crashReportCount: files.filter((file) => /^(crash-reports|crashes)\//i.test(file.path)).length,
   });
   return { report, backups: { count: backupsCount, bytes: backupsBytes }, growth, hints, scannedAt: now.toISOString() };
+}
+
+// ---------------------------------------------------------------------------
+// Public status page — token-guarded, read-only
+// ---------------------------------------------------------------------------
+
+function statusPageConfigFile() { return path.join(appDataDir(), "status-page.json"); }
+
+export async function readStatusPageConfig(): Promise<StatusPageConfig> {
+  try { return normalizeStatusConfig(JSON.parse(await fsp.readFile(statusPageConfigFile(), "utf8"))); }
+  catch { return normalizeStatusConfig(undefined); }
+}
+
+/** The token is a capability — the file is written with owner-only permissions, like webhooks. */
+export async function writeStatusPageConfig(config: StatusPageConfig): Promise<void> {
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(statusPageConfigFile(), JSON.stringify(config, null, 2), { encoding: "utf8", mode: 0o600 });
+}
+
+/** Whitelisted public snapshot of the fleet: names, games, versions, up/down, player counts, uptime. */
+export async function getPublicStatusSnapshot(): Promise<StatusSnapshot> {
+  await ensureRuntimeInitialized();
+  const config = await readStatusPageConfig();
+  const fleet = await db.select().from(servers);
+  const online = await db.select({ serverId: players.serverId, count: sql<number>`count(*)` })
+    .from(players).where(eq(players.isOnline, true)).groupBy(players.serverId);
+  const onlineBy = new Map(online.map((row) => [row.serverId, Number(row.count)]));
+  return buildStatusSnapshot(
+    config.title,
+    fleet.map((server) => ({
+      name: server.name,
+      gameName: getGame(server.gameId).name,
+      version: server.version,
+      loader: server.loader,
+      status: server.status,
+      maxPlayers: server.maxPlayers,
+      onlineCount: onlineBy.get(server.id) ?? 0,
+      lastStartedAt: server.lastStartedAt,
+    }))
+  );
 }
 
 export async function restoreBackup(serverId: number, backupId: number) {

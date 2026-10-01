@@ -12,10 +12,13 @@ type FleetItem = { id: number; name: string; status: string; game: { accent: str
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  // The public status page is shared with visitors — no panel chrome, no fleet polling.
+  const bare = pathname === "/status";
   const [fleet, setFleet] = useState<FleetItem[]>([]);
   const update = useUpdateCheck();
 
   useEffect(() => {
+    if (bare) return;
     let dead = false;
     const load = async () => {
       try {
@@ -30,7 +33,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
       dead = true;
       clearInterval(t);
     };
-  }, [pathname]);
+  }, [pathname, bare]);
+
+  if (bare) return <>{children}</>;
 
   const NAV = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
