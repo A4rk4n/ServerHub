@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.46.0] - 2026-10-01
+
+### Added
+
+- Audit trail: a new page (with nav entry) showing everything that happened
+  across the fleet in one newest-first timeline — power actions, file edits
+  with their safety-copy references, backups and export bundles, roster and
+  moderation changes, task runs, and PIN unlock attempts — merged from the
+  activity log, task runs, and moderation actions with per-category icons.
+- Filters that compose: category chips
+  (power/files/backups/roster/tasks/security/other), server, free-text
+  search across summary, detail, and server name, a date range, and
+  offset-based *Load older events* paging (`GET /api/audit`).
+- CSV export of the filtered timeline — RFC-4180 quoting, CRLF line ends,
+  stamped file name, capped at 10,000 rows (`GET /api/audit/export`).
+- PIN unlock attempts are now recorded as panel-level security events:
+  success, failure with attempts left, throttle trips, and attempts made
+  while throttled — best-effort, never able to break an unlock. File-save
+  activity now carries the safety-copy name.
+- `scripts/test-audit-trail.ts`: 5 tests covering categorization, source
+  merging, filters, pagination, and CSV shape (`AUDIT_TRAIL_SUITE_OK`).
+
 ## [2.45.0] - 2026-10-01
 
 ### Added
@@ -324,7 +346,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.45.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.46.0...HEAD
+[2.46.0]: https://github.com/A4rk4n/ServerHub/compare/v2.45.0...v2.46.0
 [2.45.0]: https://github.com/A4rk4n/ServerHub/compare/v2.44.0...v2.45.0
 [2.44.0]: https://github.com/A4rk4n/ServerHub/compare/v2.43.0...v2.44.0
 [2.43.0]: https://github.com/A4rk4n/ServerHub/compare/v2.42.0...v2.43.0
