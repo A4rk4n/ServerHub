@@ -165,6 +165,7 @@ async function initializeRuntime() {
       await logLine(server.id, "warn", "Installer", "A legacy installation was interrupted. Retry installation to create a recoverable job.");
     }
     await db.update(players).set({ isOnline: false }).where(eq(players.serverId, server.id));
+    await closeAllSessions(server.id).catch(() => {});
   }
   scheduleInstallPump();
 
@@ -263,7 +264,39 @@ async function parsePlayerLine(server: Server, line: string) {
     const names = list[1].split(",").map((name) => name.trim()).filter(Boolean);
     await db.update(players).set({ isOnline: false }).where(eq(players.serverId, server.id));
     for (const name of names) await upsertPlayer(server.id, name, true);
+    // Close console sessions for anyone the authoritative list no longer shows.
+    const listedKeys = new Set(names.map((name) => observationKey("console", name)));
+    const open = await db.select().from(playerSessions).where(and(eq(playerSessions.serverId, server.id), eq(playerSessions.provider, "console"), isNull(playerSessions.leftAt)));
+    for (const session of open.filter((item) => !listedKeys.has(item.observationKey))) await closeSession(session, new Date());
   }
+}
+
+// ---- player session journal (console-observed providers) -----------------
+
+async function closeSession(session: typeof playerSessions.$inferSelect, now: Date) {
+  const joined = session.joinedAt?.getTime() ?? now.getTime();
+  await db
+    .update(playerSessions)
+    .set({ leftAt: now, durationSec: Math.max(session.durationSec, Math.round((now.getTime() - joined) / 1000)) })
+    .where(eq(playerSessions.id, session.id));
+}
+
+async function syncConsoleSession(serverId: number, name: string, online: boolean) {
+  const key = observationKey("console", name);
+  const [open] = await db.select().from(playerSessions).where(and(eq(playerSessions.serverId, serverId), eq(playerSessions.observationKey, key), isNull(playerSessions.leftAt)));
+  if (online && !open) {
+    await db.insert(playerSessions).values({ serverId, provider: "console", observationKey: key, displayName: name.slice(0, 100), joinedAt: new Date() });
+  } else if (!online && open) {
+    await closeSession(open, new Date());
+  }
+}
+
+// When a server process ends (or the runtime restarts), nobody is online:
+// every open session closes so playtime never counts downtime.
+async function closeAllSessions(serverId: number) {
+  const now = new Date();
+  const open = await db.select().from(playerSessions).where(and(eq(playerSessions.serverId, serverId), isNull(playerSessions.leftAt)));
+  for (const session of open) await closeSession(session, now);
 }
 
 async function upsertPlayer(serverId: number, name: string, online: boolean) {
@@ -279,6 +312,7 @@ async function upsertPlayer(serverId: number, name: string, online: boolean) {
       ping: 0,
     });
   }
+  await syncConsoleSession(serverId, name, online);
 }
 
 // ---------------------------------------------------------------------------
@@ -1765,6 +1799,7 @@ async function handleExit(entry: RuntimeEntry, code: number | null, signal: Node
   guardrailStates.delete(id);
   void flushMetricsHistory(id);
   await db.update(players).set({ isOnline: false }).where(eq(players.serverId, id)).catch(() => {});
+  await closeAllSessions(id).catch(() => {});
   const expected = entry.stopping;
   await setStatus(id, expected ? "offline" : "crashed").catch(() => {});
   await logLine(id, expected ? "system" : "error", "Runtime", `Process exited (code ${code ?? "none"}, signal ${signal ?? "none"}).`).catch(() => {});
