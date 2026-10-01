@@ -8,7 +8,7 @@ import { findMacro, macroConfirmation } from "@/lib/macros";
 
 export const dynamic = "force-dynamic";
 
-const TYPES = ["restart", "backup", "prune", "maintenance", "update", "command", "broadcast", "macro"];
+const TYPES = ["restart", "backup", "prune", "maintenance", "update", "command", "broadcast", "macro", "start", "stop"];
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;

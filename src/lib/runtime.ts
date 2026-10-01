@@ -35,6 +35,7 @@ import { getGame, type InstallerKind } from "./games";
 import { observationKey, reconcileObservationKeys } from "./player-observations";
 import { findMacro, macroSummary, type Macro } from "./macros";
 import { listBackupEntries, sanitizeArchiveEntryPath } from "./backup-browser";
+import { powerTaskDecision } from "./power-schedule";
 import { nextCalendarRun } from "./calendar-schedule";
 import { scheduledCommand } from "./scheduled-actions";
 import { queryA2sInfo, queryA2sPlayers, queryMinecraftStatus } from "./query-protocols";
@@ -2374,6 +2375,16 @@ export async function sweepTasks(serverId?: number) {
       else if (task.type === "restart") {
         if (state.processes.has(server.id)) await restartFlow(server.id);
         else await logLine(server.id, "warn", "Scheduler", `Skipped "${task.name}": server is offline.`);
+      } else if (task.type === "start" || task.type === "stop") {
+        const decision = powerTaskDecision(task.type, state.processes.has(server.id), state.processes.get(server.id)?.stopping ?? false);
+        if (decision.action === "skip") {
+          await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status: "skipped", error: decision.reason });
+          await logLine(server.id, "system", "Scheduler", `Skipped "${task.name}": ${decision.reason}.`);
+        } else {
+          const result = task.type === "start" ? await startFlow(server.id) : await stopFlow(server.id, "Scheduler");
+          await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status: result.ok ? "succeeded" : "failed", error: result.reason ?? "" });
+          if (!result.ok) await logLine(server.id, "error", "Scheduler", `Scheduled ${task.type} failed: ${result.reason ?? "unknown error"}`);
+        }
       } else if (task.type === "macro") {
         const macro = await findMacro(server.id, task.payload);
         if (!macro) {

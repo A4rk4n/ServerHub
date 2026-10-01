@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, DatabaseBackup, DownloadCloud, ListChecks, Megaphone, Pencil, Play, Plus, RotateCw, Terminal, Trash2, Wrench } from "lucide-react";
+import { CalendarClock, DatabaseBackup, DownloadCloud, ListChecks, Megaphone, Pencil, Play, Plus, Power, RotateCw, Terminal, Timer, Trash2, Wrench } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Task, TaskRun } from "@/db/schema";
 import { cn, hexA, timeAgo } from "@/lib/format";
@@ -15,6 +15,8 @@ const TYPE_META: Record<string, { label: string; icon: React.ComponentType<{ siz
   command: { label: "Command", icon: Terminal, color: "#c084fc", hint: "Runs a console command" },
   broadcast: { label: "Broadcast", icon: Megaphone, color: "#4ade80", hint: "Sends a message to chat" },
   macro: { label: "Macro", icon: ListChecks, color: "#818cf8", hint: "Runs a saved command sequence" },
+  start: { label: "Start server", icon: Play, color: "#22c55e", hint: "Starts the server if it is offline" },
+  stop: { label: "Stop server", icon: Power, color: "#ef4444", hint: "Stops the server gracefully if it is running" },
 };
 
 const INTERVALS = [
@@ -55,6 +57,30 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
   const [err, setErr] = useState<string | null>(null);
   const [form, setForm] = useState({ name: "", type: "backup", payload: "", intervalMin: 360, scheduleKind: "interval", scheduledFor: "", scheduleTime: "09:00", scheduleWeekday: 1, missedPolicy: "run" });
   const [macros, setMacros] = useState<Array<{ id: string; name: string; steps: Array<{ command: string; delaySec: number }> }>>([]);
+  const [windowOpen, setWindowOpen] = useState(false);
+  const [windowStart, setWindowStart] = useState("15:00");
+  const [windowStop, setWindowStop] = useState("23:00");
+  const [windowErr, setWindowErr] = useState("");
+
+  async function createWindow() {
+    setWindowErr("");
+    if (!windowStart || !windowStop) return setWindowErr("Pick both times.");
+    if (windowStart === windowStop) return setWindowErr("Start and stop times must differ.");
+    setBusy(true);
+    try {
+      for (const task of [
+        { name: `Power on at ${windowStart}`, type: "start", scheduleKind: "daily", scheduleTime: windowStart, missedPolicy: "run" },
+        { name: `Power off at ${windowStop}`, type: "stop", scheduleKind: "daily", scheduleTime: windowStop, missedPolicy: "run" },
+      ]) {
+        const r = await fetch(`/api/servers/${serverId}/tasks`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...task, payload: "", confirmedCommand: "" }) });
+        if (!r.ok) { const j = await r.json(); return setWindowErr(j.error ?? "Could not create the power window"); }
+      }
+      setWindowOpen(false);
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function load() {
     try {
@@ -133,10 +159,26 @@ export function TasksManager({ serverId, accent }: { serverId: number; accent: s
           <p className="font-display text-[15px] font-semibold text-plum-900">Scheduler</p>
           <p className="text-[12px] text-plum-500">{tasks.filter((t) => t.enabled).length} active · runs even while you sleep</p>
         </div>
+        <Btn variant="subtle" onClick={() => setWindowOpen(true)} title="Create a daily start/stop pair so the server only runs while people play">
+          <Timer size={14} /> Power window
+        </Btn>
         <Btn variant="primary" accent={accent} onClick={() => {setEditing(null);setOpen(true)}}>
           <Plus size={15} /> New task
         </Btn>
       </div>
+
+      <Modal open={windowOpen} onClose={() => setWindowOpen(false)} title="Daily power window">
+        <p className="text-[13px] text-plum-500">Creates two daily tasks: start the server at the first time, stop it at the second. Overnight windows (stop after midnight) work too.</p>
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <Field label="Start at"><input className={inputCls} type="time" value={windowStart} onChange={(e) => setWindowStart(e.target.value)} /></Field>
+          <Field label="Stop at"><input className={inputCls} type="time" value={windowStop} onChange={(e) => setWindowStop(e.target.value)} /></Field>
+        </div>
+        {windowErr && <p className="mt-3 text-xs text-red-500">{windowErr}</p>}
+        <div className="mt-5 flex justify-end gap-2">
+          <Btn variant="ghost" onClick={() => setWindowOpen(false)}>Cancel</Btn>
+          <Btn variant="primary" accent={accent} loading={busy} onClick={() => void createWindow()}><Timer size={14} /> Create both tasks</Btn>
+        </div>
+      </Modal>
 
       {tasks.length === 0 ? (
         <Empty icon={<CalendarClock size={22} />} title="Nothing scheduled" hint="Automate restarts, backups and announcements on a repeating interval." />
