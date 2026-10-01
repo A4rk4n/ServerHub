@@ -74,7 +74,8 @@
     "test:update-validation": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-update-validation.ts",
     "test:maintenance-lifecycle": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-maintenance-lifecycle.ts",
     "test:manual-update-rollback": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-manual-update-rollback.ts",
-    "test:update-recovery": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-update-recovery.ts"
+    "test:update-recovery": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-update-recovery.ts",
+    "test:config-editor": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-config-editor.ts"
   },
   "dependencies": {
     "clsx": "2.1.1",

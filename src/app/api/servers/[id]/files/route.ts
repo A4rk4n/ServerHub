@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { servers } from "@/db/schema";
+import { detectConfigFormat, validateConfig } from "@/lib/config-editor";
 import { buildTree, readServerFile, writeServerFile } from "@/lib/filesys";
 import { act, logLine } from "@/lib/runtime";
 
@@ -30,13 +31,24 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
   const { id } = await ctx.params;
   const server = await loadServer(id);
   if (!server) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const body = (await req.json()) as { path?: string; content?: string };
+  const body = (await req.json()) as { path?: string; content?: string; force?: boolean };
   if (!body.path || typeof body.content !== "string") return NextResponse.json({ error: "path and content are required" }, { status: 400 });
   try {
-    await writeServerFile(server, body.path, body.content);
-    await logLine(server.id, "system", "Files", `Wrote ${body.path} (${Buffer.byteLength(body.content, "utf8")} bytes).`);
+    const format = detectConfigFormat(body.path);
+    if (format && !body.force) {
+      const verdict = validateConfig(format, body.content);
+      if (!verdict.ok) {
+        return NextResponse.json(
+          { error: `${format} validation failed${verdict.line ? ` at line ${verdict.line}` : ""}: ${verdict.message}`, line: verdict.line, format },
+          { status: 422 }
+        );
+      }
+    }
+    const { safetyCopy } = await writeServerFile(server, body.path, body.content);
+    const copyNote = safetyCopy ? ` Safety copy: ${safetyCopy}.` : "";
+    await logLine(server.id, "system", "Files", `Wrote ${body.path} (${Buffer.byteLength(body.content, "utf8")} bytes).${copyNote}`);
     await act(server.id, "settings", `File ${body.path} saved on ${server.name}`);
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, format, safetyCopy });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
   }
