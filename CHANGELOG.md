@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.37.0] - 2026-10-01
+
+### Added
+- Config editor upgrades in the file manager: config files (`.properties`, `.yml`/`.yaml`, `.toml`, `.json`) are now validated as you type, with a live badge showing either "valid" or the exact line and problem. Saving a config file opens a review step first — a colored diff of what changed with added/removed counts — and every save of a changed file automatically keeps a timestamped safety copy right next to it (the newest five are retained), so you can always open the previous version and copy it back. Invalid content is blocked with a clear explanation unless you explicitly choose "Save anyway".
+
 ## [2.36.0] - 2026-10-01
 
 ### Added
@@ -220,7 +225,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.36.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.37.0...HEAD
+[2.37.0]: https://github.com/A4rk4n/ServerHub/compare/v2.36.0...v2.37.0
 [2.36.0]: https://github.com/A4rk4n/ServerHub/compare/v2.35.0...v2.36.0
 [2.35.0]: https://github.com/A4rk4n/ServerHub/compare/v2.34.0...v2.35.0
 [2.34.0]: https://github.com/A4rk4n/ServerHub/compare/v2.33.0...v2.34.0
