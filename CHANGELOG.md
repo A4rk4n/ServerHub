@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.36.0] - 2026-10-01
+
+### Added
+- Crash analyzer: when a server crashes, Server Hub now reads the end of the console output and tells you why in plain language — EULA not accepted, out of memory, port already taken, Java version too old, corrupted world data, a failing mod or plugin, a missing launch file, or a full disk — each with a concrete suggested fix (the out-of-memory fix even cites your current memory limit). The diagnosis appears instantly in the console, lands in Diagnostics as an incident with the fix attached, and is included in the crash webhook notification. Crashes that match no known pattern still get a useful summary with the exit code instead of silence.
+
 ## [2.35.0] - 2026-10-01
 
 ### Added
@@ -215,7 +220,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.35.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.36.0...HEAD
+[2.36.0]: https://github.com/A4rk4n/ServerHub/compare/v2.35.0...v2.36.0
 [2.35.0]: https://github.com/A4rk4n/ServerHub/compare/v2.34.0...v2.35.0
 [2.34.0]: https://github.com/A4rk4n/ServerHub/compare/v2.33.0...v2.34.0
 [2.33.0]: https://github.com/A4rk4n/ServerHub/compare/v2.32.0...v2.33.0
