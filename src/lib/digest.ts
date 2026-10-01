@@ -110,13 +110,13 @@ function playtimeLabel(seconds: number): string {
   return hours >= 1 ? `${hours.toFixed(1)}h` : `${Math.round(seconds / 60)}m`;
 }
 
-/** Render the digest. Deterministic; caps rows to stay inside webhook limits. */
-export function formatDigest(cadence: DigestCadence, until: Date, rows: ServerDigestRow[]): { title: string; detail: string } {
+/** Render the digest. Deterministic; caps rows to stay inside webhook limits. `healthNote` (e.g. backup-mirror health) is appended after the totals line when present. */
+export function formatDigest(cadence: DigestCadence, until: Date, rows: ServerDigestRow[], healthNote = ""): { title: string; detail: string } {
   const label = cadence === "daily" ? "Daily" : "Weekly";
   const day = until.toISOString().slice(0, 10);
   const title = `📊 ${label} digest — ${day} — ${rows.length} server${rows.length === 1 ? "" : "s"}`;
   if (rows.length === 0) {
-    return { title, detail: `${title}\nNo servers yet — nothing to report.` };
+    return { title, detail: `${title}\nNo servers yet — nothing to report.${healthNote ? `\n${healthNote}` : ""}` };
   }
   const updatesPending = rows.filter((row) => row.updateAvailable === true).length;
   const totals = [
@@ -140,5 +140,5 @@ export function formatDigest(cadence: DigestCadence, until: Date, rows: ServerDi
     return `• **${row.name}** — ${parts.join(" · ")}`;
   });
   if (rows.length > MAX_DIGEST_ROWS) lines.push(`…and ${rows.length - MAX_DIGEST_ROWS} more server${rows.length - MAX_DIGEST_ROWS === 1 ? "" : "s"}.`);
-  return { title, detail: `${title}\n${totals}\n${lines.join("\n")}` };
+  return { title, detail: `${title}\n${totals}${healthNote ? `\n${healthNote}` : ""}\n${lines.join("\n")}` };
 }

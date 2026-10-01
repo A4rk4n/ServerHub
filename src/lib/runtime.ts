@@ -36,6 +36,7 @@ import { getGame, type InstallerKind } from "./games";
 import { observationKey, reconcileObservationKeys } from "./player-observations";
 import { findMacro, macroSummary, type Macro } from "./macros";
 import { listBackupEntries, sanitizeArchiveEntryPath } from "./backup-browser";
+import { MIRROR_ARCHIVE_PATTERN, formatMirrorNote, mirrorRelativePath, normalizeMirrorConfig, normalizeMirrorState, planMirrorSync, summarizeMirrorHealth, type MirrorConfig, type MirrorState } from "./backup-mirror";
 import { powerTaskDecision } from "./power-schedule";
 import { broadcastCommand, countdownPlan, normalizeWarningConfig, warningMessage, type WarningAction, type WarningConfig } from "./restart-warnings";
 import { analyzeCrash } from "./crash-analyzer";
@@ -2217,6 +2218,7 @@ export async function createBackup(id: number, label?: string, by = "you") {
       await act(id, "backup", `Backup "${name}" completed (${sizeMb} MB)`);
       void notify({ kind: "backup-complete", serverName: server.name, detail: `${name}, ${sizeMb} MB` });
       await applyBackupRetention(id).catch(() => {});
+      await mirrorBackupNow(row.id).catch(() => {});
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await db.update(backups).set({ status: "failed", note: message, archivePath: archive }).where(eq(backups.id, row.id));
@@ -2286,6 +2288,131 @@ export function backupArchivePath(backup: Backup): string {
 
 export async function deleteBackupFile(backup: Backup) {
   await fsp.rm(backupArchivePath(backup), { force: true });
+  // The mirror copy (and its state entry) leaves with the primary.
+  try {
+    const config = await readMirrorConfig();
+    const mirrorState = await readMirrorState();
+    const entry = mirrorState.entries[String(backup.id)];
+    if (entry) {
+      if (config.directory) await fsp.rm(path.join(config.directory, ...entry.file.split("/")), { force: true }).catch(() => {});
+      delete mirrorState.entries[String(backup.id)];
+      await writeMirrorState(mirrorState);
+    }
+  } catch { /* mirror cleanup is best-effort */ }
+}
+
+// ---------------------------------------------------------------------------
+// Backup mirror — checksum-verified secondary destination
+// ---------------------------------------------------------------------------
+
+function mirrorConfigFile() { return path.join(appDataDir(), "backup-mirror.json"); }
+function mirrorStateFile() { return path.join(appDataDir(), "backup-mirror-state.json"); }
+
+export async function readMirrorConfig(): Promise<MirrorConfig> {
+  try { return normalizeMirrorConfig(JSON.parse(await fsp.readFile(mirrorConfigFile(), "utf8"))); }
+  catch { return normalizeMirrorConfig(undefined); }
+}
+
+export async function writeMirrorConfig(config: MirrorConfig): Promise<void> {
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(mirrorConfigFile(), JSON.stringify(config, null, 2), "utf8");
+}
+
+async function readMirrorState(): Promise<MirrorState> {
+  try { return normalizeMirrorState(JSON.parse(await fsp.readFile(mirrorStateFile(), "utf8"))); }
+  catch { return normalizeMirrorState(undefined); }
+}
+
+async function writeMirrorState(mirrorState: MirrorState): Promise<void> {
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(mirrorStateFile(), JSON.stringify(mirrorState, null, 2), "utf8");
+}
+
+/** Relative paths (POSIX separators) of mirror files that match our naming under `server-<id>/`. */
+async function listMirrorFiles(directory: string): Promise<Set<string>> {
+  const found = new Set<string>();
+  const subdirs: import("node:fs").Dirent[] = await fsp.readdir(directory, { withFileTypes: true }).catch(() => []);
+  for (const sub of subdirs) {
+    if (!sub.isDirectory() || !/^server-\d+$/.test(sub.name)) continue;
+    const files: string[] = await fsp.readdir(path.join(directory, sub.name)).catch(() => []);
+    for (const file of files) if (MIRROR_ARCHIVE_PATTERN.test(file)) found.add(`${sub.name}/${file}`);
+  }
+  return found;
+}
+
+/** Copy one completed backup into the mirror; the copy is re-hashed and must match the primary's checksum. */
+export async function mirrorBackupNow(backupId: number): Promise<{ ok: boolean; reason?: string }> {
+  await ensureRuntimeInitialized();
+  const config = await readMirrorConfig();
+  if (!config.enabled) return { ok: false, reason: "The backup mirror is disabled" };
+  const [backup] = await db.select().from(backups).where(eq(backups.id, backupId));
+  if (!backup || backup.status !== "complete") return { ok: false, reason: "Backup not found or not complete" };
+  const [server] = await db.select().from(servers).where(eq(servers.id, backup.serverId));
+  const serverName = server?.name ?? `server ${backup.serverId}`;
+  const primary = backupArchivePath(backup);
+  let rel: string;
+  try { rel = mirrorRelativePath(backup.serverId, path.basename(primary)); }
+  catch (error) { return { ok: false, reason: error instanceof Error ? error.message : String(error) }; }
+  const destination = path.join(config.directory, ...rel.split("/"));
+  const partial = `${destination}.part`;
+  try {
+    const expected = backup.checksum || (await hashFile(primary));
+    await fsp.mkdir(path.dirname(destination), { recursive: true });
+    await fsp.copyFile(primary, partial);
+    const actual = await hashFile(partial);
+    if (actual !== expected) throw new Error(`Checksum mismatch after copy (expected ${expected.slice(0, 12)}…, got ${actual.slice(0, 12)}…)`);
+    await fsp.rename(partial, destination);
+    const mirrorState = await readMirrorState();
+    mirrorState.entries[String(backup.id)] = { status: "mirrored", file: rel, checksum: actual, mirroredAt: new Date().toISOString() };
+    await writeMirrorState(mirrorState);
+    await logLine(backup.serverId, "success", "Backup", `Mirror copy verified: ${rel} (SHA-256 ${actual.slice(0, 12)}…).`);
+    return { ok: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await fsp.rm(partial, { force: true }).catch(() => {});
+    const mirrorState = await readMirrorState();
+    mirrorState.entries[String(backup.id)] = { status: "failed", file: rel, checksum: "", mirroredAt: new Date().toISOString(), error: message };
+    await writeMirrorState(mirrorState);
+    await logLine(backup.serverId, "error", "Backup", `Mirror copy failed: ${message}`);
+    void notify({ kind: "mirror-failed", serverName, detail: message });
+    return { ok: false, reason: message };
+  }
+}
+
+/** Reconcile the whole mirror: copy missing or failed, remove stale copies of pruned backups, drop dead state entries. */
+export async function syncBackupMirror(): Promise<{ ok: boolean; reason?: string; copied: number; failed: number; removedStale: number; upToDate: number }> {
+  await ensureRuntimeInitialized();
+  const config = await readMirrorConfig();
+  if (!config.enabled) return { ok: false, reason: "The backup mirror is disabled", copied: 0, failed: 0, removedStale: 0, upToDate: 0 };
+  await fsp.mkdir(config.directory, { recursive: true });
+  const rows = await db.select().from(backups);
+  const refs = rows.map((row) => ({ id: row.id, serverId: row.serverId, status: row.status, archiveBasename: path.basename(backupArchivePath(row)) }));
+  const plan = planMirrorSync(refs, await readMirrorState(), await listMirrorFiles(config.directory));
+  let copied = 0;
+  let failed = 0;
+  for (const backupId of plan.toCopy) {
+    const result = await mirrorBackupNow(backupId);
+    if (result.ok) copied += 1;
+    else failed += 1;
+  }
+  for (const stale of plan.stale) {
+    await fsp.rm(path.join(config.directory, ...stale.split("/")), { force: true }).catch(() => {});
+  }
+  const alive = new Set(rows.map((row) => String(row.id)));
+  const finalState = await readMirrorState();
+  let dirty = false;
+  for (const key of Object.keys(finalState.entries)) {
+    if (!alive.has(key)) { delete finalState.entries[key]; dirty = true; }
+  }
+  if (dirty) await writeMirrorState(finalState);
+  return { ok: failed === 0, copied, failed, removedStale: plan.stale.length, upToDate: plan.upToDate.length };
+}
+
+/** Configuration plus live health summary, for the API and the activity digest. */
+export async function backupMirrorStatus(): Promise<{ config: MirrorConfig; health: ReturnType<typeof summarizeMirrorHealth> }> {
+  const config = await readMirrorConfig();
+  const rows = await db.select({ id: backups.id, status: backups.status }).from(backups);
+  return { config, health: summarizeMirrorHealth(rows, await readMirrorState()) };
 }
 
 export async function restoreBackup(serverId: number, backupId: number) {
@@ -2431,7 +2558,8 @@ export async function sendActivityDigest(force = false, now = new Date()): Promi
   }
   const window = digestWindow(digest.cadence, now);
   const rows = await collectDigestRows(window.since, window.until);
-  const rendered = formatDigest(digest.cadence, now, rows);
+  const mirror = await backupMirrorStatus().catch(() => null);
+  const rendered = formatDigest(digest.cadence, now, rows, mirror ? formatMirrorNote(mirror.config, mirror.health) : "");
   const delivered = await deliverNotification(config, { kind: "digest", serverName: "Server Hub", detail: rendered.detail });
   if (delivered) await writeDigestState(now.getTime());
   return delivered

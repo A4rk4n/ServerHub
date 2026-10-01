@@ -18,6 +18,7 @@ export type NotificationEventKind =
   | "offline"
   | "backup-complete"
   | "backup-failed"
+  | "mirror-failed"
   | "digest"
   | "test";
 
@@ -40,7 +41,7 @@ export const DEFAULT_NOTIFICATION_CONFIG: NotificationConfig = {
 export function notificationGroup(kind: NotificationEventKind): "status" | "crash" | "backup" | "always" {
   if (kind === "online" || kind === "offline") return "status";
   if (kind === "crash" || kind === "auto-restart" || kind === "restart-limit" || kind === "guardrail") return "crash";
-  if (kind === "backup-complete" || kind === "backup-failed") return "backup";
+  if (kind === "backup-complete" || kind === "backup-failed" || kind === "mirror-failed") return "backup";
   return "always";
 }
 
@@ -77,6 +78,7 @@ const EVENT_TEXT: Record<NotificationEventKind, (name: string, detail: string) =
   offline: (name) => `⏹️ **${name}** stopped.`,
   "backup-complete": (name, detail) => `💾 Backup completed on **${name}**${detail ? ` (${detail})` : ""}.`,
   "backup-failed": (name, detail) => `⚠️ Backup FAILED on **${name}**${detail ? `: ${detail}` : ""}.`,
+  "mirror-failed": (name, detail) => `🪞 Backup mirror FAILED on **${name}**${detail ? `: ${detail}` : ""}.`,
   digest: (_name, detail) => detail,
   test: () => "👋 Test notification — Server Hub webhooks are working.",
 };
