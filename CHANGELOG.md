@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.44.0] - 2026-10-01
+
+### Added
+
+- Disk usage explorer on every server's Files page: a stacked storage
+  breakdown (world / mods & plugins / logs / everything else / backups),
+  the ten biggest files with category badges, 24-hour and 7-day growth
+  computed from daily snapshots (kept 90 days in `disk-usage.json`), and a
+  Rescan button (`GET /api/servers/:id/disk-usage`).
+- Cleanup hints that only fire on real problems: oversized logs,
+  crash-report pileups, many backups with no retention policy, and single
+  giant files — deterministic and capped at four.
+- The directory walk is symlink-free and entry-budgeted (50,000); truncated
+  scans are labeled as lower bounds. Backup sizes are measured from the
+  archives on disk with the database size as fallback.
+- `scripts/test-disk-usage.ts`: 5 tests covering classification, report
+  ranking, snapshot history, growth, and hints (`DISK_USAGE_SUITE_OK`).
+
 ## [2.43.0] - 2026-10-01
 
 ### Added
@@ -282,7 +300,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.43.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.44.0...HEAD
+[2.44.0]: https://github.com/A4rk4n/ServerHub/compare/v2.43.0...v2.44.0
 [2.43.0]: https://github.com/A4rk4n/ServerHub/compare/v2.42.0...v2.43.0
 [2.42.0]: https://github.com/A4rk4n/ServerHub/compare/v2.41.0...v2.42.0
 [2.41.0]: https://github.com/A4rk4n/ServerHub/compare/v2.40.0...v2.41.0
