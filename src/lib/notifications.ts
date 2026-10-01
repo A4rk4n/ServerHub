@@ -18,6 +18,7 @@ export type NotificationEventKind =
   | "offline"
   | "backup-complete"
   | "backup-failed"
+  | "digest"
   | "test";
 
 export type NotificationEvent = { kind: NotificationEventKind; serverName: string; detail?: string };
@@ -25,6 +26,8 @@ export type NotificationEvent = { kind: NotificationEventKind; serverName: strin
 export type NotificationConfig = {
   url: string;
   events: { status: boolean; crash: boolean; backup: boolean };
+  /** Activity digest settings; absent in configs written before v2.39. */
+  digest?: { enabled: boolean; cadence: "daily" | "weekly"; hour: number };
 };
 
 export const DEFAULT_NOTIFICATION_CONFIG: NotificationConfig = {
@@ -74,6 +77,7 @@ const EVENT_TEXT: Record<NotificationEventKind, (name: string, detail: string) =
   offline: (name) => `⏹️ **${name}** stopped.`,
   "backup-complete": (name, detail) => `💾 Backup completed on **${name}**${detail ? ` (${detail})` : ""}.`,
   "backup-failed": (name, detail) => `⚠️ Backup FAILED on **${name}**${detail ? `: ${detail}` : ""}.`,
+  digest: (_name, detail) => detail,
   test: () => "👋 Test notification — Server Hub webhooks are working.",
 };
 
@@ -108,6 +112,9 @@ export async function readNotificationConfig(): Promise<NotificationConfig> {
         crash: raw.events?.crash !== false,
         backup: raw.events?.backup !== false,
       },
+      // Keep pre-v2.39 configs byte-identical on round-trip: only carry the
+      // digest block when the file actually has one.
+      ...(raw.digest !== undefined ? { digest: raw.digest } : {}),
     };
   } catch {
     return structuredClone(DEFAULT_NOTIFICATION_CONFIG);

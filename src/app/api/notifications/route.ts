@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
+import { normalizeDigestConfig } from "@/lib/digest";
 import { readNotificationConfig, validateWebhookUrl, writeNotificationConfig } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json({ config: await readNotificationConfig() });
+  const config = await readNotificationConfig();
+  return NextResponse.json({ config: { ...config, digest: normalizeDigestConfig(config.digest) } });
 }
 
 export async function PUT(request: Request) {
-  let body: { url?: unknown; events?: { status?: unknown; crash?: unknown; backup?: unknown } };
+  let body: { url?: unknown; events?: { status?: unknown; crash?: unknown; backup?: unknown }; digest?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -24,6 +26,7 @@ export async function PUT(request: Request) {
       crash: body.events?.crash !== false,
       backup: body.events?.backup !== false,
     },
+    digest: normalizeDigestConfig(body.digest),
   };
   await writeNotificationConfig(config);
   return NextResponse.json({ config });

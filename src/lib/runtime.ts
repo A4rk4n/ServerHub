@@ -4,10 +4,11 @@ import { catalogVersions } from "./catalog";
 import { appManifestName, compareBuilds, fetchLatestGameBuild, parseAppManifestBuildId, type GameUpdateState } from "./game-updates";
 import { evaluateGuardrail, loadGuardrailsCached, nextGuardrailState, type GuardrailState } from "./guardrails";
 import { FABRIC_INSTALLER_LIST_URL, fabricLoaderListUrl, fabricServerJarUrl, pickFabricInstaller, pickFabricLoader } from "./fabric-meta";
-import { flushMetricsHistory, recordMetricsSample } from "./metrics-history";
+import { flushMetricsHistory, readHistory, recordMetricsSample } from "./metrics-history";
 import { javaMajorForMinecraft } from "./minecraft-java";
 import { palworldGracefulStop, palworldRestPort } from "./palworld-api";
-import { notify } from "./notifications";
+import { deliverNotification, notify, readNotificationConfig } from "./notifications";
+import { DIGEST_WINDOW_MS, aggregateSessions, digestDue, digestWindow, formatDigest, normalizeDigestConfig, uptimePercent, type ServerDigestRow } from "./digest";
 import { hostPlatform } from "./host-platform";
 import { diagnoseInstallationFailure, installationFailureMessage } from "./installation-diagnostics";
 import { waitForManagedExecutableExit } from "./managed-process";
@@ -2275,6 +2276,98 @@ export async function restoreBackupEntry(serverId: number, backupId: number, raw
 
 async function enforceExpiredModeration(){const now=new Date(),pending=await db.select().from(moderationActions).where(and(eq(moderationActions.status,"pending-expiration"),lte(moderationActions.expiresAt,now)));for(const record of pending){if(record.expirationAttempts>=3){await db.update(moderationActions).set({status:"expiration-failed"}).where(eq(moderationActions.id,record.id));continue}const [server]=await db.select().from(servers).where(eq(servers.id,record.serverId));const [player]=await db.select().from(players).where(eq(players.id,record.playerId));if(!server||!player){await db.update(moderationActions).set({status:"expiration-failed"}).where(eq(moderationActions.id,record.id));continue}const command=`pardon ${record.target}`,result=await runCommand(server,command);const attempts=record.expirationAttempts+1;await db.update(moderationActions).set({expirationAttempts:attempts,lastExpirationAttemptAt:now,status:result.ok?"expiration-enforced":attempts>=3?"expiration-failed":"pending-expiration"}).where(eq(moderationActions.id,record.id));await db.insert(moderationActions).values({serverId:server.id,playerId:player.id,action:"automatic-unban",target:record.target,command,reason:`Temporary ban #${record.id} expired`,status:result.ok?"sent":"failed"});if(result.ok)await db.update(players).set({isBanned:false}).where(eq(players.id,player.id));}}
 
+// ---- activity digest ------------------------------------------------------
+
+let lastDigestProbe = 0;
+
+function digestStateFile() { return path.join(appDataDir(), "digest-state.json"); }
+
+async function readDigestState(): Promise<number | null> {
+  try {
+    const raw = JSON.parse(await fsp.readFile(digestStateFile(), "utf8")) as { lastSentAt?: unknown };
+    return typeof raw.lastSentAt === "number" && Number.isFinite(raw.lastSentAt) ? raw.lastSentAt : null;
+  } catch { return null; }
+}
+
+async function writeDigestState(lastSentAt: number): Promise<void> {
+  try { await fsp.writeFile(digestStateFile(), JSON.stringify({ lastSentAt }), "utf8"); } catch { /* best effort */ }
+}
+
+async function collectDigestRows(since: number, until: number): Promise<ServerDigestRow[]> {
+  const fleet = await db.select().from(servers);
+  const rows: ServerDigestRow[] = [];
+  for (const server of fleet) {
+    const buckets = await readHistory(server.id, until - since + 120_000).catch(() => []);
+    const sessions = await db.select().from(playerSessions).where(eq(playerSessions.serverId, server.id));
+    const aggregates = aggregateSessions(
+      sessions.map((session) => ({ name: session.displayName, joinedAt: session.joinedAt?.getTime() ?? until, leftAt: session.leftAt?.getTime() ?? null })),
+      since,
+      until
+    );
+    const snapshots = (await db.select().from(backups).where(eq(backups.serverId, server.id))).filter((b) => {
+      const at = b.createdAt?.getTime() ?? 0;
+      return at >= since && at < until;
+    });
+    const trouble = (await db.select().from(incidents).where(eq(incidents.serverId, server.id))).filter((i) => {
+      const at = i.createdAt?.getTime() ?? 0;
+      return at >= since && at < until;
+    });
+    let updateAvailable: boolean | null = null;
+    const game = getGame(server.gameId);
+    if (game.installer !== "manual") {
+      try {
+        const versions = await Promise.race([
+          catalogVersions(game.id),
+          new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("catalog timeout")), 3000)),
+        ]);
+        const latest = versions.find((item) => item.channel === "stable")?.id ?? null;
+        updateAvailable = latest && latest !== "latest" ? latest !== server.version : null;
+      } catch { updateAvailable = null; }
+    }
+    rows.push({
+      name: server.name,
+      uptimePct: uptimePercent(buckets.map((point) => point.t), since, until),
+      uniquePlayers: aggregates.uniquePlayers,
+      peakConcurrent: aggregates.peakConcurrent,
+      playtimeSec: aggregates.playtimeSec,
+      backupsOk: snapshots.filter((b) => b.status === "complete").length,
+      backupsFailed: snapshots.filter((b) => b.status !== "complete").length,
+      crashes: trouble.filter((i) => i.component === "crash").length,
+      guardrails: trouble.filter((i) => i.component === "guardrail").length,
+      updateAvailable,
+    });
+  }
+  return rows;
+}
+
+export async function sendActivityDigest(force = false, now = new Date()): Promise<{ sent: boolean; reason?: string; title?: string; detail?: string }> {
+  await ensureRuntimeInitialized();
+  const config = await readNotificationConfig();
+  const digest = normalizeDigestConfig(config.digest);
+  if (!config.url) return { sent: false, reason: "No webhook URL is configured" };
+  if (!force) {
+    if (!digest.enabled) return { sent: false, reason: "The activity digest is disabled" };
+    if (!digestDue(digest, await readDigestState(), now)) return { sent: false, reason: "The digest is not due yet" };
+  }
+  const window = digestWindow(digest.cadence, now);
+  const rows = await collectDigestRows(window.since, window.until);
+  const rendered = formatDigest(digest.cadence, now, rows);
+  const delivered = await deliverNotification(config, { kind: "digest", serverName: "Server Hub", detail: rendered.detail });
+  if (delivered) await writeDigestState(now.getTime());
+  return delivered
+    ? { sent: true, title: rendered.title, detail: rendered.detail }
+    : { sent: false, reason: "Webhook delivery failed", title: rendered.title, detail: rendered.detail };
+}
+
+async function maybeSendActivityDigest(now: Date): Promise<void> {
+  const config = await readNotificationConfig();
+  const digest = normalizeDigestConfig(config.digest);
+  if (!digest.enabled || !config.url) return;
+  if (!digestDue(digest, await readDigestState(), now)) return;
+  const result = await sendActivityDigest(false, now);
+  if (result.sent) console.log(`[digest] ${result.title} delivered (window ${DIGEST_WINDOW_MS[digest.cadence] / 3_600_000}h).`);
+}
+
 export async function sweepTasks(serverId?: number) {
   await ensureRuntimeInitialized();
   if (state.sweeping) return;
@@ -2282,6 +2375,7 @@ export async function sweepTasks(serverId?: number) {
   try {
     await enforceExpiredModeration();
     const now = new Date();
+    if (now.getTime() - lastDigestProbe > 60_000) { lastDigestProbe = now.getTime(); await maybeSendActivityDigest(now).catch(() => {}); }
     const enabled = await db.select().from(tasks).where(eq(tasks.enabled, true));
     for (const task of enabled) {
       if (serverId && task.serverId !== serverId) continue;
