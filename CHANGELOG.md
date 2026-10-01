@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.38.0] - 2026-10-01
+
+### Added
+- Whitelist & operators manager for Minecraft Java servers on the Players page: toggle whitelist enforcement, add or remove whitelisted players, and promote or demote operators — with name suggestions drawn from players the panel has already seen. While the server is running, changes go through the console so the game resolves real account UUIDs itself; while it is offline, ServerHub edits `whitelist.json`, `ops.json`, and `server.properties` directly (using the same vanilla offline-UUID derivation the game uses), complete with the config editor's automatic safety copies.
+
 ## [2.37.0] - 2026-10-01
 
 ### Added
@@ -225,7 +230,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.37.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.38.0...HEAD
+[2.38.0]: https://github.com/A4rk4n/ServerHub/compare/v2.37.0...v2.38.0
 [2.37.0]: https://github.com/A4rk4n/ServerHub/compare/v2.36.0...v2.37.0
 [2.36.0]: https://github.com/A4rk4n/ServerHub/compare/v2.35.0...v2.36.0
 [2.35.0]: https://github.com/A4rk4n/ServerHub/compare/v2.34.0...v2.35.0
