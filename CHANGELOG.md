@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.41.0] - 2026-10-01
+
+### Added
+- Restart countdown warnings: scheduled stops and restarts now warn players in-game before acting — "Server will shut down in 10 minutes… 5 minutes… 1 minute… 30 seconds" — then perform the action when the countdown reaches zero. Warning marks are configurable per server on the Tasks page (the longest mark sets the countdown length), Minecraft, Terraria, and Rust broadcast out of the box, and any other game can opt in with a custom broadcast template. A running countdown is shown in the panel and can be cancelled with one click; manual stops always take effect immediately.
+
 ## [2.40.0] - 2026-10-01
 
 ### Added
@@ -240,7 +245,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.40.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.41.0...HEAD
+[2.41.0]: https://github.com/A4rk4n/ServerHub/compare/v2.40.0...v2.41.0
 [2.40.0]: https://github.com/A4rk4n/ServerHub/compare/v2.39.0...v2.40.0
 [2.39.0]: https://github.com/A4rk4n/ServerHub/compare/v2.38.0...v2.39.0
 [2.38.0]: https://github.com/A4rk4n/ServerHub/compare/v2.37.0...v2.38.0
