@@ -3,8 +3,9 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { servers } from "@/db/schema";
-import { getGame } from "@/lib/games";
+import { getGame, hasGame } from "@/lib/games";
 import { detectGameFromFiles, listImportCandidates, validateImportPath } from "@/lib/server-import";
+import { EXPORT_MANIFEST_NAME, verifyExportManifest, type ExportManifest } from "@/lib/server-export";
 import { appDataDir, managedServerDir } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
@@ -23,12 +24,27 @@ export async function POST(request: Request) {
     const stat = await fsp.stat(resolved).catch(() => null);
     if (!stat?.isDirectory()) return NextResponse.json({ error: "That path does not exist or is not a folder" }, { status: 400 });
     const files = await listImportCandidates(resolved);
-    const detected = detectGameFromFiles(files);
+    let detected = detectGameFromFiles(files);
+    // Export-bundle twin: an extracted Server Hub bundle carries a manifest
+    // with the original game, version, and launch settings — surface it so
+    // the import form can prefill everything.
+    let manifest: ExportManifest | null = null;
+    try {
+      const raw = JSON.parse(await fsp.readFile(path.join(resolved, EXPORT_MANIFEST_NAME), "utf8"));
+      const verdict = verifyExportManifest(raw);
+      if (verdict.ok) {
+        manifest = verdict.manifest;
+        if (!detected && hasGame(manifest.server.gameId)) detected = manifest.server.gameId;
+      }
+    } catch {
+      /* no manifest — a plain directory import */
+    }
     return NextResponse.json({
       directory: resolved,
       fileCount: files.length,
       detected,
       detectedName: detected ? getGame(detected).name : null,
+      manifest,
     });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
