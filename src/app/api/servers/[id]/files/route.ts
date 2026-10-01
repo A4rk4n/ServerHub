@@ -31,7 +31,8 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
   const { id } = await ctx.params;
   const server = await loadServer(id);
   if (!server) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const body = (await req.json()) as { path?: string; content?: string; force?: boolean };
+  const body = (await req.json().catch(() => null)) as { path?: string; content?: string; force?: boolean } | null;
+  if (body === null || typeof body !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   if (!body.path || typeof body.content !== "string") return NextResponse.json({ error: "path and content are required" }, { status: 400 });
   try {
     const format = detectConfigFormat(body.path);

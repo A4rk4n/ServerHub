@@ -46,7 +46,7 @@ export async function DELETE(_req: Request, ctx: Context) {
 
 export async function POST(req: Request, ctx: Context) {
   const { id, bid, backup } = await load(ctx);
-  const { action, path: entryPath } = (await req.json()) as { action?: string; path?: string };
+  const { action, path: entryPath } = (await req.json().catch(() => ({}))) as { action?: string; path?: string };
   if (action === "restore") {
     const result = await restoreBackup(id, bid);
     if (!result.ok) return NextResponse.json({ error: result.reason ?? "Restore failed" }, { status: 409 });

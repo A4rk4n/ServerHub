@@ -23,7 +23,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const { id } = await ctx.params;
   const [s] = await db.select().from(servers).where(eq(servers.id, Number(id)));
   if (!s) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const body = (await req.json()) as { name?: string; type?: string; payload?: string; intervalMin?: number; confirmedCommand?: string; scheduleKind?: string; scheduledFor?: string; scheduleTime?: string; scheduleWeekday?: number; missedPolicy?: string };
+  const body = (await req.json().catch(() => null)) as { name?: string; type?: string; payload?: string; intervalMin?: number; confirmedCommand?: string; scheduleKind?: string; scheduledFor?: string; scheduleTime?: string; scheduleWeekday?: number; missedPolicy?: string } | null;
+  if (body === null || typeof body !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   const name = body.name?.trim();
   if (!name) return NextResponse.json({ error: "Name required" }, { status: 400 });
   const type = TYPES.includes(body.type ?? "") ? body.type! : "command";

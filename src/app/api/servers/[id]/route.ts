@@ -45,7 +45,8 @@ export async function GET(_req: Request, ctx: Ctx) {
 export async function PATCH(req: Request, ctx: Ctx) {
   const s = await load(ctx);
   if (!s) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const body = (await req.json()) as Record<string, unknown>;
+  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  if (body === null || typeof body !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   const g = getGame(s.gameId);
   if (body.resetCredentials === true) {
     await db.update(servers).set({serverPassword:"",adminPassword:"",ownerId:"",updatedAt:new Date()}).where(eq(servers.id,s.id));

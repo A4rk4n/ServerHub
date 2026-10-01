@@ -20,8 +20,11 @@ async function load(ctx: Context) {
 export async function PATCH(req: Request, ctx: Context) {
   const { addon, server, id } = await load(ctx);
   if (!addon || !server) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const { enabled } = (await req.json()) as { enabled?: boolean };
-  const targetEnabled = Boolean(enabled);
+  // A malformed body must NOT coerce `enabled` to false and silently disable
+  // the add-on — reject it before Boolean() ever runs.
+  const parsed = (await req.json().catch(() => null)) as { enabled?: boolean } | null;
+  if (parsed === null || typeof parsed !== "object" || typeof parsed.enabled !== "boolean") return NextResponse.json({ error: "Invalid JSON body — a boolean `enabled` is required" }, { status: 400 });
+  const targetEnabled = parsed.enabled;
   let relative = addon.filePath;
   if (relative) {
     const current = safePath(serverDir(server), relative);

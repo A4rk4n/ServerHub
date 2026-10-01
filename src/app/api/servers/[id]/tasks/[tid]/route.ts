@@ -19,7 +19,7 @@ async function load(ctx: Ctx) {
 
 export async function PATCH(req: Request, ctx: Ctx) {
   const t=await load(ctx);if(!t)return NextResponse.json({error:"Not found"},{status:404});const [server]=await db.select().from(servers).where(eq(servers.id,t.serverId));if(!server)return NextResponse.json({error:"Server not found"},{status:404});
-  const body=await req.json() as Partial<typeof t>&{confirmedCommand?:string;scheduledFor?:string};const patch:Record<string,unknown>={};
+  const body=(await req.json().catch(()=>null)) as (Partial<typeof t>&{confirmedCommand?:string;scheduledFor?:string})|null;if(body===null||typeof body!=="object")return NextResponse.json({error:"Invalid JSON body"},{status:400});const patch:Record<string,unknown>={};
   if(typeof body.enabled==="boolean")patch.enabled=body.enabled;if(typeof body.name==="string"&&body.name.trim())patch.name=body.name.trim().slice(0,48);
   const type=typeof body.type==="string"?body.type:t.type,payload=typeof body.payload==="string"?body.payload.trim():t.payload;if(["command","broadcast"].includes(type)){let expected:string;try{expected=scheduledCommand(server.gameId,type,payload)}catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Invalid action"},{status:400})}if(body.confirmedCommand!==expected)return NextResponse.json({error:"Exact command confirmation does not match",command:expected},{status:409});patch.payload=payload;patch.type=type}
   if (type === "macro") {
@@ -44,7 +44,7 @@ export async function DELETE(_req: Request, ctx: Ctx) {
 export async function POST(req: Request, ctx: Ctx) {
   const t = await load(ctx);
   if (!t) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const { action } = (await req.json()) as { action?: string };
+  const { action } = (await req.json().catch(() => ({}))) as { action?: string };
   if (action === "run") {
     await db.update(tasks).set({ nextRunAt: new Date(Date.now() - 1000) }).where(eq(tasks.id, t.id));
     await sweepTasks(t.serverId);

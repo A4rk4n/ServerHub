@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.46.3] - 2026-10-01
+
+### Fixed
+
+- Thirteen POST/PATCH/PUT API routes that parsed their JSON body without a
+  guard (power, console command, server settings, task create/edit/run,
+  file save, backup restore, player moderation/edit, add-on install/toggle,
+  template create) now answer `400 Invalid JSON body` instead of crashing
+  with a 500 and a stack trace in the panel log.
+- The add-on enable/disable toggle requires an explicit boolean `enabled`;
+  previously a garbage body could coerce to `false` and silently rename a
+  mod to `.disabled`.
+- A corrupt `queryMetadata` row can no longer break the diagnostics report
+  or crash the Player Connection Center page — both now degrade to showing
+  no live provider details.
+- Applying a saved template with a corrupt stored config no longer crashes
+  the new-server wizard; the template is applied as empty defaults.
+
 ## [2.46.2] - 2026-10-01
 
 ### Fixed
@@ -375,7 +393,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.46.2...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.46.3...HEAD
+[2.46.3]: https://github.com/A4rk4n/ServerHub/compare/v2.46.2...v2.46.3
 [2.46.2]: https://github.com/A4rk4n/ServerHub/compare/v2.46.1...v2.46.2
 [2.46.1]: https://github.com/A4rk4n/ServerHub/compare/v2.46.0...v2.46.1
 [2.46.0]: https://github.com/A4rk4n/ServerHub/compare/v2.45.0...v2.46.0

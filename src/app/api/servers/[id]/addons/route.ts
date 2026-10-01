@@ -98,7 +98,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const server = await getServer(id);
   if (!server) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (server.gameId !== "minecraft-modded" || server.loader !== "fabric") return NextResponse.json({ error: "Live add-on installation is currently available for Fabric servers" }, { status: 400 });
-  const { projectId } = (await req.json()) as { projectId?: string };
+  const { projectId } = (await req.json().catch(() => ({}))) as { projectId?: string };
   if (!projectId || !/^[A-Za-z0-9_-]{3,64}$/.test(projectId)) return NextResponse.json({ error: "A valid Modrinth project ID is required" }, { status: 400 });
 
   const existing = await db.select().from(addons).where(eq(addons.serverId, server.id));
