@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.29.0] - 2026-10-01
+
+### Added
+- Scheduled game updates that check first: the Tasks page gains a "Game update" task type that looks for a newer build before doing anything — and leaves the server completely untouched (no stop, no backup, no restart) when nothing new is published, recording the reason in the task history. Minecraft servers update when a newer stable release appears in the official catalog; SteamCMD titles use the conservative installed-vs-published build comparison (an unreachable metadata mirror never causes churn); rolling-release providers refresh on schedule; custom servers are never auto-updated. When an update does run, it uses the full validated lifecycle: players are warned, the server stops gracefully, a safety backup is taken, and the first start must pass the readiness probe — otherwise the previous version is restored automatically.
+
 ## [2.28.2] - 2026-09-30
 
 ### Fixed
@@ -180,7 +185,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.28.2...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.29.0...HEAD
+[2.29.0]: https://github.com/A4rk4n/ServerHub/compare/v2.28.2...v2.29.0
 [2.28.2]: https://github.com/A4rk4n/ServerHub/compare/v2.28.1...v2.28.2
 [2.28.1]: https://github.com/A4rk4n/ServerHub/compare/v2.28.0...v2.28.1
 [2.28.0]: https://github.com/A4rk4n/ServerHub/compare/v2.27.0...v2.28.0
