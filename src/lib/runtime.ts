@@ -34,6 +34,7 @@ import type { Backup, InstallationJob, Server } from "@/db/schema";
 import { getGame, type InstallerKind } from "./games";
 import { observationKey, reconcileObservationKeys } from "./player-observations";
 import { findMacro, macroSummary, type Macro } from "./macros";
+import { listBackupEntries, sanitizeArchiveEntryPath } from "./backup-browser";
 import { nextCalendarRun } from "./calendar-schedule";
 import { scheduledCommand } from "./scheduled-actions";
 import { queryA2sInfo, queryA2sPlayers, queryMinecraftStatus } from "./query-protocols";
@@ -2218,6 +2219,38 @@ export async function restoreBackup(serverId: number, backupId: number) {
   } catch (error) {
     await fsp.rm(root, { recursive: true, force: true }).catch(() => {});
     if (fs.existsSync(old)) await fsp.rename(old, root).catch(() => {});
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+// Restores a single file from a backup archive into the server
+// directory. Same gates as a full restore: the server must be stopped
+// and the archive checksum must verify — a selective restore is still
+// a restore.
+export async function restoreBackupEntry(serverId: number, backupId: number, rawPath: string) {
+  await ensureRuntimeInitialized();
+  const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
+  const [backup] = await db.select().from(backups).where(and(eq(backups.id, backupId), eq(backups.serverId, serverId)));
+  if (!server || !backup) return { ok: false, reason: "Backup not found" };
+  if (state.processes.has(serverId) || !["offline", "crashed", "error"].includes(server.status)) return { ok: false, reason: "Stop the server before restoring" };
+  if (backup.status !== "complete") return { ok: false, reason: "Backup is not complete" };
+  const entryPath = sanitizeArchiveEntryPath(rawPath);
+  if (!entryPath) return { ok: false, reason: "Invalid file path" };
+  const archive = backupArchivePath(backup);
+  if (!fs.existsSync(/*turbopackIgnore: true*/ archive)) return { ok: false, reason: "Backup archive is missing from disk" };
+  const checksum = await hashFile(archive);
+  if (backup.checksum && checksum !== backup.checksum) return { ok: false, reason: "Backup checksum verification failed" };
+  const { entries } = await listBackupEntries(archive);
+  const entry = entries.find((item) => item.path === entryPath && item.type === "file");
+  if (!entry) return { ok: false, reason: "That file is not in this backup" };
+  const root = serverDir(server);
+  try {
+    await fsp.mkdir(root, { recursive: true });
+    await tar.x({ cwd: root, file: archive, gzip: true, strict: true, preservePaths: false }, [entryPath]);
+    await logLine(serverId, "success", "Backup", `Restored "${entryPath}" from backup ${backup.name} (checksum verified).`);
+    await act(serverId, "backup", `Restored "${entryPath}" from backup "${backup.name}"`);
+    return { ok: true };
+  } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.message : String(error) };
   }
 }
