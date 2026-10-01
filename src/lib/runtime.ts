@@ -36,6 +36,7 @@ import { observationKey, reconcileObservationKeys } from "./player-observations"
 import { findMacro, macroSummary, type Macro } from "./macros";
 import { listBackupEntries, sanitizeArchiveEntryPath } from "./backup-browser";
 import { powerTaskDecision } from "./power-schedule";
+import { analyzeCrash } from "./crash-analyzer";
 import { nextCalendarRun } from "./calendar-schedule";
 import { scheduledCommand } from "./scheduled-actions";
 import { queryA2sInfo, queryA2sPlayers, queryMinecraftStatus } from "./query-protocols";
@@ -1807,10 +1808,22 @@ async function handleExit(entry: RuntimeEntry, code: number | null, signal: Node
   await setStatus(id, expected ? "offline" : "crashed").catch(() => {});
   await logLine(id, expected ? "system" : "error", "Runtime", `Process exited (code ${code ?? "none"}, signal ${signal ?? "none"}).`).catch(() => {});
   await act(id, "power", `${entry.server.name} ${expected ? "stopped" : "crashed"}`).catch(() => {});
+  let crashTitle = "";
+  if (!expected) {
+    // Diagnose the crash from the console tail and attach the finding
+    // to an incident so Diagnostics explains WHY, not just THAT.
+    try {
+      const tail = await db.select().from(consoleLogs).where(eq(consoleLogs.serverId, id)).orderBy(desc(consoleLogs.id)).limit(120);
+      const diagnosis = analyzeCrash(tail.reverse().map((row) => row.message), { exitCode: code, signal, gameId: entry.server.gameId, memoryMb: entry.server.memoryMb });
+      crashTitle = diagnosis.title;
+      await logLine(id, "warn", "Crash analyzer", `${diagnosis.title}. ${diagnosis.fix}`);
+      await incident(id, diagnosis.cause === "unknown" ? "warning" : "critical", "crash", `${diagnosis.title} — ${diagnosis.detail}`, diagnosis.fix);
+    } catch {}
+  }
   void notify(
     expected
       ? { kind: "offline", serverName: entry.server.name }
-      : { kind: "crash", serverName: entry.server.name, detail: `exit code ${code ?? "none"}, signal ${signal ?? "none"}` }
+      : { kind: "crash", serverName: entry.server.name, detail: `exit code ${code ?? "none"}, signal ${signal ?? "none"}${crashTitle ? ` — ${crashTitle}` : ""}` }
   );
   if (entry.restarting && !state.closing) {
     setTimeout(() => void startFlow(id), 900);
