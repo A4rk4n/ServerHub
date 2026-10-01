@@ -41,6 +41,7 @@ import { MAX_SCAN_ENTRIES, buildUsageReport, cleanupHints, computeGrowth, normal
 import { buildStatusSnapshot, normalizeStatusConfig, type StatusPageConfig, type StatusSnapshot } from "./status-page";
 import { powerTaskDecision } from "./power-schedule";
 import { broadcastCommand, countdownPlan, normalizeWarningConfig, warningMessage, type WarningAction, type WarningConfig } from "./restart-warnings";
+import { isAnnouncementDue, nextAnnouncementIndex, normalizeAnnouncementConfig, type AnnouncementConfig } from "./announcements";
 import { analyzeCrash } from "./crash-analyzer";
 import { nextCalendarRun } from "./calendar-schedule";
 import { scheduledCommand } from "./scheduled-actions";
@@ -179,7 +180,7 @@ async function initializeRuntime() {
   scheduleInstallPump();
 
   if (!state.scheduler) {
-    state.scheduler = setInterval(() => void sweepTasks().catch(() => {}), 15_000);
+    state.scheduler = setInterval(() => { void sweepTasks().catch(() => {}); void sweepAnnouncements().catch(() => {}); }, 15_000);
     state.scheduler.unref?.();
   }
 
@@ -1803,6 +1804,7 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
 
 async function handleExit(entry: RuntimeEntry, code: number | null, signal: NodeJS.Signals | null) {
   await cancelCountdown(entry.server.id, "the server process exited").catch(() => {});
+  announcerState.delete(entry.server.id); // next boot re-anchors the announcement cadence
   const id = entry.server.id;
   clearInterval(entry.monitor);
   if (state.processes.get(id) === entry) state.processes.delete(id);
@@ -1936,6 +1938,73 @@ export async function cancelCountdown(serverId: number, reason = ""): Promise<bo
   countdowns.delete(serverId);
   await logLine(serverId, "system", "Scheduler", `Restart countdown cancelled${reason ? `: ${reason}` : "."}`).catch(() => {});
   return true;
+}
+
+// ---- scheduled announcements ---------------------------------------------
+
+const announcerState = new Map<number, { lastIndex: number; lastSentAt: number }>();
+
+function announcementsFile() { return path.join(appDataDir(), "announcements.json"); }
+
+export async function readAnnouncementConfigFor(serverId: number): Promise<AnnouncementConfig> {
+  try {
+    const raw = JSON.parse(await fsp.readFile(announcementsFile(), "utf8")) as Record<string, unknown>;
+    return normalizeAnnouncementConfig(raw[String(serverId)]);
+  } catch { return normalizeAnnouncementConfig(undefined); }
+}
+
+export async function writeAnnouncementConfigFor(serverId: number, config: AnnouncementConfig): Promise<void> {
+  let all: Record<string, unknown> = {};
+  try { all = JSON.parse(await fsp.readFile(announcementsFile(), "utf8")) as Record<string, unknown>; } catch { /* fresh file */ }
+  all[String(serverId)] = config;
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(announcementsFile(), JSON.stringify(all, null, 2), "utf8");
+  announcerState.delete(serverId); // restart the cadence under the new config
+}
+
+export function getAnnouncerState(serverId: number): { lastSentAt: string | null } {
+  const entry = announcerState.get(serverId);
+  return { lastSentAt: entry && entry.lastSentAt > 0 ? new Date(entry.lastSentAt).toISOString() : null };
+}
+
+/** Broadcast the next message in the rotation right now (panel button). */
+export async function announceNow(serverId: number): Promise<{ ok: boolean; reason?: string; message?: string }> {
+  await ensureRuntimeInitialized();
+  const entry = state.processes.get(serverId);
+  if (!entry) return { ok: false, reason: "The server is not running" };
+  const config = await readAnnouncementConfigFor(serverId);
+  if (config.messages.length === 0) return { ok: false, reason: "Add at least one announcement message first" };
+  return broadcastAnnouncement(entry.server, config, Date.now());
+}
+
+async function broadcastAnnouncement(server: Server, config: AnnouncementConfig, nowMs: number): Promise<{ ok: boolean; reason?: string; message?: string }> {
+  const previous = announcerState.get(server.id);
+  const index = nextAnnouncementIndex(config.order, previous?.lastIndex ?? -1, config.messages.length);
+  const message = config.messages[index];
+  const command = broadcastCommand(server.gameId, config.template, message);
+  if (!command) return { ok: false, reason: "This game has no broadcast command — set a custom template first" };
+  const result = await runCommand(server, command, "Announcer");
+  if (!result.ok) return { ok: false, reason: result.reason ?? "Command failed" };
+  announcerState.set(server.id, { lastIndex: index, lastSentAt: nowMs });
+  return { ok: true, message };
+}
+
+/** 15-second sweep: broadcast on every online server whose interval has elapsed. */
+export async function sweepAnnouncements(nowMs = Date.now()): Promise<void> {
+  for (const entry of state.processes.values()) {
+    const serverId = entry.server.id;
+    const config = await readAnnouncementConfigFor(serverId);
+    if (!config.enabled) { announcerState.delete(serverId); continue; }
+    const known = announcerState.get(serverId);
+    if (!known) {
+      // First sight of a freshly started (or re-enabled) server: anchor the
+      // cadence now so players are not greeted by an instant broadcast.
+      announcerState.set(serverId, { lastIndex: -1, lastSentAt: nowMs });
+      continue;
+    }
+    if (!isAnnouncementDue(nowMs, known.lastSentAt, config.intervalMin)) continue;
+    await broadcastAnnouncement(entry.server, config, nowMs).catch(() => {});
+  }
 }
 
 /**

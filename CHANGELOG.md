@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.47.0] - 2026-10-02
+
+### Added
+
+- Scheduled announcements: each server can rotate in-game broadcasts
+  ("Join our Discord…", "Backups run nightly…") on a configurable interval
+  (1–1440 minutes), in sequential or random order (random never repeats the
+  previous message), with up to 20 messages of 200 characters each. Reuses
+  the restart-warning broadcast plumbing — games with a built-in `say`
+  command work out of the box, anything else opts in with a `{message}`
+  template. The rotation is managed from the Tasks page, including a
+  "Send next now" test button, and anchors one full interval after the
+  server starts so players are never greeted by an instant broadcast.
+- `GET`/`PUT`/`POST /api/servers/:id/announcements` — the `PUT` rejects
+  malformed JSON with `400` so a bad request can never reset the rotation.
+
 ## [2.46.3] - 2026-10-01
 
 ### Fixed
@@ -393,7 +409,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.46.3...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.47.0...HEAD
+[2.47.0]: https://github.com/A4rk4n/ServerHub/compare/v2.46.3...v2.47.0
 [2.46.3]: https://github.com/A4rk4n/ServerHub/compare/v2.46.2...v2.46.3
 [2.46.2]: https://github.com/A4rk4n/ServerHub/compare/v2.46.1...v2.46.2
 [2.46.1]: https://github.com/A4rk4n/ServerHub/compare/v2.46.0...v2.46.1

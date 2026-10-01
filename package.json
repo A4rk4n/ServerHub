@@ -1,6 +1,6 @@
 {
   "name": "server-hub",
-  "version": "2.46.3",
+  "version": "2.47.0",
   "description": "Local desktop manager for real dedicated game-server processes",
   "private": true,
   "author": "Server Hub contributors",
@@ -79,6 +79,7 @@
     "test:roster": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-roster.ts",
     "test:digest": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-digest.ts",
     "test:server-export": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-server-export.ts",
+    "test:announcements": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-announcements.ts",
     "test:restart-warnings": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-restart-warnings.ts",
     "test:console-search": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-console-search.ts",
     "test:backup-mirror": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-backup-mirror.ts",
