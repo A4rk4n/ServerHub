@@ -11,7 +11,10 @@ export async function GET() {
 }
 
 export async function PUT(req: Request) {
-  const body = (await req.json().catch(() => ({}))) as { enabled?: unknown; title?: unknown };
+  const raw = await req.json().catch(() => null);
+  // Malformed JSON must never silently disable a live status page.
+  if (raw === null || typeof raw !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  const body = raw as { enabled?: unknown; title?: unknown };
   const current = await readStatusPageConfig();
   const title = typeof body.title === "string" && body.title.trim() ? body.title.trim().slice(0, MAX_STATUS_TITLE_LENGTH) : DEFAULT_STATUS_TITLE;
   let token = current.token;

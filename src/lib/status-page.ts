@@ -5,7 +5,9 @@
 // snapshot. The token is a capability: the config file lives outside the
 // database and outside the support-bundle allowlist, like webhooks.
 
-import crypto from "node:crypto";
+// No node:crypto here on purpose: this module is shared with client
+// components (formatUptime on the public page), so everything must be
+// portable. Randomness comes from Web Crypto (Node 18+ and browsers).
 
 export type StatusPageConfig = {
   enabled: boolean;
@@ -27,15 +29,24 @@ export function normalizeStatusConfig(raw: unknown): StatusPageConfig {
   return { enabled: record.enabled === true && token.length > 0, token, title };
 }
 
+function base64url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+}
+
 /** 24 random bytes as base64url — 32 URL-safe chars. `random` is injectable for tests. */
-export function generateStatusToken(random: (bytes: number) => Buffer = crypto.randomBytes): string {
-  return random(24).toString("base64url");
+export function generateStatusToken(random?: (bytes: number) => Uint8Array): string {
+  const bytes = random ? random(24) : globalThis.crypto.getRandomValues(new Uint8Array(24));
+  return base64url(bytes);
 }
 
 /** Constant-time token comparison; an empty expected token never matches. */
 export function safeTokenEquals(expected: string, provided: string): boolean {
   if (!expected || !provided || expected.length !== provided.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
+  let diff = 0;
+  for (let i = 0; i < expected.length; i += 1) diff |= expected.charCodeAt(i) ^ provided.charCodeAt(i);
+  return diff === 0;
 }
 
 export type StatusAccess = { ok: true } | { ok: false; status: 404 | 401; problem: string };

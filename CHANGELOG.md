@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.46.1] - 2026-10-01
+
+### Fixed
+
+- Malformed JSON in a settings `PUT` can no longer silently wipe
+  configuration: `/api/status-page` (was: disabled the live status page and
+  reset its title), `/api/backup-mirror` (was: saved a disabled mirror over
+  a working one), and `/api/servers/:id/restart-warnings` (was: reset the
+  warning schedule to defaults) now answer `400 Invalid JSON body` and leave
+  the stored config untouched — matching the long-standing behavior of
+  `/api/notifications`.
+- The status-page module no longer imports `node:crypto`: token generation
+  uses Web Crypto and the constant-time comparison is implemented portably,
+  so the module shared with the public page's client code is free of
+  Node-only imports (previously it only worked because the bundler
+  tree-shook the unused import).
+
 ## [2.46.0] - 2026-10-01
 
 ### Added
@@ -346,7 +363,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.46.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.46.1...HEAD
+[2.46.1]: https://github.com/A4rk4n/ServerHub/compare/v2.46.0...v2.46.1
 [2.46.0]: https://github.com/A4rk4n/ServerHub/compare/v2.45.0...v2.46.0
 [2.45.0]: https://github.com/A4rk4n/ServerHub/compare/v2.44.0...v2.45.0
 [2.44.0]: https://github.com/A4rk4n/ServerHub/compare/v2.43.0...v2.44.0

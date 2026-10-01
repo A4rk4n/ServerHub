@@ -25,7 +25,9 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
   const { id } = await ctx.params;
   const server = await loadServer(id);
   if (!server) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const body = await req.json().catch(() => ({}));
+  const body = await req.json().catch(() => null);
+  // Malformed JSON must never silently reset a server's warning config to defaults.
+  if (body === null || typeof body !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   const config = normalizeWarningConfig(body);
   await writeWarningConfigFor(server.id, config);
   return NextResponse.json({ config, supported: broadcastCommand(server.gameId, config.template, "x") !== null });

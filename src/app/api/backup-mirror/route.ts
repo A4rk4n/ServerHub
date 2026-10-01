@@ -12,6 +12,8 @@ export async function GET() {
 
 export async function PUT(req: Request) {
   const body = await req.json().catch(() => null);
+  // Malformed JSON must never silently save a disabled config over a working one.
+  if (body === null || typeof body !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   const config = normalizeMirrorConfig(body);
   const wantsEnabled = !!body && typeof body === "object" && (body as Record<string, unknown>).enabled === true;
   if (wantsEnabled || config.directory) {
