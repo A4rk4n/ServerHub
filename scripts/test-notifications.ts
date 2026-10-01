@@ -102,7 +102,7 @@ test("delivery is a bounded POST that reports failure instead of throwing", asyn
 
 test("the runtime emits notifications at every lifecycle point, fire-and-forget", () => {
   const runtime = fs.readFileSync("src/lib/runtime.ts", "utf8");
-  for (const kind of ["online", "offline", "crash", "auto-restart", "restart-limit", "backup-complete", "backup-failed"]) {
+  for (const kind of ["online", "offline", "crash", "auto-restart", "restart-limit", "backup-complete", "backup-failed", "guardrail"]) {
     assert.ok(runtime.includes(`kind: "${kind}"`), `runtime emits ${kind}`);
   }
   assert.ok(!/await notify\(/.test(runtime), "notify is never awaited in the runtime hot path");

@@ -2,6 +2,7 @@ import { selectBackupsToPrune } from "./backup-retention";
 import { autoUpdateDecision, autoUpdateTargetVersion } from "./auto-update";
 import { catalogVersions } from "./catalog";
 import { appManifestName, compareBuilds, fetchLatestGameBuild, parseAppManifestBuildId, type GameUpdateState } from "./game-updates";
+import { evaluateGuardrail, loadGuardrailsCached, nextGuardrailState, type GuardrailState } from "./guardrails";
 import { FABRIC_INSTALLER_LIST_URL, fabricLoaderListUrl, fabricServerJarUrl, pickFabricInstaller, pickFabricLoader } from "./fabric-meta";
 import { flushMetricsHistory, recordMetricsSample } from "./metrics-history";
 import { javaMajorForMinecraft } from "./minecraft-java";
@@ -1761,6 +1762,7 @@ async function handleExit(entry: RuntimeEntry, code: number | null, signal: Node
   const id = entry.server.id;
   clearInterval(entry.monitor);
   if (state.processes.get(id) === entry) state.processes.delete(id);
+  guardrailStates.delete(id);
   void flushMetricsHistory(id);
   await db.update(players).set({ isOnline: false }).where(eq(players.serverId, id)).catch(() => {});
   const expected = entry.stopping;
@@ -1949,6 +1951,39 @@ async function sampleEntry(entry: RuntimeEntry) {
   entry.metrics.push(sample);
   if (entry.metrics.length > 240) entry.metrics.shift();
   void recordMetricsSample(entry.server.id, sample);
+  void checkGuardrails(entry).catch(() => {});
+}
+
+// Guardrail alert state per server: hysteresis + cooldown live here so a
+// sustained breach alerts once, not every two seconds.
+const guardrailStates = new Map<number, GuardrailState>();
+
+export function guardrailActive(serverId: number): boolean {
+  return guardrailStates.get(serverId)?.active ?? false;
+}
+
+async function checkGuardrails(entry: RuntimeEntry) {
+  const id = entry.server.id;
+  const config = (await loadGuardrailsCached())[String(id)];
+  if (!config?.enabled) {
+    guardrailStates.delete(id);
+    return;
+  }
+  const breach = evaluateGuardrail(entry.metrics, config);
+  const next = nextGuardrailState(guardrailStates.get(id), breach !== null);
+  guardrailStates.set(id, next);
+  if (!next.fire || !breach) return;
+  const detail = breach.metric === "cpu"
+    ? `CPU above ${breach.threshold}% for ${breach.sustainMin} min (peak ${breach.value}%)`
+    : `RAM above ${breach.threshold} MB for ${breach.sustainMin} min (peak ${breach.value} MB)`;
+  await logLine(id, "warn", "Guardrail", `${detail}.`);
+  await incident(id, "warning", "guardrail", detail, config.action === "restart" ? "Automatic restart was configured and triggered" : "Review the workload, mods, or raise the threshold in Diagnostics");
+  await act(id, "guardrail", `${entry.server.name}: ${detail}`);
+  void notify({ kind: "guardrail", serverName: entry.server.name, detail });
+  if (config.action === "restart" && state.processes.has(id)) {
+    await logLine(id, "warn", "Guardrail", "Restarting the server as configured for sustained resource pressure.");
+    void restartFlow(id).catch(() => {});
+  }
 }
 
 async function processUsage(pid: number, previous?: ProcSample): Promise<{ cpu: number; ram: number; sample?: ProcSample }> {

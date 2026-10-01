@@ -21,6 +21,7 @@ export type CardServer = {
   lastStartedAt?: string | Date | null;
   game: { id: string; short: string; name: string; accent: string; art: string; protocol: string };
   live: { cpu: number; ram: number; players: number; tps: number | null } | null;
+  guardrail?: boolean;
   updateValidationStatus?: string;
   updatePreviousVersion?: string;
   updateTargetVersion?: string;
@@ -79,7 +80,14 @@ export function ServerCard({ server, index = 0 }: { server: CardServer; index?: 
           >
             {g.short}
           </span>
-          <StatusPill status={server.status} size="sm" />
+          <span className="flex items-center gap-1.5">
+            {server.guardrail && (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700" title="A resource guardrail is currently triggered — see Diagnostics">
+                guardrail
+              </span>
+            )}
+            <StatusPill status={server.status} size="sm" />
+          </span>
         </div>
         <div className="absolute inset-x-3.5 bottom-2.5 flex items-end justify-between gap-3">
           <div className="min-w-0">

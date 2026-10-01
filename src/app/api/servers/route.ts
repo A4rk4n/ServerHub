@@ -7,7 +7,7 @@ import { db } from "@/db";
 import { servers } from "@/db/schema";
 import { getGame, hasGame } from "@/lib/games";
 import { validCatalogVersion } from "@/lib/catalog";
-import { ensureRuntimeInitialized, installFlow, metricsFor } from "@/lib/runtime";
+import { ensureRuntimeInitialized, guardrailActive, installFlow, metricsFor } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +25,7 @@ export async function GET() {
         adminPassword: server.adminPassword ? "••••••••" : "",
         game: summarize(server.gameId),
         live: metric ? { cpu: metric.cpu, ram: metric.ram, players: metric.players, tps: metric.tps } : null,
+        guardrail: guardrailActive(server.id),
       });
     }
     return NextResponse.json({ servers: output });

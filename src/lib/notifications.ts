@@ -13,6 +13,7 @@ export type NotificationEventKind =
   | "crash"
   | "auto-restart"
   | "restart-limit"
+  | "guardrail"
   | "online"
   | "offline"
   | "backup-complete"
@@ -35,7 +36,7 @@ export const DEFAULT_NOTIFICATION_CONFIG: NotificationConfig = {
 // watchdog's responses, backup = snapshot outcomes. Tests always fire.
 export function notificationGroup(kind: NotificationEventKind): "status" | "crash" | "backup" | "always" {
   if (kind === "online" || kind === "offline") return "status";
-  if (kind === "crash" || kind === "auto-restart" || kind === "restart-limit") return "crash";
+  if (kind === "crash" || kind === "auto-restart" || kind === "restart-limit" || kind === "guardrail") return "crash";
   if (kind === "backup-complete" || kind === "backup-failed") return "backup";
   return "always";
 }
@@ -68,6 +69,7 @@ const EVENT_TEXT: Record<NotificationEventKind, (name: string, detail: string) =
   crash: (name, detail) => `🔥 **${name}** crashed unexpectedly${detail ? ` (${detail})` : ""}.`,
   "auto-restart": (name, detail) => `♻️ **${name}**: automatic restart scheduled${detail ? ` — ${detail}` : ""}.`,
   "restart-limit": (name) => `🛑 **${name}**: automatic restart limit reached — manual intervention required.`,
+  guardrail: (name, detail) => `📈 **${name}**: resource guardrail triggered${detail ? ` — ${detail}` : ""}.`,
   online: (name) => `✅ **${name}** is online.`,
   offline: (name) => `⏹️ **${name}** stopped.`,
   "backup-complete": (name, detail) => `💾 Backup completed on **${name}**${detail ? ` (${detail})` : ""}.`,
