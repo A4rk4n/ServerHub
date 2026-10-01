@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Boxes, Heart, LayoutDashboard, Plus, Sparkles, Server as ServerIcon, Wrench } from "lucide-react";
+import { Boxes, Heart, LayoutDashboard, Plus, ScrollText, Sparkles, Server as ServerIcon, Wrench } from "lucide-react";
 import { cn, hexA } from "@/lib/format";
 import { STATUS_META } from "./ui";
 import { UpdateBanner, useUpdateCheck } from "./update-banner";
@@ -42,6 +42,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     { href: "/servers", label: "Servers", icon: Boxes },
     { href: "/servers/new", label: "New Server", icon: Plus, accent: true },
     { href: "/tools", label: "Tool Health", icon: Wrench },
+    { href: "/audit", label: "Audit Trail", icon: ScrollText },
   ];
 
   return (
@@ -76,7 +77,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <nav className="flex flex-col gap-1.5 px-3">
             {NAV.map((n) => {
               const isActive =
-                n.href === "/" ? pathname === "/" : n.href === "/servers/new" ? pathname === "/servers/new" : n.href === "/tools" ? pathname.startsWith("/tools") : pathname.startsWith("/servers") && pathname !== "/servers/new";
+                n.href === "/" ? pathname === "/" : n.href === "/servers/new" ? pathname === "/servers/new" : n.href === "/tools" ? pathname.startsWith("/tools") : n.href === "/audit" ? pathname.startsWith("/audit") : pathname.startsWith("/servers") && pathname !== "/servers/new";
               return (
                 <Link
                   key={n.href}
@@ -165,7 +166,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </Link>
         {NAV.map((n) => {
           const isActive =
-            n.href === "/" ? pathname === "/" : n.href === "/servers/new" ? pathname === "/servers/new" : n.href === "/tools" ? pathname.startsWith("/tools") : pathname.startsWith("/servers") && pathname !== "/servers/new";
+            n.href === "/" ? pathname === "/" : n.href === "/servers/new" ? pathname === "/servers/new" : n.href === "/tools" ? pathname.startsWith("/tools") : n.href === "/audit" ? pathname.startsWith("/audit") : pathname.startsWith("/servers") && pathname !== "/servers/new";
           return (
             <Link
               key={n.href}

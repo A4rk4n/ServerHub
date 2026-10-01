@@ -47,7 +47,7 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
     const { safetyCopy } = await writeServerFile(server, body.path, body.content);
     const copyNote = safetyCopy ? ` Safety copy: ${safetyCopy}.` : "";
     await logLine(server.id, "system", "Files", `Wrote ${body.path} (${Buffer.byteLength(body.content, "utf8")} bytes).${copyNote}`);
-    await act(server.id, "settings", `File ${body.path} saved on ${server.name}`);
+    await act(server.id, "settings", `File ${body.path} saved on ${server.name}${safetyCopy ? ` (safety copy ${safetyCopy})` : ""}`);
     return NextResponse.json({ ok: true, format, safetyCopy });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 400 });
