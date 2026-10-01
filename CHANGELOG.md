@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.43.0] - 2026-10-01
+
+### Added
+
+- Backup mirror target: keep a checksum-verified second copy of every
+  completed backup on another disk, NAS share, or synced folder. Copies are
+  written via a temp file and re-hashed — a copy only counts when its SHA-256
+  matches the primary archive. Pruned backups take their mirror copy with
+  them, and *Sync now* reconciles the whole mirror (copies missing or failed,
+  removes stale copies, self-heals vanished files).
+- Mirror health everywhere it matters: coverage line in the activity digest
+  (`🪞 Backup mirror: 5/6 mirrored · 1 pending`), a new `mirror-failed`
+  webhook notification in the backup group, and health chips with the last
+  error on the new Tools-page panel.
+- `GET`/`PUT`/`POST /api/backup-mirror`: status + health, validated settings
+  (the mirror can never point inside the Server Hub data directory), and
+  on-demand synchronization.
+- `scripts/test-backup-mirror.ts`: 5 tests covering config/directory safety,
+  state normalization, sync planning, traversal-proof layout naming, and
+  health/digest formatting (`BACKUP_MIRROR_SUITE_OK`).
+
 ## [2.42.0] - 2026-10-01
 
 ### Added
@@ -261,7 +282,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.42.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.43.0...HEAD
+[2.43.0]: https://github.com/A4rk4n/ServerHub/compare/v2.42.0...v2.43.0
 [2.42.0]: https://github.com/A4rk4n/ServerHub/compare/v2.41.0...v2.42.0
 [2.41.0]: https://github.com/A4rk4n/ServerHub/compare/v2.40.0...v2.41.0
 [2.40.0]: https://github.com/A4rk4n/ServerHub/compare/v2.39.0...v2.40.0
