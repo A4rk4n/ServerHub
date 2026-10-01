@@ -7,7 +7,7 @@ import { scheduledCommand } from "@/lib/scheduled-actions";
 
 export const dynamic = "force-dynamic";
 
-const TYPES = ["restart", "backup", "prune", "maintenance", "command", "broadcast"];
+const TYPES = ["restart", "backup", "prune", "maintenance", "update", "command", "broadcast"];
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;

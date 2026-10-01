@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, DatabaseBackup, Megaphone, Pencil, Play, Plus, RotateCw, Terminal, Trash2, Wrench } from "lucide-react";
+import { CalendarClock, DatabaseBackup, DownloadCloud, Megaphone, Pencil, Play, Plus, RotateCw, Terminal, Trash2, Wrench } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Task, TaskRun } from "@/db/schema";
 import { cn, hexA, timeAgo } from "@/lib/format";
@@ -8,6 +8,7 @@ import { Btn, Empty, Field, Modal, Spin, Toggle, inputCls } from "./ui";
 
 const TYPE_META: Record<string, { label: string; icon: React.ComponentType<{ size?: number | string; className?: string }>; color: string; hint: string }> = {
   maintenance: { label: "Maintenance", icon: Wrench, color: "#fb7185", hint: "Backup, stop and update safely" },
+  update: { label: "Game update", icon: DownloadCloud, color: "#34d399", hint: "Checks first — updates only when a new build is published" },
   restart: { label: "Restart", icon: RotateCw, color: "#f5b84c", hint: "Gracefully restarts the server" },
   backup: { label: "Backup", icon: DatabaseBackup, color: "#38bdf8", hint: "Creates a world snapshot" },
   prune: { label: "Prune backups", icon: Trash2, color: "#f97316", hint: "Applies the backup retention limits" },

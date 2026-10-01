@@ -42,3 +42,30 @@ export function compareBuilds(installed: string | null, latest: string | null): 
   if (!Number.isSafeInteger(installedNum) || !Number.isSafeInteger(latestNum)) return "unknown";
   return latestNum > installedNum ? "update-available" : "up-to-date";
 }
+
+// Latest-build lookups are cached per Steam app (not per server): six
+// hours on success, fifteen minutes on failure — shared by the badge
+// route and the auto-update scheduler so the community app-info mirror
+// stays comfortable no matter how many callers ask.
+export const OK_TTL_MS = 6 * 60 * 60 * 1000;
+export const FAIL_TTL_MS = 15 * 60 * 1000;
+const latestCache = new Map<number, { at: number; latest: { buildId: string; timeUpdated: string | null } | null }>();
+
+export async function fetchLatestGameBuild(appId: number): Promise<{ buildId: string; timeUpdated: string | null } | null> {
+  const cached = latestCache.get(appId);
+  const now = Date.now();
+  if (cached && now - cached.at < (cached.latest ? OK_TTL_MS : FAIL_TTL_MS)) return cached.latest;
+  let latest: { buildId: string; timeUpdated: string | null } | null = null;
+  try {
+    const response = await fetch(steamAppInfoUrl(appId), {
+      headers: { Accept: "application/json", "User-Agent": "ServerHub-game-update-check" },
+      signal: AbortSignal.timeout(8000),
+      cache: "no-store",
+    });
+    if (response.ok) latest = extractLatestBuildId(await response.json(), appId);
+  } catch {
+    /* mirror unreachable: report unknown, retry after FAIL_TTL */
+  }
+  latestCache.set(appId, { at: now, latest });
+  return latest;
+}

@@ -1,4 +1,7 @@
 import { selectBackupsToPrune } from "./backup-retention";
+import { autoUpdateDecision, autoUpdateTargetVersion } from "./auto-update";
+import { catalogVersions } from "./catalog";
+import { appManifestName, compareBuilds, fetchLatestGameBuild, parseAppManifestBuildId, type GameUpdateState } from "./game-updates";
 import { FABRIC_INSTALLER_LIST_URL, fabricLoaderListUrl, fabricServerJarUrl, pickFabricInstaller, pickFabricLoader } from "./fabric-meta";
 import { flushMetricsHistory, recordMetricsSample } from "./metrics-history";
 import { javaMajorForMinecraft } from "./minecraft-java";
@@ -2192,6 +2195,56 @@ export async function sweepTasks(serverId?: number) {
           await logLine(server.id,"error","Maintenance",maintenanceError);
         }
         await db.insert(taskRuns).values({taskId:task.id,serverId:server.id,taskName:task.name,type:task.type,command:"",status:maintenanceStatus,error:maintenanceError});
+      }
+      else if (task.type === "update") {
+        // Conditional update: check availability first, and leave the
+        // server completely untouched when nothing new is published.
+        const game = getGame(server.gameId);
+        let latestStableVersion: string | null = null;
+        let buildStatus: GameUpdateState = "unknown";
+        if (game.installer === "mojang" || game.installer === "fabric") {
+          try { latestStableVersion = (await catalogVersions(game.id)).find((item) => item.channel === "stable")?.id ?? null; } catch { latestStableVersion = null; }
+        } else if (game.installer === "steamcmd" && game.steamAppId) {
+          const manifest = path.join(serverDir(server), "steamapps", appManifestName(game.steamAppId));
+          const installedBuild = await fsp.readFile(manifest, "utf8").then(parseAppManifestBuildId).catch(() => null);
+          buildStatus = compareBuilds(installedBuild, (await fetchLatestGameBuild(game.steamAppId))?.buildId ?? null);
+        }
+        const decision = autoUpdateDecision({ installer: game.installer, currentVersion: server.version, latestStableVersion, buildStatus });
+        if (!decision.run) {
+          await logLine(server.id, "system", "Updater", `Scheduled update "${task.name}" skipped: ${decision.reason}.`);
+          await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status: "skipped", error: decision.reason });
+        } else {
+          let updateStatus = "failed", updateError = "";
+          const previousVersion = server.version;
+          const targetVersion = autoUpdateTargetVersion({ installer: game.installer, currentVersion: server.version, latestStableVersion });
+          try {
+            await logLine(server.id, "system", "Updater", `Scheduled update "${task.name}" started: ${decision.reason}.`);
+            if (state.processes.has(server.id)) { await runCommand(server, "say A scheduled game update is starting", "Scheduler"); await stopFlow(server.id, "Scheduled update"); await new Promise((resolve) => setTimeout(resolve, 2000)); }
+            const safety = await createBackupAndWait(server.id, `update-${safeFileName(task.name)}`, "scheduler");
+            await db.update(servers).set({ ...(targetVersion !== previousVersion ? { version: targetVersion } : {}), updateValidationStatus: "installing", updatePreviousVersion: previousVersion, updateTargetVersion: targetVersion, updateSafetyBackupId: safety.id, updateRollbackAttempted: false, updateValidationStartedAt: new Date(), updatedAt: new Date() }).where(eq(servers.id, server.id));
+            const installed = await installFlow(server.id);
+            if (!installed.ok || !installed.jobId) {
+              await db.update(servers).set({ version: previousVersion, updateValidationStatus: "none", updatedAt: new Date() }).where(eq(servers.id, server.id));
+              throw new Error(`Update queue failed: ${installed.reason ?? "unknown error"}`);
+            }
+            const deadline = Date.now() + 2 * 60 * 60_000;
+            let outcome = "running";
+            while (Date.now() < deadline && ["queued", "running", "cancelling"].includes(outcome)) { await new Promise((resolve) => setTimeout(resolve, 1000)); const [job] = await db.select().from(installationJobs).where(eq(installationJobs.id, installed.jobId!)); outcome = job?.status ?? "failed"; }
+            if (outcome !== "succeeded") throw new Error(`Update ended with status ${outcome}`);
+            const started = await startFlow(server.id);
+            const [validated] = await db.select().from(servers).where(eq(servers.id, server.id));
+            if (!started.ok || validated?.updateValidationStatus !== "validated") {
+              if (validated?.updateValidationStatus === "rollback-validated") throw new Error("Updated version failed readiness; previous version was restored and validated");
+              throw new Error(`Update readiness failed: ${started.reason ?? validated?.updateValidationStatus ?? "unknown error"}`);
+            }
+            updateStatus = "succeeded";
+            await logLine(server.id, "success", "Updater", `Scheduled update "${task.name}" (${previousVersion} → ${targetVersion}) completed and readiness passed.`);
+          } catch (error) {
+            updateError = error instanceof Error ? error.message : String(error);
+            await logLine(server.id, "error", "Updater", updateError);
+          }
+          await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status: updateStatus, error: updateError });
+        }
       }
       else if (task.type === "restart") {
         if (state.processes.has(server.id)) await restartFlow(server.id);

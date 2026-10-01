@@ -50,10 +50,12 @@ test("build comparison is conservative: alerts only on a strictly newer latest b
 });
 
 test("the route caches per app, bounds the lookup, and the frame shows the badge", () => {
+  const lib = fs.readFileSync("src/lib/game-updates.ts", "utf8");
+  assert.ok(lib.includes("OK_TTL_MS"), "successful lookups are cached");
+  assert.ok(lib.includes("FAIL_TTL_MS"), "failures retry sooner");
+  assert.ok(lib.includes("AbortSignal.timeout"), "the lookup is bounded");
   const route = fs.readFileSync("src/app/api/servers/[id]/game-update/route.ts", "utf8");
-  assert.ok(route.includes("OK_TTL_MS"), "successful lookups are cached");
-  assert.ok(route.includes("FAIL_TTL_MS"), "failures retry sooner");
-  assert.ok(route.includes("AbortSignal.timeout"), "the lookup is bounded");
+  assert.ok(route.includes("fetchLatestGameBuild"), "the route uses the shared cached lookup");
   assert.ok(route.includes('"not-applicable"'), "non-SteamCMD servers opt out cleanly");
   assert.ok(route.includes("compareBuilds"), "the conservative comparison is used");
   const frame = fs.readFileSync("src/components/server-frame.tsx", "utf8");
