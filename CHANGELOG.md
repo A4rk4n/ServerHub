@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.35.0] - 2026-10-01
+
+### Added
+- Power schedules: "Start server" and "Stop server" are now schedulable task types, and a one-click "Power window" button on the Tasks tab creates a matched daily pair — for example up at 15:00, down at 23:00 — so the server only runs while people actually play and your PC stays quiet the rest of the day. Overnight windows (stop after midnight) work too. A scheduled start that finds the server already running, or a stop that finds it already offline or still shutting down gracefully, records a skipped run with the reason instead of failing — the task history always tells you exactly what happened and why.
+
 ## [2.34.0] - 2026-10-01
 
 ### Added
@@ -210,7 +215,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.34.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.35.0...HEAD
+[2.35.0]: https://github.com/A4rk4n/ServerHub/compare/v2.34.0...v2.35.0
 [2.34.0]: https://github.com/A4rk4n/ServerHub/compare/v2.33.0...v2.34.0
 [2.33.0]: https://github.com/A4rk4n/ServerHub/compare/v2.32.0...v2.33.0
 [2.32.0]: https://github.com/A4rk4n/ServerHub/compare/v2.31.0...v2.32.0
