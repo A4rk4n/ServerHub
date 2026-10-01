@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.30.0] - 2026-10-01
+
+### Added
+- Per-server resource guardrails (Diagnostics → Resource guardrails): set a CPU and/or RAM ceiling plus a sustain window of 1–8 minutes, and get alerted only when usage stays above the threshold for the entire window — a short spike from a world save or chunk generation never triggers. A breach writes a console warning, opens a Diagnostics incident, records activity, fires webhook notifications (crash group), and shows an amber "guardrail" chip on the server card; an optional, off-by-default action restarts the server automatically. Alerts fire once per episode with a 15-minute cooldown, and reset when usage recovers. Guardrails are off by default and require a fully populated sample window, so freshly started servers are never flagged on incomplete data.
+
 ## [2.29.0] - 2026-10-01
 
 ### Added
@@ -185,7 +190,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.29.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.30.0...HEAD
+[2.30.0]: https://github.com/A4rk4n/ServerHub/compare/v2.29.0...v2.30.0
 [2.29.0]: https://github.com/A4rk4n/ServerHub/compare/v2.28.2...v2.29.0
 [2.28.2]: https://github.com/A4rk4n/ServerHub/compare/v2.28.1...v2.28.2
 [2.28.1]: https://github.com/A4rk4n/ServerHub/compare/v2.28.0...v2.28.1
