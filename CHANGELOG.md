@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.45.0] - 2026-10-01
+
+### Added
+
+- Public status page: a read-only, shareable page for players at
+  `/status?token=…` showing which servers are up, player counts, versions
+  (with non-vanilla loaders), and uptime — chrome-free, auto-refreshing
+  every 30 seconds, with a friendly invalid-link state.
+- Token guard instead of the PIN: the page and its endpoint
+  (`GET /api/status?token=…`) are exempt from the PIN lock and guarded by a
+  32-character secret link token. Disabled pages answer 404 (nothing to
+  probe), wrong tokens 401 via constant-time comparison. *New link*
+  regenerates the token and revokes the old link instantly.
+- The snapshot is whitelist-built — names, games, versions, status, player
+  counts, and uptime only; passwords, ports, paths, and addresses cannot
+  appear by construction. The token lives in a 0600 `status-page.json`
+  outside the database and outside support bundles.
+- Tools-page panel: enable toggle, page title, copyable share link, open
+  in new tab, and one-click link rotation
+  (`GET`/`PUT`/`POST /api/status-page`, PIN-protected).
+- `scripts/test-status-page.ts`: 5 tests covering config/token handling,
+  access decisions, snapshot whitelisting, label collapsing, and the exact
+  PIN-exemption surface (`STATUS_PAGE_SUITE_OK`).
+
 ## [2.44.0] - 2026-10-01
 
 ### Added
@@ -300,7 +324,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.44.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.45.0...HEAD
+[2.45.0]: https://github.com/A4rk4n/ServerHub/compare/v2.44.0...v2.45.0
 [2.44.0]: https://github.com/A4rk4n/ServerHub/compare/v2.43.0...v2.44.0
 [2.43.0]: https://github.com/A4rk4n/ServerHub/compare/v2.42.0...v2.43.0
 [2.42.0]: https://github.com/A4rk4n/ServerHub/compare/v2.41.0...v2.42.0
