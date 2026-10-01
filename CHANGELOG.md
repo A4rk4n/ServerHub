@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.32.0] - 2026-10-01
+
+### Added
+- Command macros: save named sequences of console commands — like "announce, wait 30 seconds, save the world, restart" — and fire them with one click from the Console tab or on a schedule from the Tasks tab. Each step can pause up to two minutes before the next; a failing step stops the sequence immediately so a stopped server never receives the rest. Running a macro always shows the exact commands first, and scheduling one requires confirming those exact commands — the same safety contract as scheduled commands and broadcasts. Macros are per server (up to 20, with up to 12 steps each) and can be edited or deleted at any time; a scheduled macro whose macro was deleted records a failed run instead of silently doing nothing.
+
 ## [2.31.0] - 2026-10-01
 
 ### Added
@@ -195,7 +200,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.31.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.32.0...HEAD
+[2.32.0]: https://github.com/A4rk4n/ServerHub/compare/v2.31.0...v2.32.0
 [2.31.0]: https://github.com/A4rk4n/ServerHub/compare/v2.30.0...v2.31.0
 [2.30.0]: https://github.com/A4rk4n/ServerHub/compare/v2.29.0...v2.30.0
 [2.29.0]: https://github.com/A4rk4n/ServerHub/compare/v2.28.2...v2.29.0
