@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.42.0] - 2026-10-01
+
+### Added
+
+- Full-history console search: the console page gains a collapsible search
+  panel that queries every stored log line across sessions — plain text or
+  regular expression (case-insensitive), level and source filters, and an
+  optional date range — with cursor-based pagination to continue into older
+  lines (`GET /api/servers/:id/console/search`).
+- Console log export: download any filtered span of the console history as a
+  plain-text `.log` file named after the server, capped at 20,000 lines with
+  an explicit truncation note (`GET /api/servers/:id/console/export`).
+- `scripts/test-console-search.ts`: 5 tests covering parameter normalization,
+  text/regex/level/source matching, budgeted scan pagination, log-line
+  formatting, and export file naming (`CONSOLE_SEARCH_SUITE_OK`).
+
 ## [2.41.0] - 2026-10-01
 
 ### Added
@@ -245,7 +261,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.41.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.42.0...HEAD
+[2.42.0]: https://github.com/A4rk4n/ServerHub/compare/v2.41.0...v2.42.0
 [2.41.0]: https://github.com/A4rk4n/ServerHub/compare/v2.40.0...v2.41.0
 [2.40.0]: https://github.com/A4rk4n/ServerHub/compare/v2.39.0...v2.40.0
 [2.39.0]: https://github.com/A4rk4n/ServerHub/compare/v2.38.0...v2.39.0
