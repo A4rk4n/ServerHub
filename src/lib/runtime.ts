@@ -37,6 +37,7 @@ import { observationKey, reconcileObservationKeys } from "./player-observations"
 import { findMacro, macroSummary, type Macro } from "./macros";
 import { listBackupEntries, sanitizeArchiveEntryPath } from "./backup-browser";
 import { MIRROR_ARCHIVE_PATTERN, formatMirrorNote, mirrorRelativePath, normalizeMirrorConfig, normalizeMirrorState, planMirrorSync, summarizeMirrorHealth, type MirrorConfig, type MirrorState } from "./backup-mirror";
+import { MAX_SCAN_ENTRIES, buildUsageReport, cleanupHints, computeGrowth, normalizeUsageHistory, recordUsageSnapshot, type UsageFile, type UsageGrowth, type UsageReport } from "./disk-usage";
 import { powerTaskDecision } from "./power-schedule";
 import { broadcastCommand, countdownPlan, normalizeWarningConfig, warningMessage, type WarningAction, type WarningConfig } from "./restart-warnings";
 import { analyzeCrash } from "./crash-analyzer";
@@ -2413,6 +2414,85 @@ export async function backupMirrorStatus(): Promise<{ config: MirrorConfig; heal
   const config = await readMirrorConfig();
   const rows = await db.select({ id: backups.id, status: backups.status }).from(backups);
   return { config, health: summarizeMirrorHealth(rows, await readMirrorState()) };
+}
+
+// ---------------------------------------------------------------------------
+// Disk usage explorer
+// ---------------------------------------------------------------------------
+
+function usageHistoryFile() { return path.join(appDataDir(), "disk-usage.json"); }
+
+/** Walk a server directory (symlink-free, entry-budgeted) into relative file records. */
+async function walkServerFiles(root: string): Promise<{ files: UsageFile[]; truncated: boolean }> {
+  const files: UsageFile[] = [];
+  let examined = 0;
+  let truncated = false;
+  const queue: string[] = [""];
+  while (queue.length) {
+    const relDir = queue.shift()!;
+    const absDir = relDir ? path.join(root, ...relDir.split("/")) : root;
+    const entries: import("node:fs").Dirent[] = await fsp.readdir(absDir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (examined >= MAX_SCAN_ENTRIES) { truncated = true; return { files, truncated }; }
+      examined += 1;
+      if (entry.isSymbolicLink()) continue;
+      const rel = relDir ? `${relDir}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) queue.push(rel);
+      else if (entry.isFile()) {
+        const stat = await fsp.stat(path.join(absDir, entry.name)).catch(() => null);
+        if (stat) files.push({ path: rel, sizeBytes: stat.size });
+      }
+    }
+  }
+  return { files, truncated };
+}
+
+export type DiskUsageResult = {
+  report: UsageReport;
+  backups: { count: number; bytes: number };
+  growth: UsageGrowth;
+  hints: string[];
+  scannedAt: string;
+};
+
+/**
+ * Scan a server's storage: category breakdown and biggest files from the
+ * server directory, backup archive bytes from disk (DB size as fallback),
+ * growth vs the daily snapshot history, and cleanup hints.
+ */
+export async function scanServerDiskUsage(serverId: number): Promise<DiskUsageResult | null> {
+  await ensureRuntimeInitialized();
+  const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
+  if (!server) return null;
+  const { files, truncated } = await walkServerFiles(serverDir(server));
+  const report = buildUsageReport(files, truncated);
+
+  const backupRows = await db.select().from(backups).where(eq(backups.serverId, serverId));
+  let backupsBytes = 0;
+  let backupsCount = 0;
+  for (const row of backupRows) {
+    if (row.status !== "complete") continue;
+    backupsCount += 1;
+    const stat = await fsp.stat(backupArchivePath(row)).catch(() => null);
+    backupsBytes += stat ? stat.size : row.sizeMb * 1024 * 1024;
+  }
+
+  const now = new Date();
+  const total = report.totalBytes + backupsBytes;
+  let history = normalizeUsageHistory(await fsp.readFile(usageHistoryFile(), "utf8").then(JSON.parse).catch(() => undefined));
+  const growth = computeGrowth(history, serverId, total, now);
+  history = recordUsageSnapshot(history, serverId, total, now);
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(usageHistoryFile(), JSON.stringify(history, null, 2), "utf8").catch(() => {});
+
+  const hints = cleanupHints({
+    report,
+    backupsBytes,
+    backupsCount,
+    retentionConfigured: server.backupRetentionCount > 0 || server.backupRetentionDays > 0,
+    crashReportCount: files.filter((file) => /^(crash-reports|crashes)\//i.test(file.path)).length,
+  });
+  return { report, backups: { count: backupsCount, bytes: backupsBytes }, growth, hints, scannedAt: now.toISOString() };
 }
 
 export async function restoreBackup(serverId: number, backupId: number) {
