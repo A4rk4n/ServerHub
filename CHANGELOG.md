@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.34.0] - 2026-10-01
+
+### Added
+- Panel PIN lock (Tool Health page → Panel PIN lock): optionally require a 4–12 digit PIN to open Server Hub, so housemates or siblings at the same PC cannot wander into your server controls. While locked, every page redirects to a dedicated lock screen and every API call is refused; the launcher's health probe keeps working so startup is unaffected. Five wrong PINs pause attempts for 30 seconds, unlocks last 12 hours per browser, a "Lock now" button locks instantly, and changing or removing the PIN signs out every browser at once. The PIN is stored only on your PC as a salted scrypt hash; if you ever forget it, delete pin-lock.json from the Server Hub data folder while the panel is closed. Off by default — nothing changes until you set a PIN.
+
 ## [2.33.0] - 2026-10-01
 
 ### Added
@@ -205,7 +210,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.33.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.34.0...HEAD
+[2.34.0]: https://github.com/A4rk4n/ServerHub/compare/v2.33.0...v2.34.0
 [2.33.0]: https://github.com/A4rk4n/ServerHub/compare/v2.32.0...v2.33.0
 [2.32.0]: https://github.com/A4rk4n/ServerHub/compare/v2.31.0...v2.32.0
 [2.31.0]: https://github.com/A4rk4n/ServerHub/compare/v2.30.0...v2.31.0
