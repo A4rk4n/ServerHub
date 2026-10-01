@@ -99,6 +99,14 @@ test("audit trail: CSV is RFC-4180 shaped and the file name is stamped", () => {
   assert.equal(csvEscape('say "hi"'), '"say ""hi"""');
   assert.equal(csvEscape("a,b"), '"a,b"');
   assert.equal(csvEscape("line\nbreak"), '"line\nbreak"');
+  // formula-injection neutralization: a hostile player name can never
+  // become a live formula when the CSV is opened in Excel or Sheets
+  assert.equal(csvEscape("=HYPERLINK(evil)"), "'=HYPERLINK(evil)");
+  assert.equal(csvEscape("+1234"), "'+1234");
+  assert.equal(csvEscape("-cmd"), "'-cmd");
+  assert.equal(csvEscape("@module"), "'@module");
+  assert.equal(csvEscape("=a,b"), "\"'=a,b\"", "neutralizing composes with quoting");
+  assert.equal(csvEscape("safe = inside"), "safe = inside", "only a leading trigger is neutralized");
   const csv = toAuditCsv([
     { at: "2026-10-01T12:00:00.000Z", category: "files", serverId: 1, serverName: "Lobby, EU", summary: 'File "x" saved', detail: "" },
   ]);

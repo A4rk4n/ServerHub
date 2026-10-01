@@ -26,20 +26,27 @@ export function AuditTrailView() {
   const [categories, setCategories] = useState<AuditCategory[]>([]);
   const [serverId, setServerId] = useState("");
   const [q, setQ] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [offset, setOffset] = useState(0);
   const limit = 50;
 
+  // Debounce the free-text search so typing doesn't refetch per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q), 300);
+    return () => clearTimeout(t);
+  }, [q]);
+
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
     if (categories.length) params.set("categories", categories.join(","));
     if (serverId) params.set("serverId", serverId);
-    if (q.trim()) params.set("q", q.trim());
+    if (debouncedQ.trim()) params.set("q", debouncedQ.trim());
     if (from) params.set("from", String(new Date(from).getTime()));
     if (to) params.set("to", String(new Date(to).getTime()));
     return params;
-  }, [categories, serverId, q, from, to]);
+  }, [categories, serverId, debouncedQ, from, to]);
 
   const load = useCallback(
     async (nextOffset: number, append: boolean) => {

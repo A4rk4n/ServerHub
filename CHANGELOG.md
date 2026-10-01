@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.46.2] - 2026-10-01
+
+### Fixed
+
+- Audit CSV export now neutralizes spreadsheet formula injection: fields
+  carry user-influenced text (player names, file names, task names, server
+  names), so a leading `=`, `+`, `-`, `@`, tab, or CR is prefixed with a
+  quote before Excel or Sheets could ever treat it as a formula — proven
+  end-to-end against a server literally named `=HYPERLINK("http://evil")`.
+- The audit trail's free-text search is debounced (300 ms) so typing no
+  longer issues a three-table query per keystroke.
+
 ## [2.46.1] - 2026-10-01
 
 ### Fixed
@@ -363,7 +375,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.46.1...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.46.2...HEAD
+[2.46.2]: https://github.com/A4rk4n/ServerHub/compare/v2.46.1...v2.46.2
 [2.46.1]: https://github.com/A4rk4n/ServerHub/compare/v2.46.0...v2.46.1
 [2.46.0]: https://github.com/A4rk4n/ServerHub/compare/v2.45.0...v2.46.0
 [2.45.0]: https://github.com/A4rk4n/ServerHub/compare/v2.44.0...v2.45.0

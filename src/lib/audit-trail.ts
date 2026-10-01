@@ -178,8 +178,15 @@ export function paginateAuditEvents(filtered: AuditEvent[], filters: AuditFilter
 // CSV export
 // ---------------------------------------------------------------------------
 
+/**
+ * Quote per RFC 4180 and neutralize spreadsheet formula injection: audit
+ * fields carry user-influenced text (player names, file names, task
+ * names), so a leading =, +, -, @, tab, or CR is prefixed with a quote
+ * before Excel or Sheets can ever treat it as a formula.
+ */
 export function csvEscape(value: string): string {
-  return /[",\r\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
+  const neutralized = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return /[",\r\n]/.test(neutralized) ? `"${neutralized.replaceAll('"', '""')}"` : neutralized;
 }
 
 /** RFC-4180-style CSV: CRLF line ends, quoted only where needed. */
