@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.51.0] - 2026-10-02
+
+### Added
+
+- Maintenance mode: a per-server pause switch for everything automated.
+  While flagged, the scheduler skips the server's tasks (they stay armed
+  and fire once the flag is lifted), the crash watchdog stops
+  auto-restarting it, scheduled announcements go quiet (the cadence
+  re-anchors afterwards), and the public status page shows "maintenance"
+  instead of a scary "offline". Manual actions — power buttons, console,
+  backups — keep working: maintenance silences robots, not operators.
+  Toggled from the Settings page with an optional note; entering/leaving
+  maintenance lands in the activity feed and the server console, a sky
+  "maintenance" pill appears on the server card, and the flag is carried
+  in the fleet payload. Stored in an app-data sidecar; no schema change.
+- `GET`/`PUT /api/servers/:id/maintenance` — the `PUT` rejects malformed
+  JSON with `400`, and the `since` timestamp is server-owned (stamped on
+  enable, preserved while on).
+
 ## [2.50.0] - 2026-10-02
 
 ### Added
@@ -465,7 +484,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.50.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.51.0...HEAD
+[2.51.0]: https://github.com/A4rk4n/ServerHub/compare/v2.50.0...v2.51.0
 [2.50.0]: https://github.com/A4rk4n/ServerHub/compare/v2.49.0...v2.50.0
 [2.49.0]: https://github.com/A4rk4n/ServerHub/compare/v2.48.0...v2.49.0
 [2.48.0]: https://github.com/A4rk4n/ServerHub/compare/v2.47.0...v2.48.0

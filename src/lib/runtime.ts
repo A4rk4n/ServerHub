@@ -45,6 +45,7 @@ import { broadcastCommand, countdownPlan, normalizeWarningConfig, warningMessage
 import { isAnnouncementDue, nextAnnouncementIndex, normalizeAnnouncementConfig, type AnnouncementConfig } from "./announcements";
 import { diskAlertDetail, evaluateDiskFree, isDiskAlertDue, normalizeDiskAlertConfig, type DiskAlertConfig } from "./disk-alerts";
 import { LOG_SWEEP_EVERY_MS, PRUNE_BATCH, archiveFileName, formatArchiveLine, normalizeLogRetentionConfig, retentionCutoff, type LogRetentionConfig } from "./log-retention";
+import { readAllMaintenance, readMaintenance } from "./maintenance";
 import { analyzeCrash } from "./crash-analyzer";
 import { nextCalendarRun } from "./calendar-schedule";
 import { scheduledCommand } from "./scheduled-actions";
@@ -1848,6 +1849,11 @@ async function scheduleCrashRestart(entry: RuntimeEntry) {
   // while a server is running takes effect on that process's next exit.
   const [server] = await db.select().from(servers).where(eq(servers.id, entry.server.id));
   if (!server?.autoRestart) return;
+  const paused = await readMaintenance(server.id).catch(() => ({ enabled: false }));
+  if (paused.enabled) {
+    await logLine(server.id, "warn", "Watchdog", "Maintenance mode: automatic restart suppressed.");
+    return;
+  }
   const id = server.id;
   const now = Date.now();
   const windowMs = Math.max(30, Math.min(3600, server.restartWindowSec)) * 1000;
@@ -2113,8 +2119,11 @@ export async function sweepDiskAlerts(nowMs = Date.now(), force = false): Promis
 
 /** 15-second sweep: broadcast on every online server whose interval has elapsed. */
 export async function sweepAnnouncements(nowMs = Date.now()): Promise<void> {
+  const inMaintenance = await readAllMaintenance();
   for (const entry of state.processes.values()) {
     const serverId = entry.server.id;
+    // Maintenance silences the rotation; the cadence re-anchors afterwards.
+    if (inMaintenance[String(serverId)]?.enabled) { announcerState.delete(serverId); continue; }
     const config = await readAnnouncementConfigFor(serverId);
     if (!config.enabled) { announcerState.delete(serverId); continue; }
     const known = announcerState.get(serverId);
@@ -2712,6 +2721,7 @@ export async function getPublicStatusSnapshot(): Promise<StatusSnapshot> {
   const online = await db.select({ serverId: players.serverId, count: sql<number>`count(*)` })
     .from(players).where(eq(players.isOnline, true)).groupBy(players.serverId);
   const onlineBy = new Map(online.map((row) => [row.serverId, Number(row.count)]));
+  const inMaintenance = await readAllMaintenance();
   return buildStatusSnapshot(
     config.title,
     fleet.map((server) => ({
@@ -2719,7 +2729,7 @@ export async function getPublicStatusSnapshot(): Promise<StatusSnapshot> {
       gameName: getGame(server.gameId).name,
       version: server.version,
       loader: server.loader,
-      status: server.status,
+      status: inMaintenance[String(server.id)]?.enabled ? "maintenance" : server.status,
       maxPlayers: server.maxPlayers,
       onlineCount: onlineBy.get(server.id) ?? 0,
       lastStartedAt: server.lastStartedAt,
@@ -2897,9 +2907,13 @@ export async function sweepTasks(serverId?: number) {
     const now = new Date();
     if (now.getTime() - lastDigestProbe > 60_000) { lastDigestProbe = now.getTime(); await maybeSendActivityDigest(now).catch(() => {}); }
     const enabled = await db.select().from(tasks).where(eq(tasks.enabled, true));
+    const inMaintenance = await readAllMaintenance();
     for (const task of enabled) {
       if (serverId && task.serverId !== serverId) continue;
       if (!task.nextRunAt || task.nextRunAt > now) continue;
+      // Maintenance pauses the scheduler: the task stays due and fires once
+      // the flag is lifted (the missed-run policy applies past 60 seconds).
+      if (inMaintenance[String(task.serverId)]?.enabled) continue;
       const overdue=now.getTime()-task.nextRunAt.getTime()>60_000;
       if(overdue&&task.missedPolicy!=="run"){const next=task.scheduleKind==="once"?(task.missedPolicy==="reschedule"?new Date(now.getTime()+5*60_000):null):task.scheduleKind==="daily"||task.scheduleKind==="weekly"?nextCalendarRun(task.scheduleKind,task.scheduleTime,task.scheduleWeekday,now):new Date(now.getTime()+Math.max(1,task.intervalMin)*60_000);await db.update(tasks).set({enabled:next?task.enabled:false,nextRunAt:next,lastRunAt:task.missedPolicy==="skip"?now:task.lastRunAt}).where(eq(tasks.id,task.id));await db.insert(taskRuns).values({taskId:task.id,serverId:task.serverId,taskName:task.name,type:task.type,command:"",status:task.missedPolicy==="skip"?"skipped":"rescheduled",error:`Missed while Server Hub was offline; policy: ${task.missedPolicy}`});continue}
       await db.update(tasks).set({ lastRunAt: now, enabled:task.scheduleKind==="once"?false:task.enabled, nextRunAt: task.scheduleKind==="once"?null:task.scheduleKind==="daily"||task.scheduleKind==="weekly"?nextCalendarRun(task.scheduleKind,task.scheduleTime,task.scheduleWeekday,now):new Date(now.getTime() + Math.max(1, task.intervalMin) * 60_000) }).where(eq(tasks.id, task.id));

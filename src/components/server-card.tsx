@@ -26,6 +26,7 @@ export type CardServer = {
   updatePreviousVersion?: string;
   updateTargetVersion?: string;
   tags?: string[];
+  maintenance?: boolean;
 };
 
 export function ServerCard({ server, index = 0 }: { server: CardServer; index?: number }) {
@@ -85,6 +86,11 @@ export function ServerCard({ server, index = 0 }: { server: CardServer; index?: 
             {server.guardrail && (
               <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-700" title="A resource guardrail is currently triggered — see Diagnostics">
                 guardrail
+              </span>
+            )}
+            {server.maintenance && (
+              <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-sky-700" title="Maintenance mode — scheduled tasks, auto-restarts, and announcements are paused">
+                maintenance
               </span>
             )}
             <StatusPill status={server.status} size="sm" />

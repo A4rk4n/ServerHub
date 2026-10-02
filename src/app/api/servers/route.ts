@@ -7,6 +7,7 @@ import { db } from "@/db";
 import { servers } from "@/db/schema";
 import { getGame, hasGame } from "@/lib/games";
 import { readAllServerTags } from "@/lib/server-tags";
+import { readAllMaintenance } from "@/lib/maintenance";
 import { validCatalogVersion } from "@/lib/catalog";
 import { ensureRuntimeInitialized, guardrailActive, installFlow, metricsFor } from "@/lib/runtime";
 
@@ -17,6 +18,7 @@ export async function GET() {
     await ensureRuntimeInitialized();
     const rows = await db.select().from(servers).orderBy(asc(servers.id));
     const allTags = await readAllServerTags();
+    const allMaintenance = await readAllMaintenance();
     const output = [];
     for (const server of rows) {
       const metric = server.status === "online" ? (await metricsFor(server)).at(-1) : undefined;
@@ -29,6 +31,7 @@ export async function GET() {
         live: metric ? { cpu: metric.cpu, ram: metric.ram, players: metric.players, tps: metric.tps } : null,
         guardrail: guardrailActive(server.id),
         tags: allTags[String(server.id)] ?? [],
+        maintenance: allMaintenance[String(server.id)]?.enabled ?? false,
       });
     }
     return NextResponse.json({ servers: output });
