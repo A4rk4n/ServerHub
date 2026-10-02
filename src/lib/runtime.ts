@@ -42,6 +42,7 @@ import { buildStatusSnapshot, normalizeStatusConfig, type StatusPageConfig, type
 import { powerTaskDecision } from "./power-schedule";
 import { broadcastCommand, countdownPlan, normalizeWarningConfig, warningMessage, type WarningAction, type WarningConfig } from "./restart-warnings";
 import { isAnnouncementDue, nextAnnouncementIndex, normalizeAnnouncementConfig, type AnnouncementConfig } from "./announcements";
+import { diskAlertDetail, evaluateDiskFree, isDiskAlertDue, normalizeDiskAlertConfig, type DiskAlertConfig } from "./disk-alerts";
 import { analyzeCrash } from "./crash-analyzer";
 import { nextCalendarRun } from "./calendar-schedule";
 import { scheduledCommand } from "./scheduled-actions";
@@ -180,7 +181,7 @@ async function initializeRuntime() {
   scheduleInstallPump();
 
   if (!state.scheduler) {
-    state.scheduler = setInterval(() => { void sweepTasks().catch(() => {}); void sweepAnnouncements().catch(() => {}); }, 15_000);
+    state.scheduler = setInterval(() => { void sweepTasks().catch(() => {}); void sweepAnnouncements().catch(() => {}); void sweepDiskAlerts().catch(() => {}); }, 15_000);
     state.scheduler.unref?.();
   }
 
@@ -1987,6 +1988,57 @@ async function broadcastAnnouncement(server: Server, config: AnnouncementConfig,
   if (!result.ok) return { ok: false, reason: result.reason ?? "Command failed" };
   announcerState.set(server.id, { lastIndex: index, lastSentAt: nowMs });
   return { ok: true, message };
+}
+
+// ---- disk-space alerts ---------------------------------------------------
+
+const diskAlertState = { lastCheckAt: 0, lastAlertAt: 0, lastFreeMb: null as number | null };
+const DISK_CHECK_EVERY_MS = 5 * 60_000;
+
+function diskAlertsFile() { return path.join(appDataDir(), "disk-alerts.json"); }
+
+export async function readDiskAlertConfig(): Promise<DiskAlertConfig> {
+  try {
+    return normalizeDiskAlertConfig(JSON.parse(await fsp.readFile(diskAlertsFile(), "utf8")));
+  } catch { return normalizeDiskAlertConfig(undefined); }
+}
+
+export async function writeDiskAlertConfig(config: DiskAlertConfig): Promise<void> {
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(diskAlertsFile(), JSON.stringify(config, null, 2), "utf8");
+  diskAlertState.lastCheckAt = 0; // re-check promptly under the new config
+}
+
+export function getDiskAlertStatus(): { freeMb: number | null; lastAlertAt: string | null } {
+  return {
+    freeMb: diskAlertState.lastFreeMb,
+    lastAlertAt: diskAlertState.lastAlertAt > 0 ? new Date(diskAlertState.lastAlertAt).toISOString() : null,
+  };
+}
+
+/** Scheduler-tick sweep, internally throttled to one statfs per 5 minutes. */
+export async function sweepDiskAlerts(nowMs = Date.now(), force = false): Promise<{ freeMb: number | null; breached: boolean; alerted: boolean }> {
+  if (!force && nowMs - diskAlertState.lastCheckAt < DISK_CHECK_EVERY_MS) {
+    return { freeMb: diskAlertState.lastFreeMb, breached: false, alerted: false };
+  }
+  diskAlertState.lastCheckAt = nowMs;
+  const config = await readDiskAlertConfig();
+  const stat = await fsp.statfs(appDataDir()).catch(() => null);
+  if (!stat) return { freeMb: null, breached: false, alerted: false };
+  const freeMb = Math.round((Number(stat.bavail) * Number(stat.bsize)) / 1_048_576);
+  diskAlertState.lastFreeMb = freeMb;
+  if (!config.enabled) return { freeMb, breached: false, alerted: false };
+  const breach = evaluateDiskFree(freeMb, config.minFreeMb);
+  if (!breach) {
+    diskAlertState.lastAlertAt = 0; // space recovered — re-arm immediately
+    return { freeMb, breached: false, alerted: false };
+  }
+  if (!isDiskAlertDue(nowMs, diskAlertState.lastAlertAt, config.cooldownMin)) return { freeMb, breached: true, alerted: false };
+  diskAlertState.lastAlertAt = nowMs;
+  const detail = diskAlertDetail(breach);
+  void notify({ kind: "disk-low", serverName: "Panel", detail });
+  await act(null, "guardrail", `Low disk space: ${detail}`).catch(() => {});
+  return { freeMb, breached: true, alerted: true };
 }
 
 /** 15-second sweep: broadcast on every online server whose interval has elapsed. */

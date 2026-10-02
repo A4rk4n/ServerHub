@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.48.0] - 2026-10-02
+
+### Added
+
+- Disk-space alerts: the panel volume is checked every 5 minutes, and when
+  free space drops below the configurable threshold (default 2 GB) the
+  webhook fires a `disk-low` notification and an entry lands in the
+  activity feed. Repeat alerts respect a cooldown (default 6 hours) and
+  re-arm immediately once space recovers; nothing is ever deleted
+  automatically. A full disk is the silent killer of game servers —
+  backups fail and worlds corrupt mid-save — and the per-server CPU/RAM
+  guardrails could not see it coming. Configured from the Tools page with
+  a live "Check now" button.
+- `GET`/`PUT`/`POST /api/disk-alerts` — the `PUT` rejects malformed JSON
+  with `400`; `POST {"action":"check-now"}` forces an immediate check.
+
+### Changed
+
+- Planned "performance alerts" scope folded into this release as disk
+  alerts: sustained CPU/RAM alerting already ships as resource guardrails,
+  so duplicating it was dropped in favour of the real gap.
+
 ## [2.47.0] - 2026-10-02
 
 ### Added
@@ -409,7 +431,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.47.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.48.0...HEAD
+[2.48.0]: https://github.com/A4rk4n/ServerHub/compare/v2.47.0...v2.48.0
 [2.47.0]: https://github.com/A4rk4n/ServerHub/compare/v2.46.3...v2.47.0
 [2.46.3]: https://github.com/A4rk4n/ServerHub/compare/v2.46.2...v2.46.3
 [2.46.2]: https://github.com/A4rk4n/ServerHub/compare/v2.46.1...v2.46.2

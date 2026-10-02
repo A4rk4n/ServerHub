@@ -1,5 +1,6 @@
 import { BackupMirrorPanel } from "@/components/backup-mirror-panel";
 import { NotificationsPanel } from "@/components/notifications-panel";
+import { DiskAlertsPanel } from "@/components/disk-alerts-panel";
 import { PinLockPanel } from "@/components/pin-lock-panel";
 import { StatusPagePanel } from "@/components/status-page-panel";
 import { ToolHealthManager } from "@/components/tool-health-manager";
@@ -10,6 +11,7 @@ export default function ToolsPage() {
     <div className="space-y-5">
       <ToolHealthManager />
       <NotificationsPanel />
+      <DiskAlertsPanel />
       <BackupMirrorPanel />
       <StatusPagePanel />
       <PinLockPanel />
