@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.55.0] - 2026-10-02
+
+### Added
+
+- Player playtime leaderboard with CSV export: the Players page now shows
+  the full ranked leaderboard for the selected window (1–30 days) — every
+  player's playtime, session count, and average session length, ties
+  broken by name — instead of only the top five, and an "Export CSV"
+  button downloads the whole table (`rank, player, playtime, sessions,
+  avg session, first/last seen, online`) as a timestamped RFC-4180 file.
+  Open sessions accrue up to the moment of export and flag the player as
+  online; sessions straddling the window boundary only count their
+  in-window slice. Player names are user-influenced text, so every CSV
+  field is quoted per RFC 4180 and spreadsheet formula injection is
+  neutralized, exactly like the audit-trail export.
+
 ## [2.54.0] - 2026-10-02
 
 ### Added
@@ -551,7 +567,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.54.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.55.0...HEAD
+[2.55.0]: https://github.com/A4rk4n/ServerHub/compare/v2.54.0...v2.55.0
 [2.54.0]: https://github.com/A4rk4n/ServerHub/compare/v2.53.1...v2.54.0
 [2.53.1]: https://github.com/A4rk4n/ServerHub/compare/v2.53.0...v2.53.1
 [2.53.0]: https://github.com/A4rk4n/ServerHub/compare/v2.52.0...v2.53.0

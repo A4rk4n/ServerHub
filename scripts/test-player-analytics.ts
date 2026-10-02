@@ -91,6 +91,6 @@ test("the journal, API, and UI are wired", () => {
   assert.ok(route.includes("Math.min(30, Math.max(1,"), "the window clamps to 1-30 days");
   const ui = fs.readFileSync("src/components/players-manager.tsx", "utf8");
   assert.ok(ui.includes("AnalyticsPanel"), "the Players tab renders the analytics panel");
-  assert.ok(ui.includes("Top players") && ui.includes("Busy hours"), "leaderboard and busy-hours chart exist");
+  assert.ok(ui.includes("Playtime leaderboard") && ui.includes("Busy hours"), "leaderboard and busy-hours chart exist");
   console.log("PLAYER_ANALYTICS_SUITE_OK");
 });
