@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.53.0] - 2026-10-02
+
+### Added
+
+- Pre-launch checks: every server start — manual, scheduled, or crash
+  restart — is now preceded by a preflight sweep, and a checklist panel on
+  the Diagnostics page shows the same results on demand. Blockers stop the
+  launch with the exact reason (bind address not assigned to this machine,
+  port already in use by another process, another server in the fleet
+  active on the same port, missing or non-executable launch target,
+  unaccepted Mojang EULA); warnings are logged to the server console but
+  never stop anything (free disk below the alert floor, memory budget
+  above currently free RAM). A blocked start leaves the server `offline`
+  instead of marking it `crashed`, logs each blocker to the console, and
+  lands a "start blocked by pre-launch checks" entry in the activity
+  feed. `GET /api/servers/:id/preflight` exposes the checklist; a running
+  server skips the self-defeating port probe.
+
 ## [2.52.0] - 2026-10-02
 
 ### Added
@@ -505,7 +523,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.52.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.53.0...HEAD
+[2.53.0]: https://github.com/A4rk4n/ServerHub/compare/v2.52.0...v2.53.0
 [2.52.0]: https://github.com/A4rk4n/ServerHub/compare/v2.51.0...v2.52.0
 [2.51.0]: https://github.com/A4rk4n/ServerHub/compare/v2.50.0...v2.51.0
 [2.50.0]: https://github.com/A4rk4n/ServerHub/compare/v2.49.0...v2.50.0
