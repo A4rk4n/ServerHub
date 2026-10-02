@@ -2,6 +2,7 @@ import { BackupMirrorPanel } from "@/components/backup-mirror-panel";
 import { NotificationsPanel } from "@/components/notifications-panel";
 import { DiskAlertsPanel } from "@/components/disk-alerts-panel";
 import { LogRetentionPanel } from "@/components/log-retention-panel";
+import { PanelSettingsPanel } from "@/components/panel-settings-panel";
 import { PinLockPanel } from "@/components/pin-lock-panel";
 import { StatusPagePanel } from "@/components/status-page-panel";
 import { ToolHealthManager } from "@/components/tool-health-manager";
@@ -14,6 +15,7 @@ export default function ToolsPage() {
       <NotificationsPanel />
       <DiskAlertsPanel />
       <LogRetentionPanel />
+      <PanelSettingsPanel />
       <BackupMirrorPanel />
       <StatusPagePanel />
       <PinLockPanel />

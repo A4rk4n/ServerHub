@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.52.0] - 2026-10-02
+
+### Added
+
+- Panel settings export/import: one JSON bundle of every panel-level
+  configuration — notifications, disk alerts, log retention, restart
+  warnings, announcements, server tags, status page, backup mirror —
+  downloadable from the Tools page for backups or migrating to a new
+  machine. Strict whitelist: the PIN lock is never included (re-establish
+  security locally), maintenance flags and runtime state files are
+  excluded, and imported sections are written with `0600` permissions.
+  The bundle does carry the webhook URL and status-page token — that is
+  the point of a migration — so treat the file like a secret. Imports are
+  verified (kind, version, section shapes) before anything is written,
+  and every consumer still normalizes on read, so junk inside a section
+  degrades to defaults instead of breaking the panel. Per-server sections
+  apply by server ID.
+- `GET`/`POST /api/panel-settings` — the `GET` downloads a timestamped
+  bundle; the `POST` rejects malformed JSON, wrong kinds, and unsupported
+  versions with `400` and reports exactly which sections were applied.
+
 ## [2.51.0] - 2026-10-02
 
 ### Added
@@ -484,7 +505,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.51.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.52.0...HEAD
+[2.52.0]: https://github.com/A4rk4n/ServerHub/compare/v2.51.0...v2.52.0
 [2.51.0]: https://github.com/A4rk4n/ServerHub/compare/v2.50.0...v2.51.0
 [2.50.0]: https://github.com/A4rk4n/ServerHub/compare/v2.49.0...v2.50.0
 [2.49.0]: https://github.com/A4rk4n/ServerHub/compare/v2.48.0...v2.49.0
