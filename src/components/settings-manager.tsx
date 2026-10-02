@@ -55,6 +55,7 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
   const [delName, setDelName] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [cloning, setCloning] = useState(false);
+  const [cloneWithFiles, setCloneWithFiles] = useState(false);
   const [templating, setTemplating] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<{supported:boolean; currentVersion:string; latestVersion?:string; updateAvailable?:boolean; rolling?:boolean; provider?:string; reason?:string; validationStatus?:string; previousVersion?:string; targetVersion?:string; rollbackAvailable?:boolean; rollbackRequiresStop?:boolean} | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -87,7 +88,7 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
 
   async function saveTemplate() {setTemplating(true);setErr(null);try{const r=await fetch("/api/templates",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({serverId:initial.id,name:`${initial.name} template`})});const j=await r.json();if(!r.ok)setErr(j.error??"Template save failed");else setSavedAt(Date.now())}finally{setTemplating(false)}}
 
-  async function cloneConfiguration() { setCloning(true);setErr(null);try{const r=await fetch(`/api/servers/${initial.id}/clone`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:`${initial.name} Copy`})});const j=await r.json();if(!r.ok)setErr(j.error??"Clone failed");else router.push(`/servers/${j.server.id}/settings`)}finally{setCloning(false)}}
+  async function cloneConfiguration() { setCloning(true);setErr(null);try{const r=await fetch(`/api/servers/${initial.id}/clone`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:`${initial.name} Copy`,copyFiles:cloneWithFiles})});const j=await r.json();if(!r.ok)setErr(j.error??"Clone failed");else router.push(`/servers/${j.server.id}/settings`)}finally{setCloning(false)}}
 
   async function save() {
     setSaving(true);
@@ -419,7 +420,7 @@ export function SettingsManager({ initial, game }: { initial: Server; game: Game
           {err && <p className="mt-3 text-[12px] text-red-500">{err}</p>}
         </section>
 
-        <section className="panel p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div className="max-w-xl"><p className="text-sm font-semibold text-plum-800">Clone configuration</p><p className="mt-1 text-xs text-plum-500">Creates a new setup with a free adjacent port. Credentials, worlds, backups, players, logs, tasks, mods, and private paths are excluded.</p></div><div className="flex gap-2"><Btn variant="ghost" loading={templating} onClick={saveTemplate}><Save size={14}/> Save template</Btn><Btn variant="subtle" loading={cloning} onClick={cloneConfiguration}><Copy size={14}/> Clone safely</Btn></div></div></section>
+        <section className="panel p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div className="max-w-xl"><p className="text-sm font-semibold text-plum-800">Clone server</p><p className="mt-1 text-xs text-plum-500">{cloneWithFiles ? "Creates a copy on a free adjacent port including every server file — world, configs, and mods. The server must be stopped first; credentials, backups, players, logs, and tasks never clone." : "Creates a new setup with a free adjacent port. Configuration only: credentials, worlds, backups, players, logs, tasks, and mods are excluded, and the clone is reinstalled fresh."}</p><label className="mt-2 flex items-center gap-2 text-xs font-medium text-plum-600"><Toggle checked={cloneWithFiles} onChange={setCloneWithFiles} accent={accent}/> Copy server files too (world, configs, mods)</label></div><div className="flex gap-2"><Btn variant="ghost" loading={templating} onClick={saveTemplate}><Save size={14}/> Save template</Btn><Btn variant="subtle" loading={cloning} onClick={cloneConfiguration}><Copy size={14}/> {cloneWithFiles ? "Clone with files" : "Clone safely"}</Btn></div></div></section>
 
         {/* danger zone */}
         <section className="rounded-2xl border border-red-200 bg-red-50 p-5">

@@ -2592,6 +2592,33 @@ export async function sweepBackupVerification(nowMs = Date.now(), force = false)
   return { checked: candidates.length, corrupt };
 }
 
+/**
+ * Copy the source server's directory into the clone's (server-clone.ts owns
+ * the eligibility rules). Returns the number of files that landed; a source
+ * with no directory yet simply copies nothing.
+ */
+export async function cloneServerFiles(source: Server, target: Server): Promise<{ files: number }> {
+  const from = serverDir(source);
+  const to = serverDir(target);
+  try {
+    await fsp.access(from);
+  } catch {
+    return { files: 0 };
+  }
+  await fsp.mkdir(path.dirname(to), { recursive: true });
+  await fsp.cp(from, to, { recursive: true, force: true });
+  let files = 0;
+  const walk = async (dir: string): Promise<void> => {
+    for (const entry of await fsp.readdir(dir, { withFileTypes: true })) {
+      if (files >= 10_000) return;
+      if (entry.isDirectory()) await walk(path.join(dir, entry.name));
+      else files += 1;
+    }
+  };
+  await walk(to).catch(() => {});
+  return { files };
+}
+
 export async function deleteBackupFile(backup: Backup) {
   await fsp.rm(backupArchivePath(backup), { force: true });
   // The mirror copy (and its state entry) leaves with the primary.
