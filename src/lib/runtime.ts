@@ -52,6 +52,7 @@ import { scheduledCommand } from "./scheduled-actions";
 import { queryA2sInfo, queryA2sPlayers, queryMinecraftStatus } from "./query-protocols";
 import { isProtectedSecret, protectAndVerify, revealSecret } from "./credential-vault";
 import { appDataDir, backupsDir, ensureDataDirs, safeFileName, serverDir, toolsDir } from "./storage";
+import { evaluateBindAddress, evaluateDiskFloor, evaluateEula, evaluateFleetPortConflict, evaluateLaunchTarget, evaluateMemoryBudget, evaluatePortProbe, probeLaunchTarget, summarizePreflight, type PreflightSummary } from "./start-preflight";
 import { recordSuccessfulToolUse } from "./tool-usage";
 
 export type Metric = { t: number; cpu: number; ram: number; players: number; tps: number | null };
@@ -1146,6 +1147,33 @@ export async function portAvailable(port: number, protocol: "TCP" | "UDP", addre
   });
 }
 
+/**
+ * Pre-launch checks: evaluated in start-preflight.ts, probed here (the
+ * runtime owns the fleet table, socket binds, statfs, and process table).
+ * Every startFlow consults this; GET /api/servers/:id/preflight exposes it.
+ */
+export async function runStartPreflight(server: Server): Promise<PreflightSummary> {
+  const game = getGame(server.gameId);
+  const neighbors = await db.select({ id: servers.id, name: servers.name, port: servers.port, status: servers.status }).from(servers);
+  // A server that is already running is holding its own port — skip the bind
+  // probe rather than reporting the server as its own conflict.
+  const portFree = state.processes.has(server.id) ? null : await portAvailable(server.port, game.protocol, server.bindAddress);
+  const launchProbe = await probeLaunchTarget(server.launchCommand);
+  const diskConfig = await readDiskAlertConfig();
+  const stat = await fsp.statfs(appDataDir()).catch(() => null);
+  const freeMb = stat ? Math.round((Number(stat.bavail) * Number(stat.bsize)) / 1_048_576) : null;
+  const availableMb = Math.round(os.freemem() / 1_048_576);
+  return summarizePreflight([
+    evaluateBindAddress(server.bindAddress),
+    evaluatePortProbe(server.port, game.protocol, server.bindAddress, portFree),
+    evaluateFleetPortConflict(server, neighbors),
+    evaluateLaunchTarget(server.launchCommand, game.installer === "manual", launchProbe),
+    evaluateEula(server.gameId, server.eulaAccepted),
+    evaluateDiskFloor(freeMb, diskConfig.minFreeMb),
+    evaluateMemoryBudget(server.memoryMb, availableMb),
+  ]);
+}
+
 async function preflightInstallation(server: Server, root: string, context: InstallContext) {
   const game = getGame(server.gameId);
   await context.report("preflight", 3, "Checking storage, port and installation paths");
@@ -1734,6 +1762,13 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
   if (state.processes.has(id)) return { ok: false, reason: "Server process is already running" };
   if (state.installs.has(id) || server.status === "installing") return { ok: false, reason: "Installation is still running" };
   if (server.status === "error") return { ok: false, reason: "Installation failed. Retry installation first." };
+  const preflight = await runStartPreflight(server);
+  for (const warning of preflight.warnings) await logLine(id, "warn", "Preflight", warning);
+  if (!preflight.canStart) {
+    for (const blocker of preflight.blockers) await logLine(id, "error", "Preflight", blocker);
+    await act(id, "power", `${server.name} start blocked by pre-launch checks`);
+    return { ok: false, reason: `Pre-launch checks failed: ${preflight.blockers.join(" ")}` };
+  }
   const rollbackReadinessValidation=server.updateValidationStatus==="rollback-restored"||server.updateValidationStatus==="rollback-validating";
   const pendingUpdateValidation=server.updateValidationStatus==="awaiting-readiness"||server.updateValidationStatus==="validating-runtime"||rollbackReadinessValidation;
 
