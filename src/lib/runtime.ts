@@ -24,11 +24,12 @@ import dgram from "node:dgram";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import zlib from "node:zlib";
 import { Readable } from "node:stream";
 import { finished, pipeline } from "node:stream/promises";
 import yauzl from "yauzl";
 import * as tar from "tar";
-import { and, asc, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, sql } from "drizzle-orm";
 import { db, dbPath, sqliteClient } from "@/db";
 import { activity, backups, consoleLogs, incidents, installationEvents, installationJobs, moderationActions, playerSessions, players, servers, taskRuns, tasks } from "@/db/schema";
 import type { Backup, InstallationJob, Server } from "@/db/schema";
@@ -43,6 +44,7 @@ import { powerTaskDecision } from "./power-schedule";
 import { broadcastCommand, countdownPlan, normalizeWarningConfig, warningMessage, type WarningAction, type WarningConfig } from "./restart-warnings";
 import { isAnnouncementDue, nextAnnouncementIndex, normalizeAnnouncementConfig, type AnnouncementConfig } from "./announcements";
 import { diskAlertDetail, evaluateDiskFree, isDiskAlertDue, normalizeDiskAlertConfig, type DiskAlertConfig } from "./disk-alerts";
+import { LOG_SWEEP_EVERY_MS, PRUNE_BATCH, archiveFileName, formatArchiveLine, normalizeLogRetentionConfig, retentionCutoff, type LogRetentionConfig } from "./log-retention";
 import { analyzeCrash } from "./crash-analyzer";
 import { nextCalendarRun } from "./calendar-schedule";
 import { scheduledCommand } from "./scheduled-actions";
@@ -181,7 +183,7 @@ async function initializeRuntime() {
   scheduleInstallPump();
 
   if (!state.scheduler) {
-    state.scheduler = setInterval(() => { void sweepTasks().catch(() => {}); void sweepAnnouncements().catch(() => {}); void sweepDiskAlerts().catch(() => {}); }, 15_000);
+    state.scheduler = setInterval(() => { void sweepTasks().catch(() => {}); void sweepAnnouncements().catch(() => {}); void sweepDiskAlerts().catch(() => {}); void sweepLogRetention().catch(() => {}); }, 15_000);
     state.scheduler.unref?.();
   }
 
@@ -1988,6 +1990,74 @@ async function broadcastAnnouncement(server: Server, config: AnnouncementConfig,
   if (!result.ok) return { ok: false, reason: result.reason ?? "Command failed" };
   announcerState.set(server.id, { lastIndex: index, lastSentAt: nowMs });
   return { ok: true, message };
+}
+
+// ---- console-log retention -------------------------------------------------
+
+const logRetentionState = { lastSweepAt: 0, lastResult: null as { prunedLines: number; archivedFiles: number; sweptAt: number } | null };
+
+function logRetentionFile() { return path.join(appDataDir(), "log-retention.json"); }
+function logArchiveDir() { return path.join(appDataDir(), "log-archive"); }
+
+export async function readLogRetentionConfig(): Promise<LogRetentionConfig> {
+  try {
+    return normalizeLogRetentionConfig(JSON.parse(await fsp.readFile(logRetentionFile(), "utf8")));
+  } catch { return normalizeLogRetentionConfig(undefined); }
+}
+
+export async function writeLogRetentionConfig(config: LogRetentionConfig): Promise<void> {
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(logRetentionFile(), JSON.stringify(config, null, 2), "utf8");
+  logRetentionState.lastSweepAt = 0; // re-sweep promptly under the new config
+}
+
+export function getLogRetentionStatus(): { lastSweepAt: string | null; lastResult: { prunedLines: number; archivedFiles: number; sweptAt: string } | null } {
+  const last = logRetentionState.lastResult;
+  return {
+    lastSweepAt: logRetentionState.lastSweepAt > 0 ? new Date(logRetentionState.lastSweepAt).toISOString() : null,
+    lastResult: last ? { prunedLines: last.prunedLines, archivedFiles: last.archivedFiles, sweptAt: new Date(last.sweptAt).toISOString() } : null,
+  };
+}
+
+/** Hourly sweep: archive-then-prune console lines past the retention window. */
+export async function sweepLogRetention(nowMs = Date.now(), force = false): Promise<{ prunedLines: number; archivedFiles: number }> {
+  if (!force && nowMs - logRetentionState.lastSweepAt < LOG_SWEEP_EVERY_MS) return { prunedLines: 0, archivedFiles: 0 };
+  logRetentionState.lastSweepAt = nowMs;
+  const config = await readLogRetentionConfig();
+  if (!config.enabled) return { prunedLines: 0, archivedFiles: 0 };
+  const cutoff = retentionCutoff(nowMs, config.retentionDays);
+  const fleet = await db.select({ id: servers.id }).from(servers);
+  let prunedLines = 0;
+  let archivedFiles = 0;
+  for (const { id } of fleet) {
+    const stale = await db
+      .select()
+      .from(consoleLogs)
+      .where(and(eq(consoleLogs.serverId, id), lt(consoleLogs.ts, cutoff)))
+      .orderBy(asc(consoleLogs.id))
+      .limit(PRUNE_BATCH);
+    if (stale.length === 0) continue;
+    if (config.archive) {
+      const dir = path.join(logArchiveDir(), String(id));
+      await fsp.mkdir(dir, { recursive: true });
+      const body = stale.map(formatArchiveLine).join("\n") + "\n";
+      await fsp.writeFile(path.join(dir, archiveFileName(id, nowMs)), zlib.gzipSync(body));
+      archivedFiles += 1;
+      // Oldest beyond the cap go first — names are lexicographically dated.
+      const kept = (await fsp.readdir(dir).catch(() => [] as string[])).filter((name) => name.endsWith(".log.gz")).sort();
+      for (const old of kept.slice(0, Math.max(0, kept.length - config.archiveKeep))) {
+        await fsp.rm(path.join(dir, old), { force: true });
+      }
+    }
+    const maxId = stale[stale.length - 1].id;
+    await db.delete(consoleLogs).where(and(eq(consoleLogs.serverId, id), lte(consoleLogs.id, maxId), lt(consoleLogs.ts, cutoff)));
+    prunedLines += stale.length;
+  }
+  if (prunedLines > 0) {
+    await act(null, "task", `Log retention: pruned ${prunedLines} console line${prunedLines === 1 ? "" : "s"} older than ${config.retentionDays} day${config.retentionDays === 1 ? "" : "s"}${config.archive ? ` (${archivedFiles} archive file${archivedFiles === 1 ? "" : "s"} written)` : ""}`).catch(() => {});
+  }
+  logRetentionState.lastResult = { prunedLines, archivedFiles, sweptAt: nowMs };
+  return { prunedLines, archivedFiles };
 }
 
 // ---- disk-space alerts ---------------------------------------------------

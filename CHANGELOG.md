@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.50.0] - 2026-10-02
+
+### Added
+
+- Console log retention: lines older than the configurable window
+  (default 30 days, 1–365) are pruned by an hourly sweep so the
+  console_logs table stops growing without bound and searches stay fast.
+  With archiving on (the default), pruned lines are gzipped into
+  `app-data/log-archive/<serverId>/` first — nothing is lost by default —
+  and each server keeps at most the configured number of archive files
+  (default 30, oldest deleted first). Each sweep is bounded to 5000 lines
+  per server; a backlog drains over successive sweeps. Every productive
+  sweep lands a summary in the activity feed. Configured on the Tools
+  page with a "Sweep now" button.
+- `GET`/`PUT`/`POST /api/log-retention` — the `PUT` rejects malformed
+  JSON with `400`; `POST {"action":"sweep-now"}` forces an immediate
+  sweep and reports pruned/archived counts.
+
 ## [2.49.0] - 2026-10-02
 
 ### Added
@@ -447,7 +465,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.49.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.50.0...HEAD
+[2.50.0]: https://github.com/A4rk4n/ServerHub/compare/v2.49.0...v2.50.0
 [2.49.0]: https://github.com/A4rk4n/ServerHub/compare/v2.48.0...v2.49.0
 [2.48.0]: https://github.com/A4rk4n/ServerHub/compare/v2.47.0...v2.48.0
 [2.47.0]: https://github.com/A4rk4n/ServerHub/compare/v2.46.3...v2.47.0
