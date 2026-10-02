@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.57.0] - 2026-10-02
+
+### Added
+
+- Full server cloning: the Settings page's clone action gains a "Copy
+  server files too" toggle. A file clone copies the entire server
+  directory — world, configs, mods — keeps the original world name so the
+  copied world is the one that loads, carries the launch command, and
+  comes out `offline`, ready to start immediately (proven: a cloned
+  server booted seconds after cloning with no reinstall). It requires the
+  source to be stopped, because copying a live directory can tear the
+  world mid-write (`409` otherwise); a copy that fails midway removes the
+  half-clone instead of leaving a trap. Config-only clones behave as
+  before (fresh `-clone` world, reinstall required) and now also carry
+  the launch command. The API additionally accepts an explicit `port`
+  (validated 1024–65535, collision-checked against the fleet, `409` when
+  taken; automatic adjacent-port scan otherwise), malformed bodies `400`,
+  and every clone lands in the activity feed with its port and file
+  count. Credentials, backups, players, logs, tasks, and schedules never
+  clone in either mode.
+
 ## [2.56.0] - 2026-10-02
 
 ### Added
@@ -586,7 +607,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.56.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.57.0...HEAD
+[2.57.0]: https://github.com/A4rk4n/ServerHub/compare/v2.56.0...v2.57.0
 [2.56.0]: https://github.com/A4rk4n/ServerHub/compare/v2.55.0...v2.56.0
 [2.55.0]: https://github.com/A4rk4n/ServerHub/compare/v2.54.0...v2.55.0
 [2.54.0]: https://github.com/A4rk4n/ServerHub/compare/v2.53.1...v2.54.0
