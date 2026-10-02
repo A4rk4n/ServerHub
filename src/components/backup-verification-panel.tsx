@@ -38,7 +38,7 @@ export function BackupVerificationPanel() {
       const j = await r.json();
       if (r.ok) {
         setReport(j);
-        setNote(`Checked ${j.checked} archive${j.checked === 1 ? "" : "s"} — ${j.corrupt === 0 ? "no corruption found" : `${j.corrupt} corrupt`}.`);
+        setNote(`Checked ${j.checked} archive${j.checked === 1 ? "" : "s"} — ${j.corruptFound === 0 ? "no corruption found" : `${j.corruptFound} corrupt`}.`);
       } else {
         setNote(j.error ?? "Verification failed to run.");
       }

@@ -40,5 +40,5 @@ export async function POST(req: Request) {
   const action = (body as { action?: unknown })?.action;
   if (action !== "verify-now") return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   const result = await sweepBackupVerification(Date.now(), true);
-  return NextResponse.json({ ...result, ...(await buildReport()) });
+  return NextResponse.json({ checked: result.checked, corruptFound: result.corrupt, ...(await buildReport()) });
 }

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.56.0] - 2026-10-02
+
+### Added
+
+- Backup integrity verification: a backup that cannot be restored is not
+  a backup, so every completed archive is now re-hashed (sha-256 against
+  the recorded checksum) and tar-walked (same safety posture as restore)
+  on a rolling schedule — a bounded number of archives per sweep, newest
+  first, re-verified weekly, verdicts cached in an app-data sidecar and
+  pruned with the backups they belong to. The moment a verdict flips bad
+  a new `backup-corrupt` notification fires (part of the backup webhook
+  group) and the finding lands in the activity feed — once per failure,
+  not on every re-check. Each backup in the Backups list now shows its
+  verdict (verified ✓ / CORRUPT ✕ with the reason / not verified yet),
+  and a "Backup integrity" panel on the Tools page shows fleet-wide
+  counts, the corrupt list, and a "Verify now" button that re-checks
+  everything immediately — including archives with fresh verdicts,
+  because corruption does not wait for cache expiry.
+
 ## [2.55.0] - 2026-10-02
 
 ### Added
@@ -567,7 +586,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.55.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.56.0...HEAD
+[2.56.0]: https://github.com/A4rk4n/ServerHub/compare/v2.55.0...v2.56.0
 [2.55.0]: https://github.com/A4rk4n/ServerHub/compare/v2.54.0...v2.55.0
 [2.54.0]: https://github.com/A4rk4n/ServerHub/compare/v2.53.1...v2.54.0
 [2.53.1]: https://github.com/A4rk4n/ServerHub/compare/v2.53.0...v2.53.1
