@@ -37,6 +37,8 @@ import { getGame, type InstallerKind } from "./games";
 import { observationKey, reconcileObservationKeys } from "./player-observations";
 import { findMacro, macroSummary, type Macro } from "./macros";
 import { listBackupEntries, sanitizeArchiveEntryPath } from "./backup-browser";
+import { MAX_VERIFY_FORCED, MAX_VERIFY_PER_SWEEP, VERIFY_SWEEP_EVERY_MS, normalizeVerificationState, pruneVerificationState, selectBackupsToVerify, summarizeVerification, type VerificationRecord, type VerificationState } from "./backup-verification";
+import { inspectBackupArchive } from "./backup-validation";
 import { MIRROR_ARCHIVE_PATTERN, formatMirrorNote, mirrorRelativePath, normalizeMirrorConfig, normalizeMirrorState, planMirrorSync, summarizeMirrorHealth, type MirrorConfig, type MirrorState } from "./backup-mirror";
 import { MAX_SCAN_ENTRIES, buildUsageReport, cleanupHints, computeGrowth, normalizeUsageHistory, recordUsageSnapshot, type UsageFile, type UsageGrowth, type UsageReport } from "./disk-usage";
 import { buildStatusSnapshot, normalizeStatusConfig, type StatusPageConfig, type StatusSnapshot } from "./status-page";
@@ -186,7 +188,7 @@ async function initializeRuntime() {
   scheduleInstallPump();
 
   if (!state.scheduler) {
-    state.scheduler = setInterval(() => { void sweepTasks().catch(() => {}); void sweepAnnouncements().catch(() => {}); void sweepDiskAlerts().catch(() => {}); void sweepLogRetention().catch(() => {}); void sweepUptimeHistory().catch(() => {}); }, 15_000);
+    state.scheduler = setInterval(() => { void sweepTasks().catch(() => {}); void sweepAnnouncements().catch(() => {}); void sweepDiskAlerts().catch(() => {}); void sweepLogRetention().catch(() => {}); void sweepUptimeHistory().catch(() => {}); void sweepBackupVerification().catch(() => {}); }, 15_000);
     state.scheduler.unref?.();
   }
 
@@ -2522,6 +2524,72 @@ export async function applyBackupRetention(serverId: number): Promise<{ pruned: 
 
 export function backupArchivePath(backup: Backup): string {
   return backup.archivePath || path.join(backupsDir(backup.serverId), `${String(backup.id).padStart(6, "0")}-${safeFileName(backup.name)}.tar.gz`);
+}
+
+// ---------------------------------------------------------------------------
+// Backup integrity verification (backup-verification.ts owns the pure logic)
+// ---------------------------------------------------------------------------
+
+const backupVerifyState = { lastSweepAt: 0 };
+
+function backupVerificationFile() {
+  return path.join(appDataDir(), "backup-verification.json");
+}
+
+export async function readBackupVerification(): Promise<VerificationState> {
+  try { return normalizeVerificationState(JSON.parse(await fsp.readFile(backupVerificationFile(), "utf8"))); }
+  catch { return {}; }
+}
+
+/**
+ * Rolling verification: re-hash a bounded number of completed archives per
+ * pass (stale-first cache, newest backups first) and flip a backup-corrupt
+ * notification the moment a verdict goes bad. `force` is the operator's
+ * "verify now" — bigger cap, no sweep throttle.
+ */
+export async function sweepBackupVerification(nowMs = Date.now(), force = false): Promise<{ checked: number; corrupt: number }> {
+  if (!force && nowMs - backupVerifyState.lastSweepAt < VERIFY_SWEEP_EVERY_MS) return { checked: 0, corrupt: 0 };
+  backupVerifyState.lastSweepAt = nowMs;
+  const rows = await db.select().from(backups);
+  let state = pruneVerificationState(await readBackupVerification(), new Set(rows.map((row) => String(row.id))));
+  // Operator-forced runs re-verify everything (staleness 0): a corrupted
+  // archive must be catchable immediately, not after the cache expires.
+  const candidates = selectBackupsToVerify(rows, state, nowMs, force ? MAX_VERIFY_FORCED : MAX_VERIFY_PER_SWEEP, force ? 0 : undefined);
+  let corrupt = 0;
+  for (const backupId of candidates) {
+    const backup = rows.find((row) => row.id === backupId);
+    if (!backup) continue;
+    const archive = backupArchivePath(backup);
+    let record: VerificationRecord;
+    try {
+      const result = await inspectBackupArchive(archive, backup.checksum);
+      record = {
+        ok: result.valid,
+        problem: result.valid ? "" : `Checksum mismatch — expected ${result.expectedChecksum.slice(0, 12)}…, found ${result.actualChecksum.slice(0, 12)}…`,
+        checksum: result.actualChecksum,
+        verifiedAt: new Date(nowMs).toISOString(),
+        archiveBytes: result.archiveBytes,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const missing = (error as NodeJS.ErrnoException)?.code === "ENOENT";
+      record = { ok: false, problem: missing ? "Archive file is missing from disk" : message.slice(0, 500), checksum: "", verifiedAt: new Date(nowMs).toISOString(), archiveBytes: 0 };
+    }
+    const previous = state[String(backupId)];
+    state = { ...state, [String(backupId)]: record };
+    if (!record.ok) {
+      corrupt += 1;
+      if (!previous || previous.ok) {
+        const [server] = await db.select().from(servers).where(eq(servers.id, backup.serverId));
+        const serverName = server?.name ?? `Server ${backup.serverId}`;
+        void notify({ kind: "backup-corrupt", serverName, detail: `${backup.name} — ${record.problem}` });
+        await act(backup.serverId, "backup", `Backup "${backup.name}" failed verification: ${record.problem}`).catch(() => {});
+      }
+    }
+  }
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(backupVerificationFile(), JSON.stringify(state), "utf8");
+  return { checked: candidates.length, corrupt };
 }
 
 export async function deleteBackupFile(backup: Backup) {

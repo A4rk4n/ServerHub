@@ -2,7 +2,9 @@
 
 import { DatabaseBackup, Download, FolderSearch, History, Plus, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { Backup } from "@/db/schema";
+import type { Backup as BackupRow } from "@/db/schema";
+
+type Backup = BackupRow & { verification?: { ok: boolean; problem: string; verifiedAt: string } | null };
 import { cn, hexA, timeAgo } from "@/lib/format";
 import { Btn, Empty, Modal, Spin, inputCls } from "./ui";
 
@@ -179,6 +181,13 @@ export function BackupsManager({ serverId, accent, status }: { serverId: number;
                 </p>
                 <p className="mt-0.5 text-[11px] text-plum-400">
                   {b.note || "manual"} · {timeAgo(b.createdAt)}
+                  {b.status === "complete" && (
+                    b.verification
+                      ? b.verification.ok
+                        ? <span className="ml-1.5 font-semibold text-emerald-600" title={`Archive verified ${timeAgo(b.verification.verifiedAt)}`}>· verified ✓</span>
+                        : <span className="ml-1.5 font-semibold text-red-500" title={b.verification.problem}>· CORRUPT ✕</span>
+                      : <span className="ml-1.5 text-plum-300" title="Awaiting the next integrity sweep">· not verified yet</span>
+                  )}
                 </p>
               </div>
               {b.status === "building" ? (

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { backups, servers } from "@/db/schema";
-import { applyBackupRetention, createBackup } from "@/lib/runtime";
+import { applyBackupRetention, createBackup, readBackupVerification } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -11,8 +11,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   const [s] = await db.select().from(servers).where(eq(servers.id, Number(id)));
   if (!s) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const rows = await db.select().from(backups).where(eq(backups.serverId, s.id)).orderBy(desc(backups.id));
+  const verification = await readBackupVerification();
   return NextResponse.json({
-    backups: rows,
+    backups: rows.map((row) => ({ ...row, verification: verification[String(row.id)] ?? null })),
     retention: { count: s.backupRetentionCount, days: s.backupRetentionDays, protectedId: s.updateSafetyBackupId ?? null },
   });
 }
