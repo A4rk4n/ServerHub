@@ -53,6 +53,7 @@ import { queryA2sInfo, queryA2sPlayers, queryMinecraftStatus } from "./query-pro
 import { isProtectedSecret, protectAndVerify, revealSecret } from "./credential-vault";
 import { appDataDir, backupsDir, ensureDataDirs, safeFileName, serverDir, toolsDir } from "./storage";
 import { evaluateBindAddress, evaluateDiskFloor, evaluateEula, evaluateFleetPortConflict, evaluateLaunchTarget, evaluateMemoryBudget, evaluatePortProbe, probeLaunchTarget, summarizePreflight, type PreflightSummary } from "./start-preflight";
+import { UPTIME_SAMPLE_EVERY_MS, UPTIME_WINDOW_DAYS, normalizeUptimeHistory, pruneUptimeHistory, recordUptimeSample, uptimeBars, uptimeWindowPercent, utcDayKey, type UptimeHistory, type UptimeSampleState } from "./uptime-history";
 import { recordSuccessfulToolUse } from "./tool-usage";
 
 export type Metric = { t: number; cpu: number; ram: number; players: number; tps: number | null };
@@ -185,7 +186,7 @@ async function initializeRuntime() {
   scheduleInstallPump();
 
   if (!state.scheduler) {
-    state.scheduler = setInterval(() => { void sweepTasks().catch(() => {}); void sweepAnnouncements().catch(() => {}); void sweepDiskAlerts().catch(() => {}); void sweepLogRetention().catch(() => {}); }, 15_000);
+    state.scheduler = setInterval(() => { void sweepTasks().catch(() => {}); void sweepAnnouncements().catch(() => {}); void sweepDiskAlerts().catch(() => {}); void sweepLogRetention().catch(() => {}); void sweepUptimeHistory().catch(() => {}); }, 15_000);
     state.scheduler.unref?.();
   }
 
@@ -2737,6 +2738,42 @@ export async function scanServerDiskUsage(serverId: number): Promise<DiskUsageRe
 
 function statusPageConfigFile() { return path.join(appDataDir(), "status-page.json"); }
 
+// ---------------------------------------------------------------------------
+// Uptime history — minute samples into UTC day buckets (uptime-history.ts)
+// ---------------------------------------------------------------------------
+
+const uptimeSweepState = { lastSampleAt: 0 };
+
+function uptimeHistoryFile() {
+  return path.join(appDataDir(), "uptime-history.json");
+}
+
+export async function readUptimeHistory(): Promise<UptimeHistory> {
+  try { return normalizeUptimeHistory(JSON.parse(await fsp.readFile(uptimeHistoryFile(), "utf8"))); }
+  catch { return {}; }
+}
+
+/** Scheduler-tick sweep, throttled to one sample per server per minute. */
+export async function sweepUptimeHistory(nowMs = Date.now(), force = false): Promise<{ sampled: boolean }> {
+  if (!force && nowMs - uptimeSweepState.lastSampleAt < UPTIME_SAMPLE_EVERY_MS) return { sampled: false };
+  uptimeSweepState.lastSampleAt = nowMs;
+  const fleet = await db.select({ id: servers.id, status: servers.status }).from(servers);
+  if (fleet.length === 0) return { sampled: false };
+  const inMaintenance = await readAllMaintenance();
+  const history = await readUptimeHistory();
+  const day = utcDayKey(new Date(nowMs));
+  for (const server of fleet) {
+    const sample: UptimeSampleState = inMaintenance[String(server.id)]?.enabled
+      ? "maintenance"
+      : server.status === "online" ? "online" : "offline";
+    recordUptimeSample(history, server.id, day, sample);
+  }
+  const pruned = pruneUptimeHistory(history, new Date(nowMs), UPTIME_WINDOW_DAYS, new Set(fleet.map((server) => String(server.id))));
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(uptimeHistoryFile(), JSON.stringify(pruned), "utf8");
+  return { sampled: true };
+}
+
 export async function readStatusPageConfig(): Promise<StatusPageConfig> {
   try { return normalizeStatusConfig(JSON.parse(await fsp.readFile(statusPageConfigFile(), "utf8"))); }
   catch { return normalizeStatusConfig(undefined); }
@@ -2757,6 +2794,8 @@ export async function getPublicStatusSnapshot(): Promise<StatusSnapshot> {
     .from(players).where(eq(players.isOnline, true)).groupBy(players.serverId);
   const onlineBy = new Map(online.map((row) => [row.serverId, Number(row.count)]));
   const inMaintenance = await readAllMaintenance();
+  const history = await readUptimeHistory();
+  const now = new Date();
   return buildStatusSnapshot(
     config.title,
     fleet.map((server) => ({
@@ -2768,6 +2807,9 @@ export async function getPublicStatusSnapshot(): Promise<StatusSnapshot> {
       maxPlayers: server.maxPlayers,
       onlineCount: onlineBy.get(server.id) ?? 0,
       lastStartedAt: server.lastStartedAt,
+      uptime: history[String(server.id)]
+        ? { windowPct: uptimeWindowPercent(history, server.id, now), days: uptimeBars(history, server.id, now) }
+        : null,
     }))
   );
 }

@@ -9,6 +9,8 @@
 // components (formatUptime on the public page), so everything must be
 // portable. Randomness comes from Web Crypto (Node 18+ and browsers).
 
+import type { UptimeDay } from "./uptime-history";
+
 export type StatusPageConfig = {
   enabled: boolean;
   /** URL-safe bearer token; empty means "never generated yet". */
@@ -79,6 +81,7 @@ export type StatusSourceRow = {
   maxPlayers: number;
   onlineCount: number;
   lastStartedAt: Date | string | null;
+  uptime?: { windowPct: number | null; days: UptimeDay[] } | null;
 };
 
 export type PublicServerRow = {
@@ -88,6 +91,8 @@ export type PublicServerRow = {
   status: PublicServerStatus;
   players: { online: number; max: number };
   uptimeSec: number | null;
+  /** 90-day history strip; null until the first sample lands. */
+  uptime: { windowPct: number | null; days: UptimeDay[] } | null;
 };
 
 export type StatusSnapshot = {
@@ -113,6 +118,10 @@ export function buildStatusSnapshot(title: string, rows: StatusSourceRow[], now 
       status,
       players: { online: Math.max(0, row.onlineCount), max: Math.max(0, row.maxPlayers) },
       uptimeSec,
+      // Whitelist-copied like everything else: extra keys on the input can never leak.
+      uptime: row.uptime
+        ? { windowPct: row.uptime.windowPct, days: row.uptime.days.map((day) => ({ date: day.date, pct: day.pct, state: day.state })) }
+        : null,
     };
   });
   servers.sort((a, b) => a.name.localeCompare(b.name));

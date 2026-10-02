@@ -68,7 +68,8 @@ test("status page: the snapshot is whitelist-built — sensitive input fields ca
   assert.deepEqual(snapshot.totals, { servers: 2, online: 1, players: 5 });
   assert.deepEqual(snapshot.servers.map((row) => row.name), ["Arena", "Lobby"], "sorted by name");
   const lobby = snapshot.servers[1];
-  assert.deepEqual(Object.keys(lobby).sort(), ["game", "name", "players", "status", "uptimeSec", "version"], "exactly the whitelisted keys");
+  assert.deepEqual(Object.keys(lobby).sort(), ["game", "name", "players", "status", "uptime", "uptimeSec", "version"], "exactly the whitelisted keys");
+  assert.equal(lobby.uptime, null, "no history input means a null uptime strip");
   assert.equal(JSON.stringify(snapshot).includes("hunter2"), false);
   assert.equal(JSON.stringify(snapshot).includes("secret"), false);
   assert.equal(lobby.version, "26.3 (fabric)", "non-vanilla loaders are shown");
