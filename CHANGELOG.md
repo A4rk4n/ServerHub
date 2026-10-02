@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.54.0] - 2026-10-02
+
+### Added
+
+- Uptime history on the public status page: the runtime samples every
+  server once a minute into UTC day buckets (90-day window, app-data
+  sidecar), and each server on the shared status page now carries the
+  classic uptime strip — one bar per day, oldest to newest, with a
+  window-wide uptime percentage. Maintenance mode is first-class: samples
+  taken while a server is flagged for maintenance render as a distinct
+  sky-blue bar and are excluded from the uptime denominator, so planned
+  work never counts as an outage. Unsampled days show as gaps, "no data
+  yet" is null rather than a fake 0%, corrupt history files degrade to an
+  empty strip, and pruning drops days outside the window plus servers
+  that no longer exist. The snapshot stays whitelist-built — day entries
+  are field-copied so nothing extra can leak to the public page.
+
 ## [2.53.1] - 2026-10-02
 
 ### Fixed
@@ -534,7 +551,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.53.1...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.54.0...HEAD
+[2.54.0]: https://github.com/A4rk4n/ServerHub/compare/v2.53.1...v2.54.0
 [2.53.1]: https://github.com/A4rk4n/ServerHub/compare/v2.53.0...v2.53.1
 [2.53.0]: https://github.com/A4rk4n/ServerHub/compare/v2.52.0...v2.53.0
 [2.52.0]: https://github.com/A4rk4n/ServerHub/compare/v2.51.0...v2.52.0
