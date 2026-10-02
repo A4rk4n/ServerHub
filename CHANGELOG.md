@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.49.0] - 2026-10-02
+
+### Added
+
+- Server tags: label servers ("production", "events", "testing") from the
+  Settings page — up to 8 tags each, canonicalized to lower-case
+  letters/digits/spaces/dashes and deduplicated. Tag chips appear on the
+  server cards, and the fleet page gains tag filter chips with counts;
+  because bulk power actions already operate on the filtered set,
+  "restart everything tagged events" is now a two-click operation. Tags
+  live in an app-data sidecar (`server-tags.json`) — no schema change,
+  and exports/imports are untouched.
+- `GET`/`PUT /api/servers/:id/tags` — the `PUT` requires an explicit
+  `tags` array and rejects malformed JSON with `400`, so a bad request
+  can never wipe a server's labels.
+
 ## [2.48.0] - 2026-10-02
 
 ### Added
@@ -431,7 +447,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.48.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.49.0...HEAD
+[2.49.0]: https://github.com/A4rk4n/ServerHub/compare/v2.48.0...v2.49.0
 [2.48.0]: https://github.com/A4rk4n/ServerHub/compare/v2.47.0...v2.48.0
 [2.47.0]: https://github.com/A4rk4n/ServerHub/compare/v2.46.3...v2.47.0
 [2.46.3]: https://github.com/A4rk4n/ServerHub/compare/v2.46.2...v2.46.3

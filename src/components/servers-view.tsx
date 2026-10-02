@@ -21,6 +21,7 @@ export function ServersView({ initial }: { initial: CardServer[] }) {
   const [servers, setServers] = useState(initial);
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("all");
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [arming, setArming] = useState<BulkAction | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -58,14 +59,21 @@ export function ServersView({ initial }: { initial: CardServer[] }) {
     return () => clearTimeout(t);
   }, [notice]);
 
+  const allTags = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of servers) for (const tag of s.tags ?? []) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [servers]);
+
   const filtered = useMemo(() => {
     return servers.filter((s) => {
       if (filter === "online" && s.status !== "online") return false;
       if (filter === "offline" && !["offline", "crashed", "error"].includes(s.status)) return false;
+      if (tagFilter && !(s.tags ?? []).includes(tagFilter)) return false;
       if (q && !(s.name + s.game.name + s.gameId).toLowerCase().includes(q.toLowerCase())) return false;
       return true;
     });
-  }, [servers, q, filter]);
+  }, [servers, q, filter, tagFilter]);
 
   async function runBulk(action: BulkAction) {
     const { eligible } = partitionBulkAction(filtered, action);
@@ -264,10 +272,22 @@ export function ServersView({ initial }: { initial: CardServer[] }) {
             {f}
           </button>
         ))}
+        {allTags.map(([tag, count]) => (
+          <button
+            key={tag}
+            onClick={() => setTagFilter(tagFilter === tag ? null : tag)}
+            className={`rounded-lg px-2.5 py-1.5 text-[12px] font-semibold transition ${
+              tagFilter === tag ? "bg-candy-100 text-plum-900" : "text-plum-500 hover:bg-candy-50 hover:text-plum-700"
+            }`}
+            title={`Only servers tagged “${tag}” — bulk actions apply to the filtered set`}
+          >
+            #{tag} <span className="text-[10px] text-plum-400">{count}</span>
+          </button>
+        ))}
         {servers.length > 1 && (
           <div className="ml-auto flex items-center gap-1.5">
             <span className="mr-1 text-[10px] font-bold uppercase tracking-wider text-plum-400">
-              fleet{filter !== "all" || q ? " (filtered)" : ""}
+              fleet{filter !== "all" || tagFilter || q ? " (filtered)" : ""}
             </span>
             {(Object.keys(BULK_META) as BulkAction[]).map((action) => {
               const meta = BULK_META[action];

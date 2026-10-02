@@ -25,6 +25,7 @@ export type CardServer = {
   updateValidationStatus?: string;
   updatePreviousVersion?: string;
   updateTargetVersion?: string;
+  tags?: string[];
 };
 
 export function ServerCard({ server, index = 0 }: { server: CardServer; index?: number }) {
@@ -96,6 +97,16 @@ export function ServerCard({ server, index = 0 }: { server: CardServer; index?: 
               v{server.version}
               {server.loader !== "vanilla" ? ` · ${server.loader}` : ""} · :{server.port}/{g.protocol.toLowerCase()}
             </p>
+            {(server.tags?.length ?? 0) > 0 && (
+              <p className="mt-1 flex flex-wrap gap-1">
+                {server.tags!.slice(0, 4).map((tag) => (
+                  <span key={tag} className="rounded-full border border-candy-200 bg-white/80 px-1.5 py-px text-[9px] font-semibold text-plum-500 backdrop-blur-sm">
+                    #{tag}
+                  </span>
+                ))}
+                {server.tags!.length > 4 && <span className="text-[9px] font-semibold text-plum-400">+{server.tags!.length - 4}</span>}
+              </p>
+            )}
           </div>
         </div>
       </div>
