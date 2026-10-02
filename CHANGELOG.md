@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.53.1] - 2026-10-02
+
+### Fixed
+
+- Pre-launch checks on Windows: the launch-target probe now treats any
+  existing target as runnable there — Windows has no executable bit, so
+  the POSIX `X_OK` test (and the unit suite asserting on it) was
+  meaningless on that platform and failed CI on windows-2025. Linux
+  behavior is unchanged: a missing or non-executable launch target still
+  blocks the start.
+
 ## [2.53.0] - 2026-10-02
 
 ### Added
@@ -523,7 +534,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.53.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.53.1...HEAD
+[2.53.1]: https://github.com/A4rk4n/ServerHub/compare/v2.53.0...v2.53.1
 [2.53.0]: https://github.com/A4rk4n/ServerHub/compare/v2.52.0...v2.53.0
 [2.52.0]: https://github.com/A4rk4n/ServerHub/compare/v2.51.0...v2.52.0
 [2.51.0]: https://github.com/A4rk4n/ServerHub/compare/v2.50.0...v2.51.0

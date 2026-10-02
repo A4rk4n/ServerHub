@@ -48,9 +48,10 @@ test("preflight: launch target probe and evaluation", async () => {
     const plain = path.join(dir, "notes.txt");
     fs.writeFileSync(runnable, "#!/bin/sh\n", { mode: 0o755 });
     fs.writeFileSync(plain, "hello", { mode: 0o644 });
-    // Absolute paths are inspected on disk.
+    // Absolute paths are inspected on disk. Windows has no executable bit,
+    // so an existing target always counts as runnable there.
     assert.deepEqual(await probeLaunchTarget(runnable), { exists: true, executable: true });
-    assert.deepEqual(await probeLaunchTarget(plain), { exists: true, executable: false });
+    assert.deepEqual(await probeLaunchTarget(plain), { exists: true, executable: process.platform === "win32" });
     assert.deepEqual(await probeLaunchTarget(path.join(dir, "missing.sh")), { exists: false, executable: false });
     // Relative commands resolve via PATH at spawn time — not probed.
     assert.equal(await probeLaunchTarget("java"), null);

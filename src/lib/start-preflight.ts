@@ -67,6 +67,9 @@ export async function probeLaunchTarget(command: string): Promise<LaunchTargetPr
   } catch {
     return { exists: false, executable: false };
   }
+  // Windows has no executable bit — X_OK degrades to an existence check
+  // there, so an existing target always counts as runnable.
+  if (process.platform === "win32") return { exists: true, executable: true };
   try {
     await fsp.access(cmd, fsConstants.X_OK);
     return { exists: true, executable: true };
