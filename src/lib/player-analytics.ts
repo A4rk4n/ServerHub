@@ -3,6 +3,8 @@
 // per-day series, and an hour-of-day activity histogram. Open sessions
 // (leftAt null) count as "still online" up to `now`.
 
+import { csvEscape } from "./audit-trail";
+
 export type SessionLike = {
   observationKey: string;
   displayName: string;
@@ -137,4 +139,65 @@ export function dailyPlayerSeries(sessions: SessionLike[], now = Date.now(), day
     });
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Player leaderboard — full ranked table + CSV export
+// ---------------------------------------------------------------------------
+
+
+export type LeaderboardRow = {
+  rank: number;
+  key: string;
+  name: string;
+  playtimeSec: number;
+  sessions: number;
+  avgSessionSec: number;
+  firstSeen: number;
+  lastSeen: number;
+  online: boolean;
+};
+
+/** Every player seen in the window (not just the top ten), ranked by playtime. */
+export function playerLeaderboard(sessions: SessionLike[], now = Date.now(), windowDays = 7): LeaderboardRow[] {
+  const clipped = clip(toIntervals(sessions, now), now - windowDays * DAY_MS, now);
+  const byPlayer = new Map<string, { name: string; playtimeSec: number; sessions: number; firstSeen: number; lastSeen: number; online: boolean }>();
+  for (const item of clipped) {
+    const seconds = Math.round((item.end - item.start) / 1000);
+    const entry = byPlayer.get(item.key) ?? { name: item.name, playtimeSec: 0, sessions: 0, firstSeen: item.start, lastSeen: 0, online: false };
+    entry.name = item.name;
+    entry.playtimeSec += seconds;
+    entry.sessions += 1;
+    entry.firstSeen = Math.min(entry.firstSeen, item.start);
+    entry.lastSeen = Math.max(entry.lastSeen, item.end);
+    entry.online = entry.online || item.open;
+    byPlayer.set(item.key, entry);
+  }
+  return [...byPlayer.entries()]
+    .map(([key, value]) => ({ key, ...value, avgSessionSec: value.sessions ? Math.round(value.playtimeSec / value.sessions) : 0 }))
+    .sort((a, b) => b.playtimeSec - a.playtimeSec || a.name.localeCompare(b.name))
+    .map((row, index) => ({ rank: index + 1, ...row }));
+}
+
+/** RFC-4180 CSV. Player names are user-influenced text, so every field goes through csvEscape (quoting + formula neutralization). */
+export function leaderboardCsv(rows: LeaderboardRow[]): string {
+  const lines = ["rank,player,playtime_hours,playtime_seconds,sessions,avg_session_minutes,first_seen,last_seen,online"];
+  for (const row of rows) {
+    lines.push([
+      String(row.rank),
+      row.name,
+      (row.playtimeSec / 3600).toFixed(2),
+      String(row.playtimeSec),
+      String(row.sessions),
+      (row.avgSessionSec / 60).toFixed(1),
+      new Date(row.firstSeen).toISOString(),
+      new Date(row.lastSeen).toISOString(),
+      row.online ? "yes" : "no",
+    ].map(csvEscape).join(","));
+  }
+  return `${lines.join("\r\n")}\r\n`;
+}
+
+export function leaderboardCsvFileName(serverId: number, windowDays: number, now = new Date()): string {
+  return `players-server-${serverId}-${windowDays}d-${now.toISOString().slice(0, 10).replaceAll("-", "")}.csv`;
 }

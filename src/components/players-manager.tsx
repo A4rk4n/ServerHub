@@ -1,6 +1,6 @@
 "use client";
 
-import { Ban, BarChart3, Clock3, Crown, LogOut, ShieldCheck, Search, ShieldOff, Star, Undo2, Users } from "lucide-react";
+import { Ban, BarChart3, Clock3, Crown, Download, LogOut, ShieldCheck, Search, ShieldOff, Star, Undo2, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ModerationActionRecord, Player, PlayerSession } from "@/db/schema";
 type PlayerView=Player&{observedIdentity:boolean;sessionCount:number;totalObservedSeconds:number;currentSessionSeconds:number;firstObservedAt:Date};
@@ -213,6 +213,7 @@ type AnalyticsPayload = {
     hourly: number[];
   };
   daily: Array<{ day: string; uniquePlayers: number; playtimeSec: number; peakConcurrent: number }>;
+  leaderboard: Array<{ rank: number; key: string; name: string; playtimeSec: number; sessions: number; avgSessionSec: number; firstSeen: number; lastSeen: number; online: boolean }>;
 };
 
 function hours(seconds: number) {
@@ -243,10 +244,13 @@ function AnalyticsPanel({ serverId, accent }: { serverId: number; accent: string
     <section className="panel p-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-display flex items-center gap-2 text-sm font-semibold text-plum-900"><BarChart3 size={15} style={{ color: accent }} /> Player analytics</h3>
-        <div className="flex gap-1">
+        <div className="flex items-center gap-1">
           {[7, 14, 30].map((option) => (
             <button key={option} onClick={() => setDays(option)} className={cn("rounded-lg px-2 py-1 text-[10px] font-bold uppercase", days === option ? "bg-candy-100 text-plum-800" : "text-plum-400")}>{option}d</button>
           ))}
+          <a href={`/api/servers/${serverId}/analytics?days=${days}&format=csv`} className="ml-1" title="Download the full leaderboard as CSV">
+            <Btn size="sm" variant="subtle"><Download size={12} />Export CSV</Btn>
+          </a>
         </div>
       </div>
       {!s ? <Spin label="Crunching sessions…" /> : s.totalSessions === 0 ? (
@@ -285,15 +289,15 @@ function AnalyticsPanel({ serverId, accent }: { serverId: number; accent: string
               <div className="mt-1 flex justify-between text-[9px] text-plum-400"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
             </div>
             <div>
-              <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-plum-500">Top players</p>
-              <div className="space-y-1">
-                {s.topPlayers.slice(0, 5).map((player, index) => (
+              <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-plum-500">Playtime leaderboard</p>
+              <div className="max-h-48 space-y-1 overflow-y-auto pr-1">
+                {(data.leaderboard ?? s.topPlayers.map((player, index) => ({ ...player, rank: index + 1, avgSessionSec: player.sessions ? Math.round(player.playtimeSec / player.sessions) : 0 }))).map((player) => (
                   <div key={player.key} className="flex items-center justify-between rounded-lg border border-candy-100 px-2.5 py-1.5 text-xs">
                     <span className="flex items-center gap-2 font-semibold text-plum-800">
-                      <span className="text-[10px] text-plum-400">#{index + 1}</span>{player.name}
+                      <span className="text-[10px] text-plum-400">#{player.rank}</span>{player.name}
                       {player.online && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" title="Online now" />}
                     </span>
-                    <span className="text-plum-500">{hours(player.playtimeSec)} · {player.sessions}×</span>
+                    <span className="text-plum-500" title={`avg session ${hours(player.avgSessionSec)}`}>{hours(player.playtimeSec)} · {player.sessions}× · ø{hours(player.avgSessionSec)}</span>
                   </div>
                 ))}
               </div>
