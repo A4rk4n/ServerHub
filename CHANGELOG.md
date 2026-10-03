@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.59.0] - 2026-10-03
+
+### Added
+
+- Weekly power schedule: each server's Settings page gains a "Weekly
+  power schedule" panel with up to four calendar windows — pick days of
+  the week and a start/end time ("online 16:00–23:00 on weekdays") and
+  the server starts when a window opens and stops when it closes.
+  Windows may span midnight (a Friday 22:00–02:00 window covers Friday
+  night and Saturday morning). The panel shows what the schedule wants
+  right now and when the next change happens.
+- The scheduler acts only at window EDGES: between transitions, manual
+  power controls always win, so starting a server for a late-night
+  session outside its window is never fought (proven live: a manually
+  started server survived a full sweep cycle with the window closed).
+  Maintenance mode silences the power scheduler entirely, and crashed
+  servers are left to the crash watchdog — only cleanly offline servers
+  are schedule-started.
+- New `GET`/`PUT /api/servers/:id/power-windows` endpoint. Invalid
+  windows are rejected loudly with the exact reason ("Start time must
+  be HH:MM (24-hour)") rather than silently dropped, and scheduled
+  starts/stops land in the activity feed ("started by power schedule").
+  Stored in a `power-windows.json` sidecar; no schema change.
+
 ## [2.58.0] - 2026-10-03
 
 ### Added
@@ -633,7 +657,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.58.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.59.0...HEAD
+[2.59.0]: https://github.com/A4rk4n/ServerHub/compare/v2.58.0...v2.59.0
 [2.58.0]: https://github.com/A4rk4n/ServerHub/compare/v2.57.0...v2.58.0
 [2.57.0]: https://github.com/A4rk4n/ServerHub/compare/v2.56.0...v2.57.0
 [2.56.0]: https://github.com/A4rk4n/ServerHub/compare/v2.55.0...v2.56.0
