@@ -7,6 +7,7 @@
 
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { MAX_DELIVERY_HISTORY, appendDelivery, normalizeDeliveryHistory, redactWebhookTarget, type DeliveryRecord } from "./notification-history";
 import { appDataDir } from "./storage";
 
 export type NotificationEventKind =
@@ -135,12 +136,23 @@ export async function writeNotificationConfig(config: NotificationConfig): Promi
   cachedConfig = null;
 }
 
-export async function deliverNotification(
+export type DeliveryOutcome = {
+  sent: boolean;
+  /** True when the event was muted or unconfigured — no attempt was made. */
+  skipped: boolean;
+  status: number;
+  error: string;
+  durationMs: number;
+};
+
+/** One bounded webhook attempt with the full outcome — no recording here. */
+export async function attemptDelivery(
   config: NotificationConfig,
   event: NotificationEvent,
   fetchImpl: typeof fetch = fetch
-): Promise<boolean> {
-  if (!shouldNotify(config, event.kind)) return false;
+): Promise<DeliveryOutcome> {
+  if (!shouldNotify(config, event.kind)) return { sent: false, skipped: true, status: 0, error: "", durationMs: 0 };
+  const startedAt = Date.now();
   try {
     const response = await fetchImpl(config.url, {
       method: "POST",
@@ -148,10 +160,60 @@ export async function deliverNotification(
       body: buildWebhookBody(config.url, event),
       signal: AbortSignal.timeout(5000),
     });
-    return response.ok;
-  } catch {
-    return false;
+    return { sent: response.ok, skipped: false, status: response.status, error: "", durationMs: Date.now() - startedAt };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { sent: false, skipped: false, status: 0, error: message.slice(0, 200), durationMs: Date.now() - startedAt };
   }
+}
+
+export async function deliverNotification(
+  config: NotificationConfig,
+  event: NotificationEvent,
+  fetchImpl: typeof fetch = fetch
+): Promise<boolean> {
+  return (await attemptDelivery(config, event, fetchImpl)).sent;
+}
+
+// ---------------------------------------------------------------------------
+// Delivery history — ring buffer in an app-data sidecar (notification-history.ts)
+// ---------------------------------------------------------------------------
+
+function historyFile() {
+  return path.join(appDataDir(), "notification-history.json");
+}
+
+export async function readDeliveryHistory(): Promise<DeliveryRecord[]> {
+  try { return normalizeDeliveryHistory(JSON.parse(await fsp.readFile(historyFile(), "utf8"))); }
+  catch { return []; }
+}
+
+async function recordDelivery(record: DeliveryRecord): Promise<void> {
+  const history = appendDelivery(await readDeliveryHistory(), record, MAX_DELIVERY_HISTORY);
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(historyFile(), JSON.stringify(history), "utf8");
+}
+
+/** Attempt + record: every real attempt lands in the history, muted events do not. */
+export async function deliverAndRecord(
+  config: NotificationConfig,
+  event: NotificationEvent,
+  fetchImpl: typeof fetch = fetch
+): Promise<DeliveryOutcome> {
+  const outcome = await attemptDelivery(config, event, fetchImpl);
+  if (!outcome.skipped) {
+    await recordDelivery({
+      at: new Date().toISOString(),
+      kind: event.kind,
+      server: event.serverName,
+      ok: outcome.sent,
+      status: outcome.status,
+      error: outcome.error,
+      durationMs: outcome.durationMs,
+      target: redactWebhookTarget(config.url),
+    }).catch(() => {});
+  }
+  return outcome;
 }
 
 // Runtime-facing fire-and-forget entry point with a short config cache so
@@ -163,7 +225,7 @@ export async function notify(event: NotificationEvent): Promise<void> {
     if (!cachedConfig || Date.now() - cachedConfig.at > 15_000) {
       cachedConfig = { at: Date.now(), config: await readNotificationConfig() };
     }
-    await deliverNotification(cachedConfig.config, event);
+    await deliverAndRecord(cachedConfig.config, event);
   } catch {
     /* notifications never interfere with server management */
   }

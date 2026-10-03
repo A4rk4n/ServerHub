@@ -1,11 +1,13 @@
 "use client";
 
-import { BellRing, CalendarClock, Check, Send } from "lucide-react";
-import { useEffect, useState } from "react";
+import { BellRing, CalendarClock, Check, History, Send } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { timeAgo } from "@/lib/format";
 import { Btn, Field, Spin, Toggle, inputCls } from "./ui";
 
 type Digest = { enabled: boolean; cadence: "daily" | "weekly"; hour: number };
 type Config = { url: string; events: { status: boolean; crash: boolean; backup: boolean }; digest: Digest };
+type Delivery = { at: string; kind: string; server: string; ok: boolean; status: number; error: string; durationMs: number; target: string };
 
 export function NotificationsPanel() {
   const [config, setConfig] = useState<Config | null>(null);
@@ -13,6 +15,19 @@ export function NotificationsPanel() {
   const [testing, setTesting] = useState(false);
   const [digesting, setDigesting] = useState(false);
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
+  const [deliveries, setDeliveries] = useState<Delivery[] | null>(null);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const r = await fetch("/api/notifications/history", { cache: "no-store" });
+      const j = await r.json();
+      if (Array.isArray(j.deliveries)) setDeliveries(j.deliveries);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory]);
 
   useEffect(() => {
     void (async () => {
@@ -65,6 +80,7 @@ export function NotificationsPanel() {
       const r = await fetch("/api/notifications/test", { method: "POST" });
       const j = await r.json().catch(() => ({}));
       setNotice(r.ok ? { text: "Test notification delivered ✓", ok: true } : { text: j.error ?? "Test failed", ok: false });
+      void loadHistory();
     } finally {
       setTesting(false);
     }
@@ -148,6 +164,28 @@ export function NotificationsPanel() {
         </Btn>
         {notice && (
           <span className={`text-[12px] font-semibold ${notice.ok ? "text-emerald-600" : "text-rose-500"}`}>{notice.text}</span>
+        )}
+      </div>
+      <div className="mt-5 border-t border-candy-100 pt-4">
+        <p className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-plum-500">
+          <History size={12} /> Recent deliveries
+        </p>
+        {!deliveries || deliveries.length === 0 ? (
+          <p className="text-xs text-plum-400">No webhook deliveries recorded yet — muted events are not attempts.</p>
+        ) : (
+          <div className="max-h-56 space-y-1 overflow-y-auto pr-1">
+            {deliveries.map((d, index) => (
+              <div key={`${d.at}-${index}`} className="flex items-center gap-2 rounded-lg border border-candy-100 px-2.5 py-1.5 text-xs">
+                <span className={`inline-flex shrink-0 rounded-full px-1.5 py-0.5 font-mono text-[10px] font-bold ${d.ok ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-500"}`}>
+                  {d.status > 0 ? d.status : "ERR"}
+                </span>
+                <span className="font-semibold text-plum-800">{d.kind}</span>
+                <span className="truncate text-plum-500">{d.server}</span>
+                {!d.ok && d.error && <span className="truncate text-red-400" title={d.error}>{d.error}</span>}
+                <span className="ml-auto shrink-0 text-plum-400">{d.durationMs}ms · {d.target} · {timeAgo(d.at)}</span>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>
