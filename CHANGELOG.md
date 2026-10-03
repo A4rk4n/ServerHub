@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.58.0] - 2026-10-03
+
+### Added
+
+- Notification delivery history: every real webhook attempt — runtime
+  events and test sends alike — is now recorded in a 50-entry ring
+  buffer (`notification-history.json`), capturing the event kind, server,
+  HTTP status (0 for transport failures), short error, duration, and the
+  webhook's hostname only — never the full URL, which embeds a secret
+  token. Muted events are not attempts and are never recorded.
+- `GET /api/notifications/history` returns the recorded deliveries plus
+  a summary (total, failed, most recent success/failure timestamps).
+  Corrupt history files degrade to an empty list and oversized files are
+  truncated to the cap on read.
+- The Tools page's notifications panel gains a "Recent deliveries"
+  section: status badge (HTTP code, or ERR for transport failures), event
+  kind, server, error text, duration, target host, and relative time.
+  Sending a test notification refreshes the list immediately.
+
+### Changed
+
+- The "Send test" button now reports exactly what went wrong: the
+  specific HTTP status the webhook answered ("The webhook answered HTTP
+  429") or the transport error when it could not be reached, instead of
+  a generic failure message.
+
 ## [2.57.0] - 2026-10-02
 
 ### Added
@@ -607,7 +633,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.57.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.58.0...HEAD
+[2.58.0]: https://github.com/A4rk4n/ServerHub/compare/v2.57.0...v2.58.0
 [2.57.0]: https://github.com/A4rk4n/ServerHub/compare/v2.56.0...v2.57.0
 [2.56.0]: https://github.com/A4rk4n/ServerHub/compare/v2.55.0...v2.56.0
 [2.55.0]: https://github.com/A4rk4n/ServerHub/compare/v2.54.0...v2.55.0
