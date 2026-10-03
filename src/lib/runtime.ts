@@ -48,6 +48,7 @@ import { isAnnouncementDue, nextAnnouncementIndex, normalizeAnnouncementConfig, 
 import { diskAlertDetail, evaluateDiskFree, isDiskAlertDue, normalizeDiskAlertConfig, type DiskAlertConfig } from "./disk-alerts";
 import { LOG_SWEEP_EVERY_MS, PRUNE_BATCH, archiveFileName, formatArchiveLine, normalizeLogRetentionConfig, retentionCutoff, type LogRetentionConfig } from "./log-retention";
 import { readAllMaintenance, readMaintenance } from "./maintenance";
+import { desiredPowerState, readAllWindowSchedules } from "./power-windows";
 import { analyzeCrash } from "./crash-analyzer";
 import { nextCalendarRun } from "./calendar-schedule";
 import { scheduledCommand } from "./scheduled-actions";
@@ -188,7 +189,7 @@ async function initializeRuntime() {
   scheduleInstallPump();
 
   if (!state.scheduler) {
-    state.scheduler = setInterval(() => { void sweepTasks().catch(() => {}); void sweepAnnouncements().catch(() => {}); void sweepDiskAlerts().catch(() => {}); void sweepLogRetention().catch(() => {}); void sweepUptimeHistory().catch(() => {}); void sweepBackupVerification().catch(() => {}); }, 15_000);
+    state.scheduler = setInterval(() => { void sweepTasks().catch(() => {}); void sweepAnnouncements().catch(() => {}); void sweepDiskAlerts().catch(() => {}); void sweepLogRetention().catch(() => {}); void sweepUptimeHistory().catch(() => {}); void sweepBackupVerification().catch(() => {}); void sweepPowerSchedule().catch(() => {}); }, 15_000);
     state.scheduler.unref?.();
   }
 
@@ -2867,6 +2868,64 @@ export async function sweepUptimeHistory(nowMs = Date.now(), force = false): Pro
   await fsp.mkdir(appDataDir(), { recursive: true });
   await fsp.writeFile(uptimeHistoryFile(), JSON.stringify(pruned), "utf8");
   return { sampled: true };
+}
+
+// ---------------------------------------------------------------------------
+// Power schedule sweep (power-schedule.ts) — acts only at window EDGES:
+// when the desired state TRANSITIONS, reconcile; in between, manual power
+// controls always win. Maintenance mode silences the scheduler entirely.
+// ---------------------------------------------------------------------------
+
+const POWER_SWEEP_EVERY_MS = 60_000;
+const powerScheduleState = { lastSweepAt: 0, lastDesired: new Map<number, "online" | "offline">() };
+
+/** Called when a server's schedule is edited: re-evaluate it on the next sweep. */
+export function powerScheduleChanged(serverId: number): void {
+  powerScheduleState.lastDesired.delete(serverId);
+  powerScheduleState.lastSweepAt = 0;
+}
+
+/** Scheduler-tick sweep, throttled to once per minute. */
+export async function sweepPowerSchedule(nowMs = Date.now(), force = false): Promise<{ started: number; stopped: number }> {
+  if (!force && nowMs - powerScheduleState.lastSweepAt < POWER_SWEEP_EVERY_MS) return { started: 0, stopped: 0 };
+  powerScheduleState.lastSweepAt = nowMs;
+  const schedules = await readAllWindowSchedules();
+  const active = Object.entries(schedules).filter(([, schedule]) => schedule.enabled);
+  if (active.length === 0) {
+    powerScheduleState.lastDesired.clear();
+    return { started: 0, stopped: 0 };
+  }
+  const inMaintenance = await readAllMaintenance();
+  const now = new Date(nowMs);
+  let started = 0;
+  let stopped = 0;
+  for (const [key, schedule] of active) {
+    const id = Number(key);
+    const desired = desiredPowerState(schedule, now);
+    if (desired === null) continue;
+    const previous = powerScheduleState.lastDesired.get(id);
+    powerScheduleState.lastDesired.set(id, desired);
+    if (previous === desired) continue; // between edges, the operator is in charge
+    if (inMaintenance[key]?.enabled) continue; // maintenance silences robots, including this one
+    const [server] = await db.select().from(servers).where(eq(servers.id, id));
+    if (!server) continue;
+    if (desired === "online" && server.status === "offline") {
+      await logLine(id, "system", "Scheduler", `Power window opened — starting ${server.name}.`).catch(() => {});
+      const result = await startFlow(id, true).catch(() => ({ ok: false }));
+      if (result.ok) {
+        started++;
+        await act(id, "power", `${server.name} started by power schedule`).catch(() => {});
+      }
+    } else if (desired === "offline" && server.status === "online") {
+      await logLine(id, "system", "Scheduler", `Power window closed — stopping ${server.name}.`).catch(() => {});
+      const result = await stopFlow(id, "Power schedule").catch(() => ({ ok: false }));
+      if (result.ok) {
+        stopped++;
+        await act(id, "power", `${server.name} stopped by power schedule`).catch(() => {});
+      }
+    }
+  }
+  return { started, stopped };
 }
 
 export async function readStatusPageConfig(): Promise<StatusPageConfig> {
