@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { nextFreeServerPort, TEMPLATE_EXCLUDED_FIELDS, templateConfigFromServer } from "../src/lib/server-templates";
 
-const source = { gameId: "minecraft", version: "1.21", loader: "vanilla", memoryMb: 4096, maxPlayers: 20, motd: "hello", difficulty: "normal", pvp: true, bindAddress: "192.168.1.210", publicAddress: "185.83.148.20", readinessTimeoutSec: 60, autoRestart: true, maxCrashRestarts: 3, restartWindowSec: 300, autoBackupBeforeUpdate: true, updateBackupRetention: 5, serverPassword: "secret", adminPassword: "admin", ownerId: "player", worldName: "private-world", seed: "seed", port: 25565, launchCommand: "private.exe", launchArgs: "--token secret", workingDirectory: "C:\\Users\\Ahri\\server" };
+const source = { gameId: "minecraft", version: "1.21", loader: "vanilla", memoryMb: 4096, maxPlayers: 20, motd: "hello", difficulty: "normal", pvp: true, bindAddress: "192.168.1.210", publicAddress: "185.83.148.20", readinessTimeoutSec: 60, autoRestart: true, maxCrashRestarts: 3, restartWindowSec: 300, autoBackupBeforeUpdate: true, updateBackupRetention: 5, backupRetentionCount: 10, backupRetentionDays: 30, serverPassword: "secret", adminPassword: "admin", ownerId: "player", worldName: "private-world", seed: "seed", port: 25565, launchCommand: "private.exe", launchArgs: "--token secret", workingDirectory: "C:\\Users\\Ahri\\server" };
 
 test("template configs omit every excluded field", () => {
   const config = templateConfigFromServer(source);

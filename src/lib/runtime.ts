@@ -1,3 +1,14 @@
+import { selectBackupsToPrune } from "./backup-retention";
+import { autoUpdateDecision, autoUpdateTargetVersion } from "./auto-update";
+import { catalogVersions } from "./catalog";
+import { appManifestName, compareBuilds, fetchLatestGameBuild, parseAppManifestBuildId, type GameUpdateState } from "./game-updates";
+import { evaluateGuardrail, loadGuardrailsCached, nextGuardrailState, type GuardrailState } from "./guardrails";
+import { FABRIC_INSTALLER_LIST_URL, fabricLoaderListUrl, fabricServerJarUrl, pickFabricInstaller, pickFabricLoader } from "./fabric-meta";
+import { flushMetricsHistory, readHistory, recordMetricsSample } from "./metrics-history";
+import { javaMajorForMinecraft } from "./minecraft-java";
+import { palworldGracefulStop, palworldRestPort } from "./palworld-api";
+import { deliverNotification, notify, readNotificationConfig } from "./notifications";
+import { DIGEST_WINDOW_MS, aggregateSessions, digestDue, digestWindow, formatDigest, normalizeDigestConfig, uptimePercent, type ServerDigestRow } from "./digest";
 import { hostPlatform } from "./host-platform";
 import { diagnoseInstallationFailure, installationFailureMessage } from "./installation-diagnostics";
 import { waitForManagedExecutableExit } from "./managed-process";
@@ -13,21 +24,39 @@ import dgram from "node:dgram";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import zlib from "node:zlib";
 import { Readable } from "node:stream";
 import { finished, pipeline } from "node:stream/promises";
 import yauzl from "yauzl";
 import * as tar from "tar";
-import { and, asc, desc, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, sql } from "drizzle-orm";
 import { db, dbPath, sqliteClient } from "@/db";
 import { activity, backups, consoleLogs, incidents, installationEvents, installationJobs, moderationActions, playerSessions, players, servers, taskRuns, tasks } from "@/db/schema";
 import type { Backup, InstallationJob, Server } from "@/db/schema";
 import { getGame, type InstallerKind } from "./games";
 import { observationKey, reconcileObservationKeys } from "./player-observations";
+import { findMacro, macroSummary, type Macro } from "./macros";
+import { listBackupEntries, sanitizeArchiveEntryPath } from "./backup-browser";
+import { MAX_VERIFY_FORCED, MAX_VERIFY_PER_SWEEP, VERIFY_SWEEP_EVERY_MS, normalizeVerificationState, pruneVerificationState, selectBackupsToVerify, summarizeVerification, type VerificationRecord, type VerificationState } from "./backup-verification";
+import { inspectBackupArchive } from "./backup-validation";
+import { MIRROR_ARCHIVE_PATTERN, formatMirrorNote, mirrorRelativePath, normalizeMirrorConfig, normalizeMirrorState, planMirrorSync, summarizeMirrorHealth, type MirrorConfig, type MirrorState } from "./backup-mirror";
+import { MAX_SCAN_ENTRIES, buildUsageReport, cleanupHints, computeGrowth, normalizeUsageHistory, recordUsageSnapshot, type UsageFile, type UsageGrowth, type UsageReport } from "./disk-usage";
+import { buildStatusSnapshot, normalizeStatusConfig, type StatusPageConfig, type StatusSnapshot } from "./status-page";
+import { powerTaskDecision } from "./power-schedule";
+import { broadcastCommand, countdownPlan, normalizeWarningConfig, warningMessage, type WarningAction, type WarningConfig } from "./restart-warnings";
+import { isAnnouncementDue, nextAnnouncementIndex, normalizeAnnouncementConfig, type AnnouncementConfig } from "./announcements";
+import { diskAlertDetail, evaluateDiskFree, isDiskAlertDue, normalizeDiskAlertConfig, type DiskAlertConfig } from "./disk-alerts";
+import { LOG_SWEEP_EVERY_MS, PRUNE_BATCH, archiveFileName, formatArchiveLine, normalizeLogRetentionConfig, retentionCutoff, type LogRetentionConfig } from "./log-retention";
+import { readAllMaintenance, readMaintenance } from "./maintenance";
+import { desiredPowerState, readAllWindowSchedules } from "./power-windows";
+import { analyzeCrash } from "./crash-analyzer";
 import { nextCalendarRun } from "./calendar-schedule";
 import { scheduledCommand } from "./scheduled-actions";
 import { queryA2sInfo, queryA2sPlayers, queryMinecraftStatus } from "./query-protocols";
 import { isProtectedSecret, protectAndVerify, revealSecret } from "./credential-vault";
 import { appDataDir, backupsDir, ensureDataDirs, safeFileName, serverDir, toolsDir } from "./storage";
+import { evaluateBindAddress, evaluateDiskFloor, evaluateEula, evaluateFleetPortConflict, evaluateLaunchTarget, evaluateMemoryBudget, evaluatePortProbe, probeLaunchTarget, summarizePreflight, type PreflightSummary } from "./start-preflight";
+import { UPTIME_SAMPLE_EVERY_MS, UPTIME_WINDOW_DAYS, normalizeUptimeHistory, pruneUptimeHistory, recordUptimeSample, uptimeBars, uptimeWindowPercent, utcDayKey, type UptimeHistory, type UptimeSampleState } from "./uptime-history";
 import { recordSuccessfulToolUse } from "./tool-usage";
 
 export type Metric = { t: number; cpu: number; ram: number; players: number; tps: number | null };
@@ -155,11 +184,12 @@ async function initializeRuntime() {
       await logLine(server.id, "warn", "Installer", "A legacy installation was interrupted. Retry installation to create a recoverable job.");
     }
     await db.update(players).set({ isOnline: false }).where(eq(players.serverId, server.id));
+    await closeAllSessions(server.id).catch(() => {});
   }
   scheduleInstallPump();
 
   if (!state.scheduler) {
-    state.scheduler = setInterval(() => void sweepTasks().catch(() => {}), 15_000);
+    state.scheduler = setInterval(() => { void sweepTasks().catch(() => {}); void sweepAnnouncements().catch(() => {}); void sweepDiskAlerts().catch(() => {}); void sweepLogRetention().catch(() => {}); void sweepUptimeHistory().catch(() => {}); void sweepBackupVerification().catch(() => {}); void sweepPowerSchedule().catch(() => {}); }, 15_000);
     state.scheduler.unref?.();
   }
 
@@ -253,7 +283,39 @@ async function parsePlayerLine(server: Server, line: string) {
     const names = list[1].split(",").map((name) => name.trim()).filter(Boolean);
     await db.update(players).set({ isOnline: false }).where(eq(players.serverId, server.id));
     for (const name of names) await upsertPlayer(server.id, name, true);
+    // Close console sessions for anyone the authoritative list no longer shows.
+    const listedKeys = new Set(names.map((name) => observationKey("console", name)));
+    const open = await db.select().from(playerSessions).where(and(eq(playerSessions.serverId, server.id), eq(playerSessions.provider, "console"), isNull(playerSessions.leftAt)));
+    for (const session of open.filter((item) => !listedKeys.has(item.observationKey))) await closeSession(session, new Date());
   }
+}
+
+// ---- player session journal (console-observed providers) -----------------
+
+async function closeSession(session: typeof playerSessions.$inferSelect, now: Date) {
+  const joined = session.joinedAt?.getTime() ?? now.getTime();
+  await db
+    .update(playerSessions)
+    .set({ leftAt: now, durationSec: Math.max(session.durationSec, Math.round((now.getTime() - joined) / 1000)) })
+    .where(eq(playerSessions.id, session.id));
+}
+
+async function syncConsoleSession(serverId: number, name: string, online: boolean) {
+  const key = observationKey("console", name);
+  const [open] = await db.select().from(playerSessions).where(and(eq(playerSessions.serverId, serverId), eq(playerSessions.observationKey, key), isNull(playerSessions.leftAt)));
+  if (online && !open) {
+    await db.insert(playerSessions).values({ serverId, provider: "console", observationKey: key, displayName: name.slice(0, 100), joinedAt: new Date() });
+  } else if (!online && open) {
+    await closeSession(open, new Date());
+  }
+}
+
+// When a server process ends (or the runtime restarts), nobody is online:
+// every open session closes so playtime never counts downtime.
+async function closeAllSessions(serverId: number) {
+  const now = new Date();
+  const open = await db.select().from(playerSessions).where(and(eq(playerSessions.serverId, serverId), isNull(playerSessions.leftAt)));
+  for (const session of open) await closeSession(session, now);
 }
 
 async function upsertPlayer(serverId: number, name: string, online: boolean) {
@@ -269,6 +331,7 @@ async function upsertPlayer(serverId: number, name: string, online: boolean) {
       ping: 0,
     });
   }
+  await syncConsoleSession(serverId, name, online);
 }
 
 // ---------------------------------------------------------------------------
@@ -718,14 +781,18 @@ async function installMojang(server: Server, root: string, context: InstallConte
 
 async function installFabric(server: Server, root: string, context: InstallContext) {
   await context.report("downloading", 15, "Resolving the latest stable Fabric loader");
-  const response = await fetch(`https://meta.fabricmc.net/v2/versions/loader/${encodeURIComponent(server.version)}`, { signal: context.signal });
+  const response = await fetch(fabricLoaderListUrl(server.version), { signal: context.signal });
   if (!response.ok) throw new Error(`Fabric does not publish a loader for Minecraft ${server.version} (HTTP ${response.status}).`);
-  const versions = (await response.json()) as { loader: { version: string; stable: boolean }; installer: { version: string; stable: boolean } }[];
-  const choice = versions.find((item) => item.loader.stable && item.installer.stable) ?? versions[0];
-  if (!choice) throw new Error(`No Fabric loader is available for Minecraft ${server.version}.`);
-  const url = `https://meta.fabricmc.net/v2/versions/loader/${encodeURIComponent(server.version)}/${encodeURIComponent(choice.loader.version)}/${encodeURIComponent(choice.installer.version)}/server/jar`;
-  await downloadFile(url, path.join(root, "server.jar"), server.id, `Fabric loader ${choice.loader.version}`, context, [20, 76]);
-  await logLine(server.id, "success", "Installer", `Fabric ${choice.loader.version} installed for Minecraft ${server.version}.`);
+  const loaderVersion = pickFabricLoader(await response.json().catch(() => null));
+  if (!loaderVersion) throw new Error(`No Fabric loader is available for Minecraft ${server.version}.`);
+  await context.report("downloading", 17, "Resolving the latest stable Fabric installer");
+  const installerResponse = await fetch(FABRIC_INSTALLER_LIST_URL, { signal: context.signal });
+  if (!installerResponse.ok) throw new Error(`The Fabric installer list failed: HTTP ${installerResponse.status}.`);
+  const installerVersion = pickFabricInstaller(await installerResponse.json().catch(() => null));
+  if (!installerVersion) throw new Error("Fabric's installer list came back empty. Please retry in a moment.");
+  const url = fabricServerJarUrl(server.version, loaderVersion, installerVersion);
+  await downloadFile(url, path.join(root, "server.jar"), server.id, `Fabric loader ${loaderVersion}`, context, [20, 76]);
+  await logLine(server.id, "success", "Installer", `Fabric ${loaderVersion} installed for Minecraft ${server.version}.`);
 }
 
 async function installBedrock(server: Server, root: string, context: InstallContext) {
@@ -1084,6 +1151,33 @@ export async function portAvailable(port: number, protocol: "TCP" | "UDP", addre
   });
 }
 
+/**
+ * Pre-launch checks: evaluated in start-preflight.ts, probed here (the
+ * runtime owns the fleet table, socket binds, statfs, and process table).
+ * Every startFlow consults this; GET /api/servers/:id/preflight exposes it.
+ */
+export async function runStartPreflight(server: Server): Promise<PreflightSummary> {
+  const game = getGame(server.gameId);
+  const neighbors = await db.select({ id: servers.id, name: servers.name, port: servers.port, status: servers.status }).from(servers);
+  // A server that is already running is holding its own port — skip the bind
+  // probe rather than reporting the server as its own conflict.
+  const portFree = state.processes.has(server.id) ? null : await portAvailable(server.port, game.protocol, server.bindAddress);
+  const launchProbe = await probeLaunchTarget(server.launchCommand);
+  const diskConfig = await readDiskAlertConfig();
+  const stat = await fsp.statfs(appDataDir()).catch(() => null);
+  const freeMb = stat ? Math.round((Number(stat.bavail) * Number(stat.bsize)) / 1_048_576) : null;
+  const availableMb = Math.round(os.freemem() / 1_048_576);
+  return summarizePreflight([
+    evaluateBindAddress(server.bindAddress),
+    evaluatePortProbe(server.port, game.protocol, server.bindAddress, portFree),
+    evaluateFleetPortConflict(server, neighbors),
+    evaluateLaunchTarget(server.launchCommand, game.installer === "manual", launchProbe),
+    evaluateEula(server.gameId, server.eulaAccepted),
+    evaluateDiskFloor(freeMb, diskConfig.minFreeMb),
+    evaluateMemoryBudget(server.memoryMb, availableMb),
+  ]);
+}
+
 async function preflightInstallation(server: Server, root: string, context: InstallContext) {
   const game = getGame(server.gameId);
   await context.report("preflight", 3, "Checking storage, port and installation paths");
@@ -1145,6 +1239,12 @@ async function validateInstalledArtifacts(server: Server, root: string) {
       : ["ShooterGame/Binaries/Linux/ShooterGameServer", "ShooterGameServer"],
     terraria: platform === "win32" ? ["TerrariaServer.exe"] : ["TerrariaServer.bin.x86_64", "TerrariaServer"],
     rust: platform === "win32" ? ["RustDedicated.exe"] : ["RustDedicated"],
+    satisfactory: platform === "win32"
+      ? ["FactoryServer.exe", "FactoryGame/Binaries/Win64/FactoryServer-Win64-Shipping-Cmd.exe"]
+      : ["FactoryServer.sh"],
+    palworld: platform === "win32"
+      ? ["PalServer.exe", "Pal/Binaries/Win64/PalServer-Win64-Shipping-Cmd.exe"]
+      : ["PalServer.sh"],
     dragonwilds: platform === "win32"
       ? ["RSDragonwilds.exe", "RSDragonwildsServer.exe"]
       : ["RSDragonwildsServer.sh", "RSDragonwildsServer"],
@@ -1349,6 +1449,30 @@ export async function writeServerConfig(storedServer: Server, rootOverride?: str
       "",
     ].join("\n");
     await fsp.writeFile(path.join(root, "serverconfig.txt"), config, "utf8");
+  } else if (server.gameId === "palworld") {
+    // Palworld reads a single OptionSettings tuple; keys omitted from the
+    // tuple fall back to the game's defaults, so only managed settings are
+    // written. Double quotes are stripped from values because they would
+    // terminate the quoted tuple fields.
+    const clean = (value: string) => value.replace(/[\r\n"]/g, " ").trim();
+    const platformFolder = hostPlatform() === "win32" ? "WindowsServer" : "LinuxServer";
+    const configFile = path.join(root, "Pal", "Saved", "Config", platformFolder, "PalWorldSettings.ini");
+    const options = [
+      `ServerName="${clean(server.name).slice(0, 48) || "Server Hub"}"`,
+      `ServerPlayerMaxNum=${server.maxPlayers}`,
+      `PublicPort=${server.port}`,
+      `ServerPassword="${clean(server.serverPassword)}"`,
+      `AdminPassword="${clean(server.adminPassword)}"`,
+      // The REST API (loopback graceful stop) authenticates with the
+      // admin password; without one it stays disabled. Its TCP port is
+      // derived from the game port and never gets a firewall rule.
+      clean(server.adminPassword) ? "RESTAPIEnabled=True" : "RESTAPIEnabled=False",
+      `RESTAPIPort=${palworldRestPort(server.port)}`,
+      "RCONEnabled=False",
+    ].join(",");
+    const config = ["[/Script/Pal.PalGameWorldSettings]", `OptionSettings=(${options})`, ""].join("\n");
+    await fsp.mkdir(path.dirname(configFile), { recursive: true });
+    await fsp.writeFile(configFile, config, { encoding: "utf8", mode: 0o600 });
   } else if (server.gameId === "dragonwilds") {
     const clean = (value: string) => value.replace(/[\r\n]/g, " ").trim();
     if (!clean(server.ownerId)) throw new Error("Dragonwilds requires the owner's in-game Player ID.");
@@ -1373,6 +1497,11 @@ export async function writeServerConfig(storedServer: Server, rootOverride?: str
 }
 
 function parseArgs(input: string): string[] {
+  // Backslash escaping is a POSIX shell convention. On Windows the backslash
+  // is the path separator (cmd.exe escapes with ^), so treating it as an
+  // escape character would corrupt launch arguments containing paths such as
+  // C:\servers\world — they must pass through literally.
+  const backslashEscapes = hostPlatform() !== "win32";
   const args: string[] = [];
   let current = "";
   let quote: "'" | '"' | null = null;
@@ -1381,7 +1510,7 @@ function parseArgs(input: string): string[] {
     if (escaping) {
       current += char;
       escaping = false;
-    } else if (char === "\\" && quote !== "'") escaping = true;
+    } else if (char === "\\" && quote !== "'" && backslashEscapes) escaping = true;
     else if (quote) {
       if (char === quote) quote = null;
       else current += char;
@@ -1417,15 +1546,6 @@ async function findExecutable(root: string, candidates: string[]): Promise<strin
     }
   }
   return null;
-}
-
-function javaMajorForMinecraft(version: string): number {
-  const parts = version.split(".").map(Number);
-  const minor = parts[1] || 0;
-  const patch = parts[2] || 0;
-  if (minor <= 16) return 8;
-  if (minor < 20 || (minor === 20 && patch <= 4)) return 17;
-  return 21;
 }
 
 async function ensureJava(serverId: number, major: number, context?: InstallContext): Promise<string> {
@@ -1523,6 +1643,27 @@ async function launchSpec(server: Server): Promise<LaunchSpec> {
       "+server.maxplayers", String(server.maxPlayers), "+server.seed", server.seed || "0",
       "+server.description", server.motd,
     ] };
+  }
+  if (server.gameId === "satisfactory") {
+    const executable = await findExecutable(root, hostPlatform() === "win32"
+      ? ["FactoryServer.exe", "FactoryGame/Binaries/Win64/FactoryServer-Win64-Shipping-Cmd.exe"]
+      : ["FactoryServer.sh"]);
+    if (!executable) throw new Error("The Satisfactory dedicated-server launcher was not found after SteamCMD installation.");
+    if (hostPlatform() !== "win32") await fsp.chmod(executable, 0o755).catch(() => {});
+    // Unreal Engine dedicated server: -multihome binds the configured LAN
+    // address; -unattended prevents interactive error dialogs.
+    return { executable, args: ["-log", "-unattended", `-Port=${server.port}`, `-multihome=${server.bindAddress}`] };
+  }
+  if (server.gameId === "palworld") {
+    const executable = await findExecutable(root, hostPlatform() === "win32"
+      ? ["PalServer.exe", "Pal/Binaries/Win64/PalServer-Win64-Shipping-Cmd.exe"]
+      : ["PalServer.sh"]);
+    if (!executable) throw new Error("The Palworld dedicated-server launcher was not found after SteamCMD installation.");
+    if (hostPlatform() !== "win32") await fsp.chmod(executable, 0o755).catch(() => {});
+    // Palworld has no bind-address flag (it listens on every interface):
+    // only the listen port and player cap are command-line options; all
+    // remaining settings are written to PalWorldSettings.ini beforehand.
+    return { executable, args: [`-port=${server.port}`, `-players=${server.maxPlayers}`] };
   }
   if (server.gameId === "dragonwilds") {
     const executable = await findExecutable(root, hostPlatform() === "win32"
@@ -1625,6 +1766,13 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
   if (state.processes.has(id)) return { ok: false, reason: "Server process is already running" };
   if (state.installs.has(id) || server.status === "installing") return { ok: false, reason: "Installation is still running" };
   if (server.status === "error") return { ok: false, reason: "Installation failed. Retry installation first." };
+  const preflight = await runStartPreflight(server);
+  for (const warning of preflight.warnings) await logLine(id, "warn", "Preflight", warning);
+  if (!preflight.canStart) {
+    for (const blocker of preflight.blockers) await logLine(id, "error", "Preflight", blocker);
+    await act(id, "power", `${server.name} start blocked by pre-launch checks`);
+    return { ok: false, reason: `Pre-launch checks failed: ${preflight.blockers.join(" ")}` };
+  }
   const rollbackReadinessValidation=server.updateValidationStatus==="rollback-restored"||server.updateValidationStatus==="rollback-validating";
   const pendingUpdateValidation=server.updateValidationStatus==="awaiting-readiness"||server.updateValidationStatus==="validating-runtime"||rollbackReadinessValidation;
 
@@ -1685,6 +1833,7 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
     if(server.gameId === "minecraft" || server.gameId === "minecraft-modded") await recordSuccessfulToolUse("java","Started a Minecraft server and passed its readiness probe");
     await logLine(id, "success", "Runtime", `Process started with PID ${child.pid}.`);
     await act(id, "power", `${server.name} started (PID ${child.pid})`);
+    void notify({ kind: "online", serverName: server.name });
     return { ok: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1697,14 +1846,36 @@ export async function startFlow(id: number, automatic = false): Promise<{ ok: bo
 }
 
 async function handleExit(entry: RuntimeEntry, code: number | null, signal: NodeJS.Signals | null) {
+  await cancelCountdown(entry.server.id, "the server process exited").catch(() => {});
+  announcerState.delete(entry.server.id); // next boot re-anchors the announcement cadence
   const id = entry.server.id;
   clearInterval(entry.monitor);
   if (state.processes.get(id) === entry) state.processes.delete(id);
+  guardrailStates.delete(id);
+  void flushMetricsHistory(id);
   await db.update(players).set({ isOnline: false }).where(eq(players.serverId, id)).catch(() => {});
+  await closeAllSessions(id).catch(() => {});
   const expected = entry.stopping;
   await setStatus(id, expected ? "offline" : "crashed").catch(() => {});
   await logLine(id, expected ? "system" : "error", "Runtime", `Process exited (code ${code ?? "none"}, signal ${signal ?? "none"}).`).catch(() => {});
   await act(id, "power", `${entry.server.name} ${expected ? "stopped" : "crashed"}`).catch(() => {});
+  let crashTitle = "";
+  if (!expected) {
+    // Diagnose the crash from the console tail and attach the finding
+    // to an incident so Diagnostics explains WHY, not just THAT.
+    try {
+      const tail = await db.select().from(consoleLogs).where(eq(consoleLogs.serverId, id)).orderBy(desc(consoleLogs.id)).limit(120);
+      const diagnosis = analyzeCrash(tail.reverse().map((row) => row.message), { exitCode: code, signal, gameId: entry.server.gameId, memoryMb: entry.server.memoryMb });
+      crashTitle = diagnosis.title;
+      await logLine(id, "warn", "Crash analyzer", `${diagnosis.title}. ${diagnosis.fix}`);
+      await incident(id, diagnosis.cause === "unknown" ? "warning" : "critical", "crash", `${diagnosis.title} — ${diagnosis.detail}`, diagnosis.fix);
+    } catch {}
+  }
+  void notify(
+    expected
+      ? { kind: "offline", serverName: entry.server.name }
+      : { kind: "crash", serverName: entry.server.name, detail: `exit code ${code ?? "none"}, signal ${signal ?? "none"}${crashTitle ? ` — ${crashTitle}` : ""}` }
+  );
   if (entry.restarting && !state.closing) {
     setTimeout(() => void startFlow(id), 900);
   } else if (!expected && !state.closing) {
@@ -1717,6 +1888,11 @@ async function scheduleCrashRestart(entry: RuntimeEntry) {
   // while a server is running takes effect on that process's next exit.
   const [server] = await db.select().from(servers).where(eq(servers.id, entry.server.id));
   if (!server?.autoRestart) return;
+  const paused = await readMaintenance(server.id).catch(() => ({ enabled: false }));
+  if (paused.enabled) {
+    await logLine(server.id, "warn", "Watchdog", "Maintenance mode: automatic restart suppressed.");
+    return;
+  }
   const id = server.id;
   const now = Date.now();
   const windowMs = Math.max(30, Math.min(3600, server.restartWindowSec)) * 1000;
@@ -1729,6 +1905,7 @@ async function scheduleCrashRestart(entry: RuntimeEntry) {
     await setStatus(id, "crashed");
     await logLine(id, "error", "Watchdog", `Automatic restart limit reached (${limit} within ${Math.round(windowMs / 1000)} seconds). Manual intervention is required.`);
     await act(id, "power", `${server.name} restart limit reached`);
+    void notify({ kind: "restart-limit", serverName: server.name });
     return;
   }
 
@@ -1736,6 +1913,7 @@ async function scheduleCrashRestart(entry: RuntimeEntry) {
   await setStatus(id, "restarting");
   await logLine(id, "warn", "Watchdog", `Unexpected exit detected. Automatic restart ${history.length} of ${limit} begins in ${delaySeconds} seconds.`);
   await act(id, "power", `${server.name} scheduled for automatic restart`);
+  void notify({ kind: "auto-restart", serverName: server.name, detail: `attempt ${history.length} of ${limit}, in ${delaySeconds}s` });
   const timer = setTimeout(() => {
     if (state.restartTimers.get(id) !== timer) return;
     state.restartTimers.delete(id);
@@ -1775,8 +1953,275 @@ export async function cancelPendingRestart(id: number, reason = "Panel") {
   return true;
 }
 
+// ---- restart countdown warnings ------------------------------------------
+
+const countdowns = new Map<number, { action: WarningAction; timers: NodeJS.Timeout[]; endsAt: number; label: string }>();
+
+function warningConfigFile() { return path.join(appDataDir(), "restart-warnings.json"); }
+
+export async function readWarningConfigFor(serverId: number): Promise<WarningConfig> {
+  try {
+    const raw = JSON.parse(await fsp.readFile(warningConfigFile(), "utf8")) as Record<string, unknown>;
+    return normalizeWarningConfig(raw[String(serverId)]);
+  } catch { return normalizeWarningConfig(undefined); }
+}
+
+export async function writeWarningConfigFor(serverId: number, config: WarningConfig): Promise<void> {
+  let all: Record<string, unknown> = {};
+  try { all = JSON.parse(await fsp.readFile(warningConfigFile(), "utf8")) as Record<string, unknown>; } catch { /* fresh file */ }
+  all[String(serverId)] = config;
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(warningConfigFile(), JSON.stringify(all, null, 2), "utf8");
+}
+
+export function getCountdown(serverId: number): { active: boolean; action?: WarningAction; endsAt?: string; label?: string } {
+  const pending = countdowns.get(serverId);
+  return pending ? { active: true, action: pending.action, endsAt: new Date(pending.endsAt).toISOString(), label: pending.label } : { active: false };
+}
+
+export async function cancelCountdown(serverId: number, reason = ""): Promise<boolean> {
+  const pending = countdowns.get(serverId);
+  if (!pending) return false;
+  for (const timer of pending.timers) clearTimeout(timer);
+  countdowns.delete(serverId);
+  await logLine(serverId, "system", "Scheduler", `Restart countdown cancelled${reason ? `: ${reason}` : "."}`).catch(() => {});
+  return true;
+}
+
+// ---- scheduled announcements ---------------------------------------------
+
+const announcerState = new Map<number, { lastIndex: number; lastSentAt: number }>();
+
+function announcementsFile() { return path.join(appDataDir(), "announcements.json"); }
+
+export async function readAnnouncementConfigFor(serverId: number): Promise<AnnouncementConfig> {
+  try {
+    const raw = JSON.parse(await fsp.readFile(announcementsFile(), "utf8")) as Record<string, unknown>;
+    return normalizeAnnouncementConfig(raw[String(serverId)]);
+  } catch { return normalizeAnnouncementConfig(undefined); }
+}
+
+export async function writeAnnouncementConfigFor(serverId: number, config: AnnouncementConfig): Promise<void> {
+  let all: Record<string, unknown> = {};
+  try { all = JSON.parse(await fsp.readFile(announcementsFile(), "utf8")) as Record<string, unknown>; } catch { /* fresh file */ }
+  all[String(serverId)] = config;
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(announcementsFile(), JSON.stringify(all, null, 2), "utf8");
+  announcerState.delete(serverId); // restart the cadence under the new config
+}
+
+export function getAnnouncerState(serverId: number): { lastSentAt: string | null } {
+  const entry = announcerState.get(serverId);
+  return { lastSentAt: entry && entry.lastSentAt > 0 ? new Date(entry.lastSentAt).toISOString() : null };
+}
+
+/** Broadcast the next message in the rotation right now (panel button). */
+export async function announceNow(serverId: number): Promise<{ ok: boolean; reason?: string; message?: string }> {
+  await ensureRuntimeInitialized();
+  const entry = state.processes.get(serverId);
+  if (!entry) return { ok: false, reason: "The server is not running" };
+  const config = await readAnnouncementConfigFor(serverId);
+  if (config.messages.length === 0) return { ok: false, reason: "Add at least one announcement message first" };
+  return broadcastAnnouncement(entry.server, config, Date.now());
+}
+
+async function broadcastAnnouncement(server: Server, config: AnnouncementConfig, nowMs: number): Promise<{ ok: boolean; reason?: string; message?: string }> {
+  const previous = announcerState.get(server.id);
+  const index = nextAnnouncementIndex(config.order, previous?.lastIndex ?? -1, config.messages.length);
+  const message = config.messages[index];
+  const command = broadcastCommand(server.gameId, config.template, message);
+  if (!command) return { ok: false, reason: "This game has no broadcast command — set a custom template first" };
+  const result = await runCommand(server, command, "Announcer");
+  if (!result.ok) return { ok: false, reason: result.reason ?? "Command failed" };
+  announcerState.set(server.id, { lastIndex: index, lastSentAt: nowMs });
+  return { ok: true, message };
+}
+
+// ---- console-log retention -------------------------------------------------
+
+const logRetentionState = { lastSweepAt: 0, lastResult: null as { prunedLines: number; archivedFiles: number; sweptAt: number } | null };
+
+function logRetentionFile() { return path.join(appDataDir(), "log-retention.json"); }
+function logArchiveDir() { return path.join(appDataDir(), "log-archive"); }
+
+export async function readLogRetentionConfig(): Promise<LogRetentionConfig> {
+  try {
+    return normalizeLogRetentionConfig(JSON.parse(await fsp.readFile(logRetentionFile(), "utf8")));
+  } catch { return normalizeLogRetentionConfig(undefined); }
+}
+
+export async function writeLogRetentionConfig(config: LogRetentionConfig): Promise<void> {
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(logRetentionFile(), JSON.stringify(config, null, 2), "utf8");
+  logRetentionState.lastSweepAt = 0; // re-sweep promptly under the new config
+}
+
+export function getLogRetentionStatus(): { lastSweepAt: string | null; lastResult: { prunedLines: number; archivedFiles: number; sweptAt: string } | null } {
+  const last = logRetentionState.lastResult;
+  return {
+    lastSweepAt: logRetentionState.lastSweepAt > 0 ? new Date(logRetentionState.lastSweepAt).toISOString() : null,
+    lastResult: last ? { prunedLines: last.prunedLines, archivedFiles: last.archivedFiles, sweptAt: new Date(last.sweptAt).toISOString() } : null,
+  };
+}
+
+/** Hourly sweep: archive-then-prune console lines past the retention window. */
+export async function sweepLogRetention(nowMs = Date.now(), force = false): Promise<{ prunedLines: number; archivedFiles: number }> {
+  if (!force && nowMs - logRetentionState.lastSweepAt < LOG_SWEEP_EVERY_MS) return { prunedLines: 0, archivedFiles: 0 };
+  logRetentionState.lastSweepAt = nowMs;
+  const config = await readLogRetentionConfig();
+  if (!config.enabled) return { prunedLines: 0, archivedFiles: 0 };
+  const cutoff = retentionCutoff(nowMs, config.retentionDays);
+  const fleet = await db.select({ id: servers.id }).from(servers);
+  let prunedLines = 0;
+  let archivedFiles = 0;
+  for (const { id } of fleet) {
+    const stale = await db
+      .select()
+      .from(consoleLogs)
+      .where(and(eq(consoleLogs.serverId, id), lt(consoleLogs.ts, cutoff)))
+      .orderBy(asc(consoleLogs.id))
+      .limit(PRUNE_BATCH);
+    if (stale.length === 0) continue;
+    if (config.archive) {
+      const dir = path.join(logArchiveDir(), String(id));
+      await fsp.mkdir(dir, { recursive: true });
+      const body = stale.map(formatArchiveLine).join("\n") + "\n";
+      await fsp.writeFile(path.join(dir, archiveFileName(id, nowMs)), zlib.gzipSync(body));
+      archivedFiles += 1;
+      // Oldest beyond the cap go first — names are lexicographically dated.
+      const kept = (await fsp.readdir(dir).catch(() => [] as string[])).filter((name) => name.endsWith(".log.gz")).sort();
+      for (const old of kept.slice(0, Math.max(0, kept.length - config.archiveKeep))) {
+        await fsp.rm(path.join(dir, old), { force: true });
+      }
+    }
+    const maxId = stale[stale.length - 1].id;
+    await db.delete(consoleLogs).where(and(eq(consoleLogs.serverId, id), lte(consoleLogs.id, maxId), lt(consoleLogs.ts, cutoff)));
+    prunedLines += stale.length;
+  }
+  if (prunedLines > 0) {
+    await act(null, "task", `Log retention: pruned ${prunedLines} console line${prunedLines === 1 ? "" : "s"} older than ${config.retentionDays} day${config.retentionDays === 1 ? "" : "s"}${config.archive ? ` (${archivedFiles} archive file${archivedFiles === 1 ? "" : "s"} written)` : ""}`).catch(() => {});
+  }
+  logRetentionState.lastResult = { prunedLines, archivedFiles, sweptAt: nowMs };
+  return { prunedLines, archivedFiles };
+}
+
+// ---- disk-space alerts ---------------------------------------------------
+
+const diskAlertState = { lastCheckAt: 0, lastAlertAt: 0, lastFreeMb: null as number | null };
+const DISK_CHECK_EVERY_MS = 5 * 60_000;
+
+function diskAlertsFile() { return path.join(appDataDir(), "disk-alerts.json"); }
+
+export async function readDiskAlertConfig(): Promise<DiskAlertConfig> {
+  try {
+    return normalizeDiskAlertConfig(JSON.parse(await fsp.readFile(diskAlertsFile(), "utf8")));
+  } catch { return normalizeDiskAlertConfig(undefined); }
+}
+
+export async function writeDiskAlertConfig(config: DiskAlertConfig): Promise<void> {
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(diskAlertsFile(), JSON.stringify(config, null, 2), "utf8");
+  diskAlertState.lastCheckAt = 0; // re-check promptly under the new config
+}
+
+export function getDiskAlertStatus(): { freeMb: number | null; lastAlertAt: string | null } {
+  return {
+    freeMb: diskAlertState.lastFreeMb,
+    lastAlertAt: diskAlertState.lastAlertAt > 0 ? new Date(diskAlertState.lastAlertAt).toISOString() : null,
+  };
+}
+
+/** Scheduler-tick sweep, internally throttled to one statfs per 5 minutes. */
+export async function sweepDiskAlerts(nowMs = Date.now(), force = false): Promise<{ freeMb: number | null; breached: boolean; alerted: boolean }> {
+  if (!force && nowMs - diskAlertState.lastCheckAt < DISK_CHECK_EVERY_MS) {
+    return { freeMb: diskAlertState.lastFreeMb, breached: false, alerted: false };
+  }
+  diskAlertState.lastCheckAt = nowMs;
+  const config = await readDiskAlertConfig();
+  const stat = await fsp.statfs(appDataDir()).catch(() => null);
+  if (!stat) return { freeMb: null, breached: false, alerted: false };
+  const freeMb = Math.round((Number(stat.bavail) * Number(stat.bsize)) / 1_048_576);
+  diskAlertState.lastFreeMb = freeMb;
+  if (!config.enabled) return { freeMb, breached: false, alerted: false };
+  const breach = evaluateDiskFree(freeMb, config.minFreeMb);
+  if (!breach) {
+    diskAlertState.lastAlertAt = 0; // space recovered — re-arm immediately
+    return { freeMb, breached: false, alerted: false };
+  }
+  if (!isDiskAlertDue(nowMs, diskAlertState.lastAlertAt, config.cooldownMin)) return { freeMb, breached: true, alerted: false };
+  diskAlertState.lastAlertAt = nowMs;
+  const detail = diskAlertDetail(breach);
+  void notify({ kind: "disk-low", serverName: "Panel", detail });
+  await act(null, "guardrail", `Low disk space: ${detail}`).catch(() => {});
+  return { freeMb, breached: true, alerted: true };
+}
+
+/** 15-second sweep: broadcast on every online server whose interval has elapsed. */
+export async function sweepAnnouncements(nowMs = Date.now()): Promise<void> {
+  const inMaintenance = await readAllMaintenance();
+  for (const entry of state.processes.values()) {
+    const serverId = entry.server.id;
+    // Maintenance silences the rotation; the cadence re-anchors afterwards.
+    if (inMaintenance[String(serverId)]?.enabled) { announcerState.delete(serverId); continue; }
+    const config = await readAnnouncementConfigFor(serverId);
+    if (!config.enabled) { announcerState.delete(serverId); continue; }
+    const known = announcerState.get(serverId);
+    if (!known) {
+      // First sight of a freshly started (or re-enabled) server: anchor the
+      // cadence now so players are not greeted by an instant broadcast.
+      announcerState.set(serverId, { lastIndex: -1, lastSentAt: nowMs });
+      continue;
+    }
+    if (!isAnnouncementDue(nowMs, known.lastSentAt, config.intervalMin)) continue;
+    await broadcastAnnouncement(entry.server, config, nowMs).catch(() => {});
+  }
+}
+
+/**
+ * Scheduled stop/restart with player warnings. Runs the action immediately
+ * when warnings are disabled, the server is offline, or the game has no
+ * broadcast channel; otherwise broadcasts the countdown and performs the
+ * action when it reaches zero.
+ */
+export async function warnedPower(serverId: number, action: WarningAction, label: string): Promise<{ ok: boolean; mode: "immediate" | "countdown"; seconds?: number; reason?: string }> {
+  await ensureRuntimeInitialized();
+  const entry = state.processes.get(serverId);
+  const immediate = async () => {
+    const result = action === "stop" ? await stopFlow(serverId, "Scheduler") : await restartFlow(serverId);
+    return { ok: result.ok, mode: "immediate" as const, reason: result.reason };
+  };
+  if (!entry || entry.stopping) return immediate();
+  const config = await readWarningConfigFor(serverId);
+  if (!config.enabled || !broadcastCommand(entry.server.gameId, config.template, "x")) return immediate();
+  if (countdowns.has(serverId)) return { ok: false, mode: "countdown", reason: "A shutdown countdown is already running" };
+  const plan = countdownPlan(config.intervalsSec, Date.now());
+  const timers: NodeJS.Timeout[] = [];
+  for (const step of plan.steps) {
+    const fire = () => {
+      const current = state.processes.get(serverId);
+      if (!current || !countdowns.has(serverId)) return;
+      const command = broadcastCommand(current.server.gameId, config.template, warningMessage(action, step.secondsLeft));
+      if (command) void runCommand(current.server, command, "Scheduler").catch(() => {});
+    };
+    const delay = step.atMs - Date.now();
+    if (delay <= 0) fire();
+    else timers.push(setTimeout(fire, delay));
+  }
+  timers.push(setTimeout(() => {
+    void (async () => {
+      countdowns.delete(serverId);
+      const result = action === "stop" ? await stopFlow(serverId, "Scheduler") : await restartFlow(serverId);
+      if (!result.ok) await logLine(serverId, "error", "Scheduler", `Countdown ${action} failed: ${result.reason ?? "unknown error"}`);
+    })().catch(() => {});
+  }, plan.actionAtMs - Date.now()));
+  countdowns.set(serverId, { action, timers, endsAt: plan.actionAtMs, label });
+  await logLine(serverId, "system", "Scheduler", `${action === "stop" ? "Shutdown" : "Restart"} countdown started by "${label}": ${plan.totalSec} seconds, warnings at ${config.intervalsSec.join("s, ")}s.`);
+  return { ok: true, mode: "countdown", seconds: plan.totalSec };
+}
+
 export async function stopFlow(id: number, reason = "Panel"): Promise<{ ok: boolean; reason?: string }> {
   await ensureRuntimeInitialized();
+  await cancelCountdown(id, reason === "Scheduler" ? "" : `superseded by ${reason} stop`).catch(() => {});
   if (await cancelPendingRestart(id, reason)) return { ok: true };
   const entry = state.processes.get(id);
   if (!entry) {
@@ -1787,7 +2232,25 @@ export async function stopFlow(id: number, reason = "Panel"): Promise<{ ok: bool
   entry.stopping = true;
   await setStatus(id, "stopping");
   await logLine(id, "system", "Runtime", `Graceful stop requested by ${reason}.`);
-  try { entry.child.stdin.write(`${stopCommand(entry.server)}\n`); } catch { /* process may have closed */ }
+  let useStdinStop = true;
+  if (entry.server.gameId === "palworld") {
+    // Palworld ignores stdin. Its official REST API (loopback, Basic
+    // auth with AdminPassword) saves the world and shuts down with an
+    // in-game countdown. If the API declines — REST disabled or no
+    // admin password — fall through to the stdin write (harmless) and
+    // the 30-second force-kill backstop below.
+    const adminPassword = await revealSecret(entry.server.adminPassword);
+    const result = await palworldGracefulStop({ gamePort: entry.server.port, adminPassword, waitSeconds: 10 });
+    if (result.shutdown) {
+      useStdinStop = false;
+      await logLine(id, "system", "Runtime", `Palworld accepted the REST shutdown${result.saved ? " after a world save" : ""}; the server exits within 10 seconds.`);
+    } else {
+      await logLine(id, "warn", "Runtime", "The Palworld REST API did not accept the shutdown (AdminPassword unset, or an older build); the process will be terminated instead.");
+    }
+  }
+  if (useStdinStop) {
+    try { entry.child.stdin.write(`${stopCommand(entry.server)}\n`); } catch { /* process may have closed */ }
+  }
   const timer = setTimeout(() => {
     if (state.processes.get(id) === entry) {
       void logLine(id, "warn", "Runtime", "Graceful stop timed out after 30 seconds; terminating the process tree.").catch(() => {});
@@ -1853,13 +2316,69 @@ export async function runCommand(server: Server, raw: string, issuer = "you") {
   return { ok: true };
 }
 
+// Runs a macro's steps in order, honoring per-step pauses. The first
+// failing step aborts the rest — a stopped server never receives the
+// tail of a sequence meant for a running one.
+export async function executeMacro(server: Server, macro: Macro, issuer = "you"): Promise<{ ok: boolean; stepsRun: number; error?: string }> {
+  await logLine(server.id, "system", "Macro", `Running macro "${macro.name}" (${macroSummary(macro)}).`);
+  for (let index = 0; index < macro.steps.length; index++) {
+    const step = macro.steps[index];
+    const result = await runCommand(server, step.command, issuer);
+    if (!result.ok) {
+      const error = `Step ${index + 1} of ${macro.steps.length} failed: ${result.reason ?? "Command failed"}`;
+      await logLine(server.id, "warn", "Macro", `Macro "${macro.name}" aborted. ${error}`);
+      return { ok: false, stepsRun: index, error };
+    }
+    if (step.delaySec > 0 && index < macro.steps.length - 1) {
+      await new Promise((resolve) => setTimeout(resolve, step.delaySec * 1000));
+    }
+  }
+  await act(server.id, "task", `${server.name}: macro "${macro.name}" completed (${macro.steps.length} steps)`);
+  return { ok: true, stepsRun: macro.steps.length };
+}
+
 async function sampleEntry(entry: RuntimeEntry) {
   if (!entry.child.pid || !state.processes.has(entry.server.id)) return;
   const proc = await processUsage(entry.child.pid, entry.sample);
   if (proc.sample) entry.sample = proc.sample;
   const online = await db.select({ id: players.id }).from(players).where(and(eq(players.serverId, entry.server.id), eq(players.isOnline, true)));
-  entry.metrics.push({ t: Date.now(), cpu: proc.cpu, ram: proc.ram, players: online.length, tps: null });
+  const sample = { t: Date.now(), cpu: proc.cpu, ram: proc.ram, players: online.length, tps: null };
+  entry.metrics.push(sample);
   if (entry.metrics.length > 240) entry.metrics.shift();
+  void recordMetricsSample(entry.server.id, sample);
+  void checkGuardrails(entry).catch(() => {});
+}
+
+// Guardrail alert state per server: hysteresis + cooldown live here so a
+// sustained breach alerts once, not every two seconds.
+const guardrailStates = new Map<number, GuardrailState>();
+
+export function guardrailActive(serverId: number): boolean {
+  return guardrailStates.get(serverId)?.active ?? false;
+}
+
+async function checkGuardrails(entry: RuntimeEntry) {
+  const id = entry.server.id;
+  const config = (await loadGuardrailsCached())[String(id)];
+  if (!config?.enabled) {
+    guardrailStates.delete(id);
+    return;
+  }
+  const breach = evaluateGuardrail(entry.metrics, config);
+  const next = nextGuardrailState(guardrailStates.get(id), breach !== null);
+  guardrailStates.set(id, next);
+  if (!next.fire || !breach) return;
+  const detail = breach.metric === "cpu"
+    ? `CPU above ${breach.threshold}% for ${breach.sustainMin} min (peak ${breach.value}%)`
+    : `RAM above ${breach.threshold} MB for ${breach.sustainMin} min (peak ${breach.value} MB)`;
+  await logLine(id, "warn", "Guardrail", `${detail}.`);
+  await incident(id, "warning", "guardrail", detail, config.action === "restart" ? "Automatic restart was configured and triggered" : "Review the workload, mods, or raise the threshold in Diagnostics");
+  await act(id, "guardrail", `${entry.server.name}: ${detail}`);
+  void notify({ kind: "guardrail", serverName: entry.server.name, detail });
+  if (config.action === "restart" && state.processes.has(id)) {
+    await logLine(id, "warn", "Guardrail", "Restarting the server as configured for sustained resource pressure.");
+    void restartFlow(id).catch(() => {});
+  }
 }
 
 async function processUsage(pid: number, previous?: ProcSample): Promise<{ cpu: number; ram: number; sample?: ProcSample }> {
@@ -1938,11 +2457,15 @@ export async function createBackup(id: number, label?: string, by = "you") {
       await db.update(backups).set({ status: "complete", sizeMb, archivePath: archive, checksum }).where(eq(backups.id, row.id));
       await logLine(id, "success", "Backup", `Backup complete: ${path.basename(archive)} (${sizeMb} MB, SHA-256 ${checksum.slice(0, 12)}…).`);
       await act(id, "backup", `Backup "${name}" completed (${sizeMb} MB)`);
+      void notify({ kind: "backup-complete", serverName: server.name, detail: `${name}, ${sizeMb} MB` });
+      await applyBackupRetention(id).catch(() => {});
+      await mirrorBackupNow(row.id).catch(() => {});
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await db.update(backups).set({ status: "failed", note: message, archivePath: archive }).where(eq(backups.id, row.id));
       await fsp.rm(archive, { force: true }).catch(() => {});
       await logLine(id, "error", "Backup", `Backup failed: ${message}`);
+      void notify({ kind: "backup-failed", serverName: server.name, detail: message });
     }
   })();
   return row;
@@ -1962,12 +2485,487 @@ export async function createBackupAndWait(id: number, label?: string, by = "you"
   throw new Error("Safety backup timed out");
 }
 
+/**
+ * Enforce the server's general backup retention policy (count and age
+ * limits). Runs automatically after every completed backup and can be
+ * invoked on demand. The active update safety backup is never pruned.
+ * Returns the number of pruned backups.
+ */
+export async function applyBackupRetention(serverId: number): Promise<{ pruned: number; kept: number }> {
+  await ensureRuntimeInitialized();
+  const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
+  if (!server) return { pruned: 0, kept: 0 };
+  const rows = await db.select().from(backups).where(eq(backups.serverId, serverId));
+  if (server.backupRetentionCount === 0 && server.backupRetentionDays === 0) {
+    return { pruned: 0, kept: rows.length };
+  }
+  const protectedIds = server.updateSafetyBackupId ? [server.updateSafetyBackupId] : [];
+  const pruneIds = selectBackupsToPrune({
+    backups: rows,
+    retentionCount: server.backupRetentionCount,
+    retentionDays: server.backupRetentionDays,
+    protectedIds,
+  });
+  if (pruneIds.length === 0) return { pruned: 0, kept: rows.length };
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  for (const backupId of pruneIds) {
+    const backup = byId.get(backupId);
+    if (!backup) continue;
+    await deleteBackupFile(backup);
+    await db.delete(backups).where(eq(backups.id, backupId));
+  }
+  const limits = [
+    server.backupRetentionCount > 0 ? `keep ${server.backupRetentionCount}` : "",
+    server.backupRetentionDays > 0 ? `max age ${server.backupRetentionDays}d` : "",
+  ].filter(Boolean).join(", ");
+  await logLine(serverId, "system", "Backup", `Retention pruned ${pruneIds.length} backup${pruneIds.length === 1 ? "" : "s"} (${limits}).`);
+  await act(serverId, "backup", `Retention pruned ${pruneIds.length} backup${pruneIds.length === 1 ? "" : "s"} (${limits})`);
+  return { pruned: pruneIds.length, kept: rows.length - pruneIds.length };
+}
+
 export function backupArchivePath(backup: Backup): string {
   return backup.archivePath || path.join(backupsDir(backup.serverId), `${String(backup.id).padStart(6, "0")}-${safeFileName(backup.name)}.tar.gz`);
 }
 
+// ---------------------------------------------------------------------------
+// Backup integrity verification (backup-verification.ts owns the pure logic)
+// ---------------------------------------------------------------------------
+
+const backupVerifyState = { lastSweepAt: 0 };
+
+function backupVerificationFile() {
+  return path.join(appDataDir(), "backup-verification.json");
+}
+
+export async function readBackupVerification(): Promise<VerificationState> {
+  try { return normalizeVerificationState(JSON.parse(await fsp.readFile(backupVerificationFile(), "utf8"))); }
+  catch { return {}; }
+}
+
+/**
+ * Rolling verification: re-hash a bounded number of completed archives per
+ * pass (stale-first cache, newest backups first) and flip a backup-corrupt
+ * notification the moment a verdict goes bad. `force` is the operator's
+ * "verify now" — bigger cap, no sweep throttle.
+ */
+export async function sweepBackupVerification(nowMs = Date.now(), force = false): Promise<{ checked: number; corrupt: number }> {
+  if (!force && nowMs - backupVerifyState.lastSweepAt < VERIFY_SWEEP_EVERY_MS) return { checked: 0, corrupt: 0 };
+  backupVerifyState.lastSweepAt = nowMs;
+  const rows = await db.select().from(backups);
+  let state = pruneVerificationState(await readBackupVerification(), new Set(rows.map((row) => String(row.id))));
+  // Operator-forced runs re-verify everything (staleness 0): a corrupted
+  // archive must be catchable immediately, not after the cache expires.
+  const candidates = selectBackupsToVerify(rows, state, nowMs, force ? MAX_VERIFY_FORCED : MAX_VERIFY_PER_SWEEP, force ? 0 : undefined);
+  let corrupt = 0;
+  for (const backupId of candidates) {
+    const backup = rows.find((row) => row.id === backupId);
+    if (!backup) continue;
+    const archive = backupArchivePath(backup);
+    let record: VerificationRecord;
+    try {
+      const result = await inspectBackupArchive(archive, backup.checksum);
+      record = {
+        ok: result.valid,
+        problem: result.valid ? "" : `Checksum mismatch — expected ${result.expectedChecksum.slice(0, 12)}…, found ${result.actualChecksum.slice(0, 12)}…`,
+        checksum: result.actualChecksum,
+        verifiedAt: new Date(nowMs).toISOString(),
+        archiveBytes: result.archiveBytes,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const missing = (error as NodeJS.ErrnoException)?.code === "ENOENT";
+      record = { ok: false, problem: missing ? "Archive file is missing from disk" : message.slice(0, 500), checksum: "", verifiedAt: new Date(nowMs).toISOString(), archiveBytes: 0 };
+    }
+    const previous = state[String(backupId)];
+    state = { ...state, [String(backupId)]: record };
+    if (!record.ok) {
+      corrupt += 1;
+      if (!previous || previous.ok) {
+        const [server] = await db.select().from(servers).where(eq(servers.id, backup.serverId));
+        const serverName = server?.name ?? `Server ${backup.serverId}`;
+        void notify({ kind: "backup-corrupt", serverName, detail: `${backup.name} — ${record.problem}` });
+        await act(backup.serverId, "backup", `Backup "${backup.name}" failed verification: ${record.problem}`).catch(() => {});
+      }
+    }
+  }
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(backupVerificationFile(), JSON.stringify(state), "utf8");
+  return { checked: candidates.length, corrupt };
+}
+
+/**
+ * Copy the source server's directory into the clone's (server-clone.ts owns
+ * the eligibility rules). Returns the number of files that landed; a source
+ * with no directory yet simply copies nothing.
+ */
+export async function cloneServerFiles(source: Server, target: Server): Promise<{ files: number }> {
+  const from = serverDir(source);
+  const to = serverDir(target);
+  try {
+    await fsp.access(from);
+  } catch {
+    return { files: 0 };
+  }
+  await fsp.mkdir(path.dirname(to), { recursive: true });
+  await fsp.cp(from, to, { recursive: true, force: true });
+  let files = 0;
+  const walk = async (dir: string): Promise<void> => {
+    for (const entry of await fsp.readdir(dir, { withFileTypes: true })) {
+      if (files >= 10_000) return;
+      if (entry.isDirectory()) await walk(path.join(dir, entry.name));
+      else files += 1;
+    }
+  };
+  await walk(to).catch(() => {});
+  return { files };
+}
+
 export async function deleteBackupFile(backup: Backup) {
   await fsp.rm(backupArchivePath(backup), { force: true });
+  // The mirror copy (and its state entry) leaves with the primary.
+  try {
+    const config = await readMirrorConfig();
+    const mirrorState = await readMirrorState();
+    const entry = mirrorState.entries[String(backup.id)];
+    if (entry) {
+      if (config.directory) await fsp.rm(path.join(config.directory, ...entry.file.split("/")), { force: true }).catch(() => {});
+      delete mirrorState.entries[String(backup.id)];
+      await writeMirrorState(mirrorState);
+    }
+  } catch { /* mirror cleanup is best-effort */ }
+}
+
+// ---------------------------------------------------------------------------
+// Backup mirror — checksum-verified secondary destination
+// ---------------------------------------------------------------------------
+
+function mirrorConfigFile() { return path.join(appDataDir(), "backup-mirror.json"); }
+function mirrorStateFile() { return path.join(appDataDir(), "backup-mirror-state.json"); }
+
+export async function readMirrorConfig(): Promise<MirrorConfig> {
+  try { return normalizeMirrorConfig(JSON.parse(await fsp.readFile(mirrorConfigFile(), "utf8"))); }
+  catch { return normalizeMirrorConfig(undefined); }
+}
+
+export async function writeMirrorConfig(config: MirrorConfig): Promise<void> {
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(mirrorConfigFile(), JSON.stringify(config, null, 2), "utf8");
+}
+
+async function readMirrorState(): Promise<MirrorState> {
+  try { return normalizeMirrorState(JSON.parse(await fsp.readFile(mirrorStateFile(), "utf8"))); }
+  catch { return normalizeMirrorState(undefined); }
+}
+
+async function writeMirrorState(mirrorState: MirrorState): Promise<void> {
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(mirrorStateFile(), JSON.stringify(mirrorState, null, 2), "utf8");
+}
+
+/** Relative paths (POSIX separators) of mirror files that match our naming under `server-<id>/`. */
+async function listMirrorFiles(directory: string): Promise<Set<string>> {
+  const found = new Set<string>();
+  const subdirs: import("node:fs").Dirent[] = await fsp.readdir(directory, { withFileTypes: true }).catch(() => []);
+  for (const sub of subdirs) {
+    if (!sub.isDirectory() || !/^server-\d+$/.test(sub.name)) continue;
+    const files: string[] = await fsp.readdir(path.join(directory, sub.name)).catch(() => []);
+    for (const file of files) if (MIRROR_ARCHIVE_PATTERN.test(file)) found.add(`${sub.name}/${file}`);
+  }
+  return found;
+}
+
+/** Copy one completed backup into the mirror; the copy is re-hashed and must match the primary's checksum. */
+export async function mirrorBackupNow(backupId: number): Promise<{ ok: boolean; reason?: string }> {
+  await ensureRuntimeInitialized();
+  const config = await readMirrorConfig();
+  if (!config.enabled) return { ok: false, reason: "The backup mirror is disabled" };
+  const [backup] = await db.select().from(backups).where(eq(backups.id, backupId));
+  if (!backup || backup.status !== "complete") return { ok: false, reason: "Backup not found or not complete" };
+  const [server] = await db.select().from(servers).where(eq(servers.id, backup.serverId));
+  const serverName = server?.name ?? `server ${backup.serverId}`;
+  const primary = backupArchivePath(backup);
+  let rel: string;
+  try { rel = mirrorRelativePath(backup.serverId, path.basename(primary)); }
+  catch (error) { return { ok: false, reason: error instanceof Error ? error.message : String(error) }; }
+  const destination = path.join(config.directory, ...rel.split("/"));
+  const partial = `${destination}.part`;
+  try {
+    const expected = backup.checksum || (await hashFile(primary));
+    await fsp.mkdir(path.dirname(destination), { recursive: true });
+    await fsp.copyFile(primary, partial);
+    const actual = await hashFile(partial);
+    if (actual !== expected) throw new Error(`Checksum mismatch after copy (expected ${expected.slice(0, 12)}…, got ${actual.slice(0, 12)}…)`);
+    await fsp.rename(partial, destination);
+    const mirrorState = await readMirrorState();
+    mirrorState.entries[String(backup.id)] = { status: "mirrored", file: rel, checksum: actual, mirroredAt: new Date().toISOString() };
+    await writeMirrorState(mirrorState);
+    await logLine(backup.serverId, "success", "Backup", `Mirror copy verified: ${rel} (SHA-256 ${actual.slice(0, 12)}…).`);
+    return { ok: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await fsp.rm(partial, { force: true }).catch(() => {});
+    const mirrorState = await readMirrorState();
+    mirrorState.entries[String(backup.id)] = { status: "failed", file: rel, checksum: "", mirroredAt: new Date().toISOString(), error: message };
+    await writeMirrorState(mirrorState);
+    await logLine(backup.serverId, "error", "Backup", `Mirror copy failed: ${message}`);
+    void notify({ kind: "mirror-failed", serverName, detail: message });
+    return { ok: false, reason: message };
+  }
+}
+
+/** Reconcile the whole mirror: copy missing or failed, remove stale copies of pruned backups, drop dead state entries. */
+export async function syncBackupMirror(): Promise<{ ok: boolean; reason?: string; copied: number; failed: number; removedStale: number; upToDate: number }> {
+  await ensureRuntimeInitialized();
+  const config = await readMirrorConfig();
+  if (!config.enabled) return { ok: false, reason: "The backup mirror is disabled", copied: 0, failed: 0, removedStale: 0, upToDate: 0 };
+  await fsp.mkdir(config.directory, { recursive: true });
+  const rows = await db.select().from(backups);
+  const refs = rows.map((row) => ({ id: row.id, serverId: row.serverId, status: row.status, archiveBasename: path.basename(backupArchivePath(row)) }));
+  const plan = planMirrorSync(refs, await readMirrorState(), await listMirrorFiles(config.directory));
+  let copied = 0;
+  let failed = 0;
+  for (const backupId of plan.toCopy) {
+    const result = await mirrorBackupNow(backupId);
+    if (result.ok) copied += 1;
+    else failed += 1;
+  }
+  for (const stale of plan.stale) {
+    await fsp.rm(path.join(config.directory, ...stale.split("/")), { force: true }).catch(() => {});
+  }
+  const alive = new Set(rows.map((row) => String(row.id)));
+  const finalState = await readMirrorState();
+  let dirty = false;
+  for (const key of Object.keys(finalState.entries)) {
+    if (!alive.has(key)) { delete finalState.entries[key]; dirty = true; }
+  }
+  if (dirty) await writeMirrorState(finalState);
+  return { ok: failed === 0, copied, failed, removedStale: plan.stale.length, upToDate: plan.upToDate.length };
+}
+
+/** Configuration plus live health summary, for the API and the activity digest. */
+export async function backupMirrorStatus(): Promise<{ config: MirrorConfig; health: ReturnType<typeof summarizeMirrorHealth> }> {
+  const config = await readMirrorConfig();
+  const rows = await db.select({ id: backups.id, status: backups.status }).from(backups);
+  return { config, health: summarizeMirrorHealth(rows, await readMirrorState()) };
+}
+
+// ---------------------------------------------------------------------------
+// Disk usage explorer
+// ---------------------------------------------------------------------------
+
+function usageHistoryFile() { return path.join(appDataDir(), "disk-usage.json"); }
+
+/** Walk a server directory (symlink-free, entry-budgeted) into relative file records. */
+async function walkServerFiles(root: string): Promise<{ files: UsageFile[]; truncated: boolean }> {
+  const files: UsageFile[] = [];
+  let examined = 0;
+  let truncated = false;
+  const queue: string[] = [""];
+  while (queue.length) {
+    const relDir = queue.shift()!;
+    const absDir = relDir ? path.join(root, ...relDir.split("/")) : root;
+    const entries: import("node:fs").Dirent[] = await fsp.readdir(absDir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (examined >= MAX_SCAN_ENTRIES) { truncated = true; return { files, truncated }; }
+      examined += 1;
+      if (entry.isSymbolicLink()) continue;
+      const rel = relDir ? `${relDir}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) queue.push(rel);
+      else if (entry.isFile()) {
+        const stat = await fsp.stat(path.join(absDir, entry.name)).catch(() => null);
+        if (stat) files.push({ path: rel, sizeBytes: stat.size });
+      }
+    }
+  }
+  return { files, truncated };
+}
+
+export type DiskUsageResult = {
+  report: UsageReport;
+  backups: { count: number; bytes: number };
+  growth: UsageGrowth;
+  hints: string[];
+  scannedAt: string;
+};
+
+/**
+ * Scan a server's storage: category breakdown and biggest files from the
+ * server directory, backup archive bytes from disk (DB size as fallback),
+ * growth vs the daily snapshot history, and cleanup hints.
+ */
+export async function scanServerDiskUsage(serverId: number): Promise<DiskUsageResult | null> {
+  await ensureRuntimeInitialized();
+  const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
+  if (!server) return null;
+  const { files, truncated } = await walkServerFiles(serverDir(server));
+  const report = buildUsageReport(files, truncated);
+
+  const backupRows = await db.select().from(backups).where(eq(backups.serverId, serverId));
+  let backupsBytes = 0;
+  let backupsCount = 0;
+  for (const row of backupRows) {
+    if (row.status !== "complete") continue;
+    backupsCount += 1;
+    const stat = await fsp.stat(backupArchivePath(row)).catch(() => null);
+    backupsBytes += stat ? stat.size : row.sizeMb * 1024 * 1024;
+  }
+
+  const now = new Date();
+  const total = report.totalBytes + backupsBytes;
+  let history = normalizeUsageHistory(await fsp.readFile(usageHistoryFile(), "utf8").then(JSON.parse).catch(() => undefined));
+  const growth = computeGrowth(history, serverId, total, now);
+  history = recordUsageSnapshot(history, serverId, total, now);
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(usageHistoryFile(), JSON.stringify(history, null, 2), "utf8").catch(() => {});
+
+  const hints = cleanupHints({
+    report,
+    backupsBytes,
+    backupsCount,
+    retentionConfigured: server.backupRetentionCount > 0 || server.backupRetentionDays > 0,
+    crashReportCount: files.filter((file) => /^(crash-reports|crashes)\//i.test(file.path)).length,
+  });
+  return { report, backups: { count: backupsCount, bytes: backupsBytes }, growth, hints, scannedAt: now.toISOString() };
+}
+
+// ---------------------------------------------------------------------------
+// Public status page — token-guarded, read-only
+// ---------------------------------------------------------------------------
+
+function statusPageConfigFile() { return path.join(appDataDir(), "status-page.json"); }
+
+// ---------------------------------------------------------------------------
+// Uptime history — minute samples into UTC day buckets (uptime-history.ts)
+// ---------------------------------------------------------------------------
+
+const uptimeSweepState = { lastSampleAt: 0 };
+
+function uptimeHistoryFile() {
+  return path.join(appDataDir(), "uptime-history.json");
+}
+
+export async function readUptimeHistory(): Promise<UptimeHistory> {
+  try { return normalizeUptimeHistory(JSON.parse(await fsp.readFile(uptimeHistoryFile(), "utf8"))); }
+  catch { return {}; }
+}
+
+/** Scheduler-tick sweep, throttled to one sample per server per minute. */
+export async function sweepUptimeHistory(nowMs = Date.now(), force = false): Promise<{ sampled: boolean }> {
+  if (!force && nowMs - uptimeSweepState.lastSampleAt < UPTIME_SAMPLE_EVERY_MS) return { sampled: false };
+  uptimeSweepState.lastSampleAt = nowMs;
+  const fleet = await db.select({ id: servers.id, status: servers.status }).from(servers);
+  if (fleet.length === 0) return { sampled: false };
+  const inMaintenance = await readAllMaintenance();
+  const history = await readUptimeHistory();
+  const day = utcDayKey(new Date(nowMs));
+  for (const server of fleet) {
+    const sample: UptimeSampleState = inMaintenance[String(server.id)]?.enabled
+      ? "maintenance"
+      : server.status === "online" ? "online" : "offline";
+    recordUptimeSample(history, server.id, day, sample);
+  }
+  const pruned = pruneUptimeHistory(history, new Date(nowMs), UPTIME_WINDOW_DAYS, new Set(fleet.map((server) => String(server.id))));
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(uptimeHistoryFile(), JSON.stringify(pruned), "utf8");
+  return { sampled: true };
+}
+
+// ---------------------------------------------------------------------------
+// Power schedule sweep (power-schedule.ts) — acts only at window EDGES:
+// when the desired state TRANSITIONS, reconcile; in between, manual power
+// controls always win. Maintenance mode silences the scheduler entirely.
+// ---------------------------------------------------------------------------
+
+const POWER_SWEEP_EVERY_MS = 60_000;
+const powerScheduleState = { lastSweepAt: 0, lastDesired: new Map<number, "online" | "offline">() };
+
+/** Called when a server's schedule is edited: re-evaluate it on the next sweep. */
+export function powerScheduleChanged(serverId: number): void {
+  powerScheduleState.lastDesired.delete(serverId);
+  powerScheduleState.lastSweepAt = 0;
+}
+
+/** Scheduler-tick sweep, throttled to once per minute. */
+export async function sweepPowerSchedule(nowMs = Date.now(), force = false): Promise<{ started: number; stopped: number }> {
+  if (!force && nowMs - powerScheduleState.lastSweepAt < POWER_SWEEP_EVERY_MS) return { started: 0, stopped: 0 };
+  powerScheduleState.lastSweepAt = nowMs;
+  const schedules = await readAllWindowSchedules();
+  const active = Object.entries(schedules).filter(([, schedule]) => schedule.enabled);
+  if (active.length === 0) {
+    powerScheduleState.lastDesired.clear();
+    return { started: 0, stopped: 0 };
+  }
+  const inMaintenance = await readAllMaintenance();
+  const now = new Date(nowMs);
+  let started = 0;
+  let stopped = 0;
+  for (const [key, schedule] of active) {
+    const id = Number(key);
+    const desired = desiredPowerState(schedule, now);
+    if (desired === null) continue;
+    const previous = powerScheduleState.lastDesired.get(id);
+    powerScheduleState.lastDesired.set(id, desired);
+    if (previous === desired) continue; // between edges, the operator is in charge
+    if (inMaintenance[key]?.enabled) continue; // maintenance silences robots, including this one
+    const [server] = await db.select().from(servers).where(eq(servers.id, id));
+    if (!server) continue;
+    if (desired === "online" && server.status === "offline") {
+      await logLine(id, "system", "Scheduler", `Power window opened — starting ${server.name}.`).catch(() => {});
+      const result = await startFlow(id, true).catch(() => ({ ok: false }));
+      if (result.ok) {
+        started++;
+        await act(id, "power", `${server.name} started by power schedule`).catch(() => {});
+      }
+    } else if (desired === "offline" && server.status === "online") {
+      await logLine(id, "system", "Scheduler", `Power window closed — stopping ${server.name}.`).catch(() => {});
+      const result = await stopFlow(id, "Power schedule").catch(() => ({ ok: false }));
+      if (result.ok) {
+        stopped++;
+        await act(id, "power", `${server.name} stopped by power schedule`).catch(() => {});
+      }
+    }
+  }
+  return { started, stopped };
+}
+
+export async function readStatusPageConfig(): Promise<StatusPageConfig> {
+  try { return normalizeStatusConfig(JSON.parse(await fsp.readFile(statusPageConfigFile(), "utf8"))); }
+  catch { return normalizeStatusConfig(undefined); }
+}
+
+/** The token is a capability — the file is written with owner-only permissions, like webhooks. */
+export async function writeStatusPageConfig(config: StatusPageConfig): Promise<void> {
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(statusPageConfigFile(), JSON.stringify(config, null, 2), { encoding: "utf8", mode: 0o600 });
+}
+
+/** Whitelisted public snapshot of the fleet: names, games, versions, up/down, player counts, uptime. */
+export async function getPublicStatusSnapshot(): Promise<StatusSnapshot> {
+  await ensureRuntimeInitialized();
+  const config = await readStatusPageConfig();
+  const fleet = await db.select().from(servers);
+  const online = await db.select({ serverId: players.serverId, count: sql<number>`count(*)` })
+    .from(players).where(eq(players.isOnline, true)).groupBy(players.serverId);
+  const onlineBy = new Map(online.map((row) => [row.serverId, Number(row.count)]));
+  const inMaintenance = await readAllMaintenance();
+  const history = await readUptimeHistory();
+  const now = new Date();
+  return buildStatusSnapshot(
+    config.title,
+    fleet.map((server) => ({
+      name: server.name,
+      gameName: getGame(server.gameId).name,
+      version: server.version,
+      loader: server.loader,
+      status: inMaintenance[String(server.id)]?.enabled ? "maintenance" : server.status,
+      maxPlayers: server.maxPlayers,
+      onlineCount: onlineBy.get(server.id) ?? 0,
+      lastStartedAt: server.lastStartedAt,
+      uptime: history[String(server.id)]
+        ? { windowPct: uptimeWindowPercent(history, server.id, now), days: uptimeBars(history, server.id, now) }
+        : null,
+    }))
+  );
 }
 
 export async function restoreBackup(serverId: number, backupId: number) {
@@ -2000,11 +2998,136 @@ export async function restoreBackup(serverId: number, backupId: number) {
   }
 }
 
+// Restores a single file from a backup archive into the server
+// directory. Same gates as a full restore: the server must be stopped
+// and the archive checksum must verify — a selective restore is still
+// a restore.
+export async function restoreBackupEntry(serverId: number, backupId: number, rawPath: string) {
+  await ensureRuntimeInitialized();
+  const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
+  const [backup] = await db.select().from(backups).where(and(eq(backups.id, backupId), eq(backups.serverId, serverId)));
+  if (!server || !backup) return { ok: false, reason: "Backup not found" };
+  if (state.processes.has(serverId) || !["offline", "crashed", "error"].includes(server.status)) return { ok: false, reason: "Stop the server before restoring" };
+  if (backup.status !== "complete") return { ok: false, reason: "Backup is not complete" };
+  const entryPath = sanitizeArchiveEntryPath(rawPath);
+  if (!entryPath) return { ok: false, reason: "Invalid file path" };
+  const archive = backupArchivePath(backup);
+  if (!fs.existsSync(/*turbopackIgnore: true*/ archive)) return { ok: false, reason: "Backup archive is missing from disk" };
+  const checksum = await hashFile(archive);
+  if (backup.checksum && checksum !== backup.checksum) return { ok: false, reason: "Backup checksum verification failed" };
+  const { entries } = await listBackupEntries(archive);
+  const entry = entries.find((item) => item.path === entryPath && item.type === "file");
+  if (!entry) return { ok: false, reason: "That file is not in this backup" };
+  const root = serverDir(server);
+  try {
+    await fsp.mkdir(root, { recursive: true });
+    await tar.x({ cwd: root, file: archive, gzip: true, strict: true, preservePaths: false }, [entryPath]);
+    await logLine(serverId, "success", "Backup", `Restored "${entryPath}" from backup ${backup.name} (checksum verified).`);
+    await act(serverId, "backup", `Restored "${entryPath}" from backup "${backup.name}"`);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Scheduler and logs
 // ---------------------------------------------------------------------------
 
 async function enforceExpiredModeration(){const now=new Date(),pending=await db.select().from(moderationActions).where(and(eq(moderationActions.status,"pending-expiration"),lte(moderationActions.expiresAt,now)));for(const record of pending){if(record.expirationAttempts>=3){await db.update(moderationActions).set({status:"expiration-failed"}).where(eq(moderationActions.id,record.id));continue}const [server]=await db.select().from(servers).where(eq(servers.id,record.serverId));const [player]=await db.select().from(players).where(eq(players.id,record.playerId));if(!server||!player){await db.update(moderationActions).set({status:"expiration-failed"}).where(eq(moderationActions.id,record.id));continue}const command=`pardon ${record.target}`,result=await runCommand(server,command);const attempts=record.expirationAttempts+1;await db.update(moderationActions).set({expirationAttempts:attempts,lastExpirationAttemptAt:now,status:result.ok?"expiration-enforced":attempts>=3?"expiration-failed":"pending-expiration"}).where(eq(moderationActions.id,record.id));await db.insert(moderationActions).values({serverId:server.id,playerId:player.id,action:"automatic-unban",target:record.target,command,reason:`Temporary ban #${record.id} expired`,status:result.ok?"sent":"failed"});if(result.ok)await db.update(players).set({isBanned:false}).where(eq(players.id,player.id));}}
+
+// ---- activity digest ------------------------------------------------------
+
+let lastDigestProbe = 0;
+
+function digestStateFile() { return path.join(appDataDir(), "digest-state.json"); }
+
+async function readDigestState(): Promise<number | null> {
+  try {
+    const raw = JSON.parse(await fsp.readFile(digestStateFile(), "utf8")) as { lastSentAt?: unknown };
+    return typeof raw.lastSentAt === "number" && Number.isFinite(raw.lastSentAt) ? raw.lastSentAt : null;
+  } catch { return null; }
+}
+
+async function writeDigestState(lastSentAt: number): Promise<void> {
+  try { await fsp.writeFile(digestStateFile(), JSON.stringify({ lastSentAt }), "utf8"); } catch { /* best effort */ }
+}
+
+async function collectDigestRows(since: number, until: number): Promise<ServerDigestRow[]> {
+  const fleet = await db.select().from(servers);
+  const rows: ServerDigestRow[] = [];
+  for (const server of fleet) {
+    const buckets = await readHistory(server.id, until - since + 120_000).catch(() => []);
+    const sessions = await db.select().from(playerSessions).where(eq(playerSessions.serverId, server.id));
+    const aggregates = aggregateSessions(
+      sessions.map((session) => ({ name: session.displayName, joinedAt: session.joinedAt?.getTime() ?? until, leftAt: session.leftAt?.getTime() ?? null })),
+      since,
+      until
+    );
+    const snapshots = (await db.select().from(backups).where(eq(backups.serverId, server.id))).filter((b) => {
+      const at = b.createdAt?.getTime() ?? 0;
+      return at >= since && at < until;
+    });
+    const trouble = (await db.select().from(incidents).where(eq(incidents.serverId, server.id))).filter((i) => {
+      const at = i.createdAt?.getTime() ?? 0;
+      return at >= since && at < until;
+    });
+    let updateAvailable: boolean | null = null;
+    const game = getGame(server.gameId);
+    if (game.installer !== "manual") {
+      try {
+        const versions = await Promise.race([
+          catalogVersions(game.id),
+          new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("catalog timeout")), 3000)),
+        ]);
+        const latest = versions.find((item) => item.channel === "stable")?.id ?? null;
+        updateAvailable = latest && latest !== "latest" ? latest !== server.version : null;
+      } catch { updateAvailable = null; }
+    }
+    rows.push({
+      name: server.name,
+      uptimePct: uptimePercent(buckets.map((point) => point.t), since, until),
+      uniquePlayers: aggregates.uniquePlayers,
+      peakConcurrent: aggregates.peakConcurrent,
+      playtimeSec: aggregates.playtimeSec,
+      backupsOk: snapshots.filter((b) => b.status === "complete").length,
+      backupsFailed: snapshots.filter((b) => b.status !== "complete").length,
+      crashes: trouble.filter((i) => i.component === "crash").length,
+      guardrails: trouble.filter((i) => i.component === "guardrail").length,
+      updateAvailable,
+    });
+  }
+  return rows;
+}
+
+export async function sendActivityDigest(force = false, now = new Date()): Promise<{ sent: boolean; reason?: string; title?: string; detail?: string }> {
+  await ensureRuntimeInitialized();
+  const config = await readNotificationConfig();
+  const digest = normalizeDigestConfig(config.digest);
+  if (!config.url) return { sent: false, reason: "No webhook URL is configured" };
+  if (!force) {
+    if (!digest.enabled) return { sent: false, reason: "The activity digest is disabled" };
+    if (!digestDue(digest, await readDigestState(), now)) return { sent: false, reason: "The digest is not due yet" };
+  }
+  const window = digestWindow(digest.cadence, now);
+  const rows = await collectDigestRows(window.since, window.until);
+  const mirror = await backupMirrorStatus().catch(() => null);
+  const rendered = formatDigest(digest.cadence, now, rows, mirror ? formatMirrorNote(mirror.config, mirror.health) : "");
+  const delivered = await deliverNotification(config, { kind: "digest", serverName: "Server Hub", detail: rendered.detail });
+  if (delivered) await writeDigestState(now.getTime());
+  return delivered
+    ? { sent: true, title: rendered.title, detail: rendered.detail }
+    : { sent: false, reason: "Webhook delivery failed", title: rendered.title, detail: rendered.detail };
+}
+
+async function maybeSendActivityDigest(now: Date): Promise<void> {
+  const config = await readNotificationConfig();
+  const digest = normalizeDigestConfig(config.digest);
+  if (!digest.enabled || !config.url) return;
+  if (!digestDue(digest, await readDigestState(), now)) return;
+  const result = await sendActivityDigest(false, now);
+  if (result.sent) console.log(`[digest] ${result.title} delivered (window ${DIGEST_WINDOW_MS[digest.cadence] / 3_600_000}h).`);
+}
 
 export async function sweepTasks(serverId?: number) {
   await ensureRuntimeInitialized();
@@ -2013,16 +3136,37 @@ export async function sweepTasks(serverId?: number) {
   try {
     await enforceExpiredModeration();
     const now = new Date();
+    if (now.getTime() - lastDigestProbe > 60_000) { lastDigestProbe = now.getTime(); await maybeSendActivityDigest(now).catch(() => {}); }
     const enabled = await db.select().from(tasks).where(eq(tasks.enabled, true));
+    const inMaintenance = await readAllMaintenance();
     for (const task of enabled) {
       if (serverId && task.serverId !== serverId) continue;
       if (!task.nextRunAt || task.nextRunAt > now) continue;
+      // Maintenance pauses the scheduler: the task stays due and fires once
+      // the flag is lifted (the missed-run policy applies past 60 seconds).
+      if (inMaintenance[String(task.serverId)]?.enabled) continue;
       const overdue=now.getTime()-task.nextRunAt.getTime()>60_000;
       if(overdue&&task.missedPolicy!=="run"){const next=task.scheduleKind==="once"?(task.missedPolicy==="reschedule"?new Date(now.getTime()+5*60_000):null):task.scheduleKind==="daily"||task.scheduleKind==="weekly"?nextCalendarRun(task.scheduleKind,task.scheduleTime,task.scheduleWeekday,now):new Date(now.getTime()+Math.max(1,task.intervalMin)*60_000);await db.update(tasks).set({enabled:next?task.enabled:false,nextRunAt:next,lastRunAt:task.missedPolicy==="skip"?now:task.lastRunAt}).where(eq(tasks.id,task.id));await db.insert(taskRuns).values({taskId:task.id,serverId:task.serverId,taskName:task.name,type:task.type,command:"",status:task.missedPolicy==="skip"?"skipped":"rescheduled",error:`Missed while Server Hub was offline; policy: ${task.missedPolicy}`});continue}
       await db.update(tasks).set({ lastRunAt: now, enabled:task.scheduleKind==="once"?false:task.enabled, nextRunAt: task.scheduleKind==="once"?null:task.scheduleKind==="daily"||task.scheduleKind==="weekly"?nextCalendarRun(task.scheduleKind,task.scheduleTime,task.scheduleWeekday,now):new Date(now.getTime() + Math.max(1, task.intervalMin) * 60_000) }).where(eq(tasks.id, task.id));
       const [server] = await db.select().from(servers).where(eq(servers.id, task.serverId));
       if (!server) continue;
       if (task.type === "backup") await createBackup(server.id, `auto-${safeFileName(task.name)}`, "scheduler");
+      else if (task.type === "prune") {
+        if (server.backupRetentionCount === 0 && server.backupRetentionDays === 0) {
+          await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status: "skipped", error: "No retention limits are configured in Settings" });
+          await logLine(server.id, "warn", "Backup", `Scheduled prune "${task.name}" skipped: no retention limits are configured.`);
+        } else {
+          try {
+            const result = await applyBackupRetention(server.id);
+            await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status: "succeeded", error: "" });
+            await logLine(server.id, "system", "Backup", `Scheduled prune "${task.name}" removed ${result.pruned} backup${result.pruned === 1 ? "" : "s"} (${result.kept} kept).`);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status: "failed", error: message });
+            await logLine(server.id, "error", "Backup", `Scheduled prune "${task.name}" failed: ${message}`);
+          }
+        }
+      }
       else if (task.type === "maintenance") {
         let maintenanceStatus = "failed", maintenanceError = "";
         try {
@@ -2050,9 +3194,83 @@ export async function sweepTasks(serverId?: number) {
         }
         await db.insert(taskRuns).values({taskId:task.id,serverId:server.id,taskName:task.name,type:task.type,command:"",status:maintenanceStatus,error:maintenanceError});
       }
+      else if (task.type === "update") {
+        // Conditional update: check availability first, and leave the
+        // server completely untouched when nothing new is published.
+        const game = getGame(server.gameId);
+        let latestStableVersion: string | null = null;
+        let buildStatus: GameUpdateState = "unknown";
+        if (game.installer === "mojang" || game.installer === "fabric") {
+          try { latestStableVersion = (await catalogVersions(game.id)).find((item) => item.channel === "stable")?.id ?? null; } catch { latestStableVersion = null; }
+        } else if (game.installer === "steamcmd" && game.steamAppId) {
+          const manifest = path.join(serverDir(server), "steamapps", appManifestName(game.steamAppId));
+          const installedBuild = await fsp.readFile(manifest, "utf8").then(parseAppManifestBuildId).catch(() => null);
+          buildStatus = compareBuilds(installedBuild, (await fetchLatestGameBuild(game.steamAppId))?.buildId ?? null);
+        }
+        const decision = autoUpdateDecision({ installer: game.installer, currentVersion: server.version, latestStableVersion, buildStatus });
+        if (!decision.run) {
+          await logLine(server.id, "system", "Updater", `Scheduled update "${task.name}" skipped: ${decision.reason}.`);
+          await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status: "skipped", error: decision.reason });
+        } else {
+          let updateStatus = "failed", updateError = "";
+          const previousVersion = server.version;
+          const targetVersion = autoUpdateTargetVersion({ installer: game.installer, currentVersion: server.version, latestStableVersion });
+          try {
+            await logLine(server.id, "system", "Updater", `Scheduled update "${task.name}" started: ${decision.reason}.`);
+            if (state.processes.has(server.id)) { await runCommand(server, "say A scheduled game update is starting", "Scheduler"); await stopFlow(server.id, "Scheduled update"); await new Promise((resolve) => setTimeout(resolve, 2000)); }
+            const safety = await createBackupAndWait(server.id, `update-${safeFileName(task.name)}`, "scheduler");
+            await db.update(servers).set({ ...(targetVersion !== previousVersion ? { version: targetVersion } : {}), updateValidationStatus: "installing", updatePreviousVersion: previousVersion, updateTargetVersion: targetVersion, updateSafetyBackupId: safety.id, updateRollbackAttempted: false, updateValidationStartedAt: new Date(), updatedAt: new Date() }).where(eq(servers.id, server.id));
+            const installed = await installFlow(server.id);
+            if (!installed.ok || !installed.jobId) {
+              await db.update(servers).set({ version: previousVersion, updateValidationStatus: "none", updatedAt: new Date() }).where(eq(servers.id, server.id));
+              throw new Error(`Update queue failed: ${installed.reason ?? "unknown error"}`);
+            }
+            const deadline = Date.now() + 2 * 60 * 60_000;
+            let outcome = "running";
+            while (Date.now() < deadline && ["queued", "running", "cancelling"].includes(outcome)) { await new Promise((resolve) => setTimeout(resolve, 1000)); const [job] = await db.select().from(installationJobs).where(eq(installationJobs.id, installed.jobId!)); outcome = job?.status ?? "failed"; }
+            if (outcome !== "succeeded") throw new Error(`Update ended with status ${outcome}`);
+            const started = await startFlow(server.id);
+            const [validated] = await db.select().from(servers).where(eq(servers.id, server.id));
+            if (!started.ok || validated?.updateValidationStatus !== "validated") {
+              if (validated?.updateValidationStatus === "rollback-validated") throw new Error("Updated version failed readiness; previous version was restored and validated");
+              throw new Error(`Update readiness failed: ${started.reason ?? validated?.updateValidationStatus ?? "unknown error"}`);
+            }
+            updateStatus = "succeeded";
+            await logLine(server.id, "success", "Updater", `Scheduled update "${task.name}" (${previousVersion} → ${targetVersion}) completed and readiness passed.`);
+          } catch (error) {
+            updateError = error instanceof Error ? error.message : String(error);
+            await logLine(server.id, "error", "Updater", updateError);
+          }
+          await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status: updateStatus, error: updateError });
+        }
+      }
       else if (task.type === "restart") {
-        if (state.processes.has(server.id)) await restartFlow(server.id);
+        if (state.processes.has(server.id)) {
+          const warned = await warnedPower(server.id, "restart", task.name);
+          await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status: warned.ok ? (warned.mode === "countdown" ? "countdown-started" : "succeeded") : "failed", error: warned.reason ?? "" });
+        }
         else await logLine(server.id, "warn", "Scheduler", `Skipped "${task.name}": server is offline.`);
+      } else if (task.type === "start" || task.type === "stop") {
+        const decision = powerTaskDecision(task.type, state.processes.has(server.id), state.processes.get(server.id)?.stopping ?? false);
+        if (decision.action === "skip") {
+          await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status: "skipped", error: decision.reason });
+          await logLine(server.id, "system", "Scheduler", `Skipped "${task.name}": ${decision.reason}.`);
+        } else {
+          const result = task.type === "start" ? await startFlow(server.id) : await warnedPower(server.id, "stop", task.name);
+          const status = result.ok ? ("mode" in result && result.mode === "countdown" ? "countdown-started" : "succeeded") : "failed";
+          await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status, error: result.reason ?? "" });
+          if (!result.ok) await logLine(server.id, "error", "Scheduler", `Scheduled ${task.type} failed: ${result.reason ?? "unknown error"}`);
+        }
+      } else if (task.type === "macro") {
+        const macro = await findMacro(server.id, task.payload);
+        if (!macro) {
+          await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status: "failed", error: "Macro no longer exists" });
+          await logLine(server.id, "error", "Scheduler", `Scheduled macro failed: the macro referenced by "${task.name}" was deleted.`);
+          continue;
+        }
+        const result = await executeMacro(server, macro, "Scheduler");
+        await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: macro.steps.map((step) => step.command).join(" ; "), status: result.ok ? "succeeded" : "failed", error: result.error ?? "" });
+        if (!result.ok) await logLine(server.id, "error", "Scheduler", `Scheduled macro "${macro.name}" failed: ${result.error}`);
       } else if (task.type === "broadcast" || task.type === "command") {let command="";try{command=scheduledCommand(server.gameId,task.type,task.payload);const result=await runCommand(server,command,"Scheduler");await db.insert(taskRuns).values({taskId:task.id,serverId:server.id,taskName:task.name,type:task.type,command,status:result.ok?"succeeded":"failed",error:result.reason??""});if(!result.ok)throw new Error(result.reason??"Command failed")}catch(error){if(!command)await db.insert(taskRuns).values({taskId:task.id,serverId:server.id,taskName:task.name,type:task.type,command,status:"failed",error:error instanceof Error?error.message:String(error)});await logLine(server.id,"error","Scheduler",`Scheduled action failed: ${error instanceof Error?error.message:String(error)}`);continue}}
       await act(server.id, "task", `Scheduled task "${task.name}" executed`);
     }

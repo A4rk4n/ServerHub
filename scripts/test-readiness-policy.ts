@@ -7,12 +7,16 @@ test("readinessProbeFor selects the probe per provider and transport", () => {
   assert.equal(readinessProbeFor("minecraft-modded", "TCP"), "minecraft-status");
   assert.equal(readinessProbeFor("minecraft-bedrock", "UDP"), "process-stability");
   assert.equal(readinessProbeFor("dragonwilds", "UDP"), "process-stability");
+  assert.equal(readinessProbeFor("satisfactory", "UDP"), "process-stability");
+  assert.equal(readinessProbeFor("palworld", "UDP"), "process-stability");
   assert.equal(readinessProbeFor("valheim", "UDP"), "steam-a2s");
   assert.equal(readinessProbeFor("terraria", "TCP"), "tcp-connect");
 });
 
 test("process stability thresholds reflect provider requirements", () => {
   assert.equal(minimumProcessStabilityMs("dragonwilds"), 15000);
+  assert.equal(minimumProcessStabilityMs("satisfactory"), 15000);
+  assert.equal(minimumProcessStabilityMs("palworld"), 15000);
   assert.equal(minimumProcessStabilityMs("minecraft-bedrock"), 10000);
   assert.equal(processStabilityReady(1000, 10999), false);
   assert.equal(processStabilityReady(1000, 11000), true);

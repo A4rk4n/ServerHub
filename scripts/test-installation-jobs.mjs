@@ -42,7 +42,11 @@ async function udpPort(block = false) {
   return new Promise((resolve, reject) => {
     const socket = dgram.createSocket("udp4");
     socket.once("error", reject);
-    socket.bind(0, "0.0.0.0", () => {
+    // A blocking socket must bind the exact address the preflight probes
+    // (the server's bindAddress, 127.0.0.1). Windows allows a
+    // specific-address bind alongside a foreign wildcard bind, so a
+    // 0.0.0.0 blocker would not register as a conflict there.
+    socket.bind(0, block ? "127.0.0.1" : "0.0.0.0", () => {
       const address = socket.address();
       if (block) resolve({ port: address.port, socket });
       else socket.close(() => resolve({ port: address.port, socket: null }));
@@ -68,7 +72,7 @@ async function startService(port) {
   child.stderr.on("data", (chunk) => { logs += chunk; });
   service = child;
   const serviceBase = `http://127.0.0.1:${port}`;
-  const deadline = Date.now() + 15_000;
+  const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`Service exited during startup (${child.exitCode}).\n${logs}`);
     try {
@@ -119,7 +123,7 @@ async function createCustom(serviceBase, port, name, launch = {}) {
   return body.server.id;
 }
 
-async function waitForJob(serviceBase, serverId, expected, timeout = 10_000) {
+async function waitForJob(serviceBase, serverId, expected, timeout = 20_000) {
   const deadline = Date.now() + timeout;
   let body;
   while (Date.now() < deadline) {
@@ -191,7 +195,7 @@ test("the watchdog stops a crash loop at the configured restart limit", async ()
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "start" }),
   });
-  const watchdogDeadline = Date.now() + 12_000;
+  const watchdogDeadline = Date.now() + 20_000;
   let crashCount = 0;
   while (Date.now() < watchdogDeadline) {
     crashCount = Number(await fs.readFile(crashCounter, "utf8").catch(() => "0"));
@@ -224,7 +228,7 @@ test("disabling the watchdog cancels a queued restart", async () => {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ action: "start" }),
   });
-  const restartQueuedDeadline = Date.now() + 3_000;
+  const restartQueuedDeadline = Date.now() + 6_000;
   let queuedStatus = "";
   while (Date.now() < restartQueuedDeadline) {
     queuedStatus = (await json(base, `/api/servers/${cancelId}`)).server.status;

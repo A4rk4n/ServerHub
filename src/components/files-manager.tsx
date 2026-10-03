@@ -1,9 +1,10 @@
 "use client";
 
-import { Check, ChevronDown, ChevronRight, FileText, Folder, FolderOpen, FolderTree, Lock, Save } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, ChevronRight, FileText, Folder, FolderOpen, FolderTree, History, Lock, Save } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { diffLines, detectConfigFormat, validateConfig } from "@/lib/config-editor";
 import { cn, hexA } from "@/lib/format";
-import { Btn, Spin } from "./ui";
+import { Btn, Modal, Spin } from "./ui";
 
 type FsNode = { name: string; path: string; type: "dir" | "file"; size?: number; editable?: boolean; children?: FsNode[] };
 
@@ -23,18 +24,23 @@ export function FilesManager({ serverId, accent, status }: { serverId: number; a
   const [loadingFile, setLoadingFile] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editedBadge, setEditedBadge] = useState(false);
+  const [preview, setPreview] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [safetyCopy, setSafetyCopy] = useState<string | null>(null);
+
+  const refreshTree = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/servers/${serverId}/files`, { cache: "no-store" });
+      const j = await r.json();
+      setTree(j.tree ?? []);
+    } catch {
+      setTree([]);
+    }
+  }, [serverId]);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const r = await fetch(`/api/servers/${serverId}/files`, { cache: "no-store" });
-        const j = await r.json();
-        setTree(j.tree ?? []);
-      } catch {
-        setTree([]);
-      }
-    })();
-  }, [serverId]);
+    void refreshTree();
+  }, [refreshTree]);
 
   const openFile = useCallback(
     async (path: string) => {
@@ -47,6 +53,8 @@ export function FilesManager({ serverId, accent, status }: { serverId: number; a
         setSavedContent(j.content ?? "");
         setEditable(Boolean(j.editable));
         setEditedBadge(Boolean(j.edited));
+        setSaveError(null);
+        setSafetyCopy(null);
       } finally {
         setLoadingFile(false);
       }
@@ -54,23 +62,35 @@ export function FilesManager({ serverId, accent, status }: { serverId: number; a
     [serverId]
   );
 
-  async function save() {
+  async function save(force: boolean) {
     if (!selected) return;
     setSaving(true);
+    setSaveError(null);
     try {
-      await fetch(`/api/servers/${serverId}/files`, {
+      const r = await fetch(`/api/servers/${serverId}/files`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: selected, content }),
+        body: JSON.stringify({ path: selected, content, force }),
       });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setSaveError(j.error ?? `Save failed (HTTP ${r.status})`);
+        return;
+      }
       setSavedContent(content);
       setEditedBadge(true);
+      setPreview(false);
+      setSafetyCopy(j.safetyCopy ?? null);
+      if (j.safetyCopy) void refreshTree();
     } finally {
       setSaving(false);
     }
   }
 
   const dirty = content !== saved;
+  const format = useMemo(() => (selected ? detectConfigFormat(selected) : null), [selected]);
+  const verdict = useMemo(() => (format ? validateConfig(format, content) : null), [format, content]);
+  const diff = useMemo(() => (preview ? diffLines(saved, content) : null), [preview, saved, content]);
 
   if (!tree) return <Spin label="Reading filesystem…" />;
 
@@ -111,12 +131,33 @@ export function FilesManager({ serverId, accent, status }: { serverId: number; a
                   </span>
                 )}
                 <div className="ml-auto flex items-center gap-2">
+                  {verdict && editable && (
+                    verdict.ok ? (
+                      <span className="flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600">
+                        <CheckCircle2 size={10} /> {format} valid
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-600" title={verdict.message}>
+                        <AlertTriangle size={10} /> {verdict.line ? `line ${verdict.line}: ` : ""}{verdict.message}
+                      </span>
+                    )
+                  )}
                   {dirty && <span className="text-[10.5px] font-medium text-amber-500">unsaved changes</span>}
-                  <Btn size="sm" variant="primary" accent={accent} disabled={!dirty || !editable} onClick={save} loading={saving}>
-                    <Save size={12} /> Save
+                  <Btn size="sm" variant="primary" accent={accent} disabled={!dirty || !editable} onClick={() => (format ? setPreview(true) : void save(false))} loading={saving}>
+                    <Save size={12} /> {format ? "Review & save" : "Save"}
                   </Btn>
                 </div>
               </div>
+              {safetyCopy && !dirty && (
+                <div className="flex items-center gap-1.5 border-b border-candy-200/70 bg-sky-50 px-4 py-1.5 text-[11px] text-sky-700">
+                  <History size={11} /> Saved. Previous version kept as <span className="font-mono">{safetyCopy}</span>
+                </div>
+              )}
+              {saveError && !preview && (
+                <div className="flex items-center gap-1.5 border-b border-candy-200/70 bg-rose-50 px-4 py-1.5 text-[11px] text-rose-600">
+                  <AlertTriangle size={11} /> {saveError}
+                </div>
+              )}
               {loadingFile ? (
                 <Spin label={`Loading ${selected}…`} />
               ) : editable ? (
@@ -133,6 +174,55 @@ export function FilesManager({ serverId, accent, status }: { serverId: number; a
           )}
         </div>
       </div>
+
+      <Modal open={preview} onClose={() => setPreview(false)} title={`Review changes — ${selected ?? ""}`} wide>
+        {diff && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-[12px]">
+              <span className="rounded bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-600">+{diff.added} added</span>
+              <span className="rounded bg-rose-50 px-2 py-0.5 font-semibold text-rose-600">−{diff.removed} removed</span>
+              <span className="text-plum-400">from line {diff.start}</span>
+              <span className="ml-auto flex items-center gap-1 text-[11px] text-plum-400">
+                <History size={11} /> a safety copy of the current file is kept automatically
+              </span>
+            </div>
+            <div className="max-h-[320px] overflow-auto rounded-xl border border-candy-200/70 bg-candy-50 p-3 font-mono text-[11.5px] leading-[1.65]">
+              {diff.contextBefore.map((l, i) => (
+                <div key={`cb${i}`} className="whitespace-pre-wrap text-plum-400">  {l}</div>
+              ))}
+              {diff.removedLines.map((l, i) => (
+                <div key={`rm${i}`} className="whitespace-pre-wrap bg-rose-50 text-rose-600">− {l}</div>
+              ))}
+              {diff.addedLines.map((l, i) => (
+                <div key={`ad${i}`} className="whitespace-pre-wrap bg-emerald-50 text-emerald-700">+ {l}</div>
+              ))}
+              {diff.contextAfter.map((l, i) => (
+                <div key={`ca${i}`} className="whitespace-pre-wrap text-plum-400">  {l}</div>
+              ))}
+            </div>
+            {verdict && !verdict.ok && (
+              <div className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-[12px] text-amber-700">
+                <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                <span>
+                  This file does not pass {format} validation{verdict.line ? ` (line ${verdict.line})` : ""}: {verdict.message}. You can still save it, but the
+                  server may fail to read it.
+                </span>
+              </div>
+            )}
+            {saveError && (
+              <div className="flex items-center gap-1.5 rounded-xl bg-rose-50 px-3 py-2 text-[12px] text-rose-600">
+                <AlertTriangle size={12} /> {saveError}
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <Btn size="sm" onClick={() => setPreview(false)}>Keep editing</Btn>
+              <Btn size="sm" variant="primary" accent={accent} loading={saving} onClick={() => void save(Boolean(verdict && !verdict.ok))}>
+                <Save size={12} /> {verdict && !verdict.ok ? "Save anyway" : "Confirm save"}
+              </Btn>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

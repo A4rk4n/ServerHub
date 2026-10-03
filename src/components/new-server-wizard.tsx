@@ -92,7 +92,7 @@ export function NewServerWizard() {
     return () => controller.abort();
   }, [game]);
 
-  function applyTemplate(template:SavedTemplate){const g=GAMES.find(item=>item.id===template.gameId);if(!g)return;chooseGame(g);const c=JSON.parse(template.config) as Record<string,unknown>;if(typeof c.version==="string")setVersion(c.version);if(typeof c.loader==="string")setLoader(c.loader);if(typeof c.memoryMb==="number")setMemory(c.memoryMb);if(typeof c.maxPlayers==="number")setSlots(c.maxPlayers);if(typeof c.motd==="string")setMotd(c.motd);if(typeof c.difficulty==="string")setDifficulty(c.difficulty);if(typeof c.pvp==="boolean")setPvp(c.pvp);setName(`${template.name.replace(/ template$/i,"")} New`);setPort(nextFreeServerPort(g.defaultPort,usedPorts))}
+  function applyTemplate(template:SavedTemplate){const g=GAMES.find(item=>item.id===template.gameId);if(!g)return;chooseGame(g);let c:Record<string,unknown>;try{c=JSON.parse(template.config) as Record<string,unknown>}catch{c={}}if(typeof c.version==="string")setVersion(c.version);if(typeof c.loader==="string")setLoader(c.loader);if(typeof c.memoryMb==="number")setMemory(c.memoryMb);if(typeof c.maxPlayers==="number")setSlots(c.maxPlayers);if(typeof c.motd==="string")setMotd(c.motd);if(typeof c.difficulty==="string")setDifficulty(c.difficulty);if(typeof c.pvp==="boolean")setPvp(c.pvp);setName(`${template.name.replace(/ template$/i,"")} New`);setPort(nextFreeServerPort(g.defaultPort,usedPorts))}
   async function deleteTemplate(id:number){await fetch(`/api/templates/${id}`,{method:"DELETE"});setTemplates(items=>items.filter(item=>item.id!==id))}
 
   function chooseGame(g: GameDef) {
