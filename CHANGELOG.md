@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.63.0] - 2026-10-04
+
+### Added
+
+- Tiered backup retention: each server's Settings page gains a "Tiered
+  backup retention" panel — keep the newest backup of each of the last
+  N days plus the newest of each of the last N ISO weeks (up to 30
+  daily and 52 weekly slots). Under the old flat limits a month-old
+  backup could never survive a count cap; tiers preserve long-term
+  history while still bounding storage. While enabled, tiered selection
+  replaces the flat count/age limits for that server.
+- New `GET`/`PUT /api/servers/:id/backup-tiers` endpoint with a
+  built-in preview: the response always says how many backups the
+  policy would prune right now, and the panel shows it before anything
+  is deleted. The update safety backup, still-building rows, and rows
+  without timestamps are never pruned. Scheduled prune tasks no longer
+  skip when flat limits are zero but tiers are enabled.
+- Proven live: four backups across August, September, and today with a
+  1-daily + 2-weekly policy kept exactly the newest of today and the
+  September weekly representative, pruned the out-of-slot August backup
+  and the same-day duplicates, and removed the archives from disk —
+  with the audit trail naming the limits ("keep 1 daily + keep 2
+  weekly"). Stored in a `backup-tiers.json` sidecar; no schema change.
+
 ## [2.62.0] - 2026-10-04
 
 ### Added
@@ -729,7 +753,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.62.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.63.0...HEAD
+[2.63.0]: https://github.com/A4rk4n/ServerHub/compare/v2.62.0...v2.63.0
 [2.62.0]: https://github.com/A4rk4n/ServerHub/compare/v2.61.0...v2.62.0
 [2.61.0]: https://github.com/A4rk4n/ServerHub/compare/v2.60.0...v2.61.0
 [2.60.0]: https://github.com/A4rk4n/ServerHub/compare/v2.59.0...v2.60.0
