@@ -1,4 +1,5 @@
 import { selectBackupsToPrune } from "./backup-retention";
+import { readBackupTiers, selectTieredBackupsToPrune } from "./backup-tiers";
 import { autoUpdateDecision, autoUpdateTargetVersion } from "./auto-update";
 import { catalogVersions } from "./catalog";
 import { appManifestName, compareBuilds, fetchLatestGameBuild, parseAppManifestBuildId, type GameUpdateState } from "./game-updates";
@@ -2496,16 +2497,19 @@ export async function applyBackupRetention(serverId: number): Promise<{ pruned: 
   const [server] = await db.select().from(servers).where(eq(servers.id, serverId));
   if (!server) return { pruned: 0, kept: 0 };
   const rows = await db.select().from(backups).where(eq(backups.serverId, serverId));
-  if (server.backupRetentionCount === 0 && server.backupRetentionDays === 0) {
-    return { pruned: 0, kept: rows.length };
-  }
   const protectedIds = server.updateSafetyBackupId ? [server.updateSafetyBackupId] : [];
-  const pruneIds = selectBackupsToPrune({
-    backups: rows,
-    retentionCount: server.backupRetentionCount,
-    retentionDays: server.backupRetentionDays,
-    protectedIds,
-  });
+  // Tiered retention (backup-tiers.ts) replaces the flat limits while enabled.
+  const tiers = await readBackupTiers(serverId);
+  const pruneIds = tiers.enabled
+    ? selectTieredBackupsToPrune(rows, tiers, protectedIds)
+    : server.backupRetentionCount === 0 && server.backupRetentionDays === 0
+      ? []
+      : selectBackupsToPrune({
+          backups: rows,
+          retentionCount: server.backupRetentionCount,
+          retentionDays: server.backupRetentionDays,
+          protectedIds,
+        });
   if (pruneIds.length === 0) return { pruned: 0, kept: rows.length };
   const byId = new Map(rows.map((row) => [row.id, row]));
   for (const backupId of pruneIds) {
@@ -2514,10 +2518,12 @@ export async function applyBackupRetention(serverId: number): Promise<{ pruned: 
     await deleteBackupFile(backup);
     await db.delete(backups).where(eq(backups.id, backupId));
   }
-  const limits = [
-    server.backupRetentionCount > 0 ? `keep ${server.backupRetentionCount}` : "",
-    server.backupRetentionDays > 0 ? `max age ${server.backupRetentionDays}d` : "",
-  ].filter(Boolean).join(", ");
+  const limits = tiers.enabled
+    ? [tiers.daily > 0 ? `keep ${tiers.daily} daily` : "", tiers.weekly > 0 ? `keep ${tiers.weekly} weekly` : ""].filter(Boolean).join(" + ")
+    : [
+        server.backupRetentionCount > 0 ? `keep ${server.backupRetentionCount}` : "",
+        server.backupRetentionDays > 0 ? `max age ${server.backupRetentionDays}d` : "",
+      ].filter(Boolean).join(", ");
   await logLine(serverId, "system", "Backup", `Retention pruned ${pruneIds.length} backup${pruneIds.length === 1 ? "" : "s"} (${limits}).`);
   await act(serverId, "backup", `Retention pruned ${pruneIds.length} backup${pruneIds.length === 1 ? "" : "s"} (${limits})`);
   return { pruned: pruneIds.length, kept: rows.length - pruneIds.length };
@@ -3152,7 +3158,8 @@ export async function sweepTasks(serverId?: number) {
       if (!server) continue;
       if (task.type === "backup") await createBackup(server.id, `auto-${safeFileName(task.name)}`, "scheduler");
       else if (task.type === "prune") {
-        if (server.backupRetentionCount === 0 && server.backupRetentionDays === 0) {
+        const pruneTiers = await readBackupTiers(server.id);
+        if (!pruneTiers.enabled && server.backupRetentionCount === 0 && server.backupRetentionDays === 0) {
           await db.insert(taskRuns).values({ taskId: task.id, serverId: server.id, taskName: task.name, type: task.type, command: "", status: "skipped", error: "No retention limits are configured in Settings" });
           await logLine(server.id, "warn", "Backup", `Scheduled prune "${task.name}" skipped: no retention limits are configured.`);
         } else {

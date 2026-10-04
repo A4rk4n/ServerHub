@@ -7,6 +7,7 @@ import { SettingsManager } from "@/components/settings-manager";
 import { TagsEditor } from "@/components/tags-editor";
 import { MaintenancePanel } from "@/components/maintenance-panel";
 import { PowerWindowsPanel } from "@/components/power-windows-panel";
+import { BackupTiersPanel } from "@/components/backup-tiers-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
       />
       <TagsEditor serverId={s.id} accent={g.accent} />
       <PowerWindowsPanel serverId={s.id} accent={g.accent} />
+      <BackupTiersPanel serverId={s.id} accent={g.accent} />
       <MaintenancePanel serverId={s.id} accent={g.accent} />
     </div>
   );
