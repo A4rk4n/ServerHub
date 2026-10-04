@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.64.0] - 2026-10-04
+
+### Added
+
+- Connection doctor: the Connect page gains a "Run checks" panel for
+  the classic "LAN works but the internet address doesn't" failure. It
+  walks the chain in order — server running, port actually bound (a
+  real UDP/TCP bind probe on the configured address, so a crashed or
+  misconfigured game that never bound its port is caught immediately),
+  configured public address sanity (private or loopback addresses are
+  flagged as unreachable from the internet), and the machine's real
+  egress IP compared against the configured one. A mismatch catches
+  silently-changed dynamic IPs, and an egress IP inside 100.64.0.0/10
+  is called out as carrier-grade NAT, where port forwarding can never
+  work and a tunnel or ISP-provided public IP is the only fix.
+- The doctor also prints the three steps it cannot verify from inside:
+  a copy-pasteable PowerShell firewall rule for the exact protocol and
+  port, the exact router forward line (with the reminder that TCP-only
+  rules silently fail for UDP games and the target needs a DHCP
+  reservation), and the no-hairpin rule — test the public address only
+  from outside the network, because most home routers cannot loop a
+  public IP back inside.
+- New `GET /api/servers/:id/connection-check` endpoint returning the
+  gathered facts plus ordered verdicts; public-IP detection degrades to
+  a warning (never a false failure) when the panel has no internet
+  route.
+
 ## [2.63.0] - 2026-10-04
 
 ### Added
@@ -753,7 +780,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.63.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.64.0...HEAD
+[2.64.0]: https://github.com/A4rk4n/ServerHub/compare/v2.63.0...v2.64.0
 [2.63.0]: https://github.com/A4rk4n/ServerHub/compare/v2.62.0...v2.63.0
 [2.62.0]: https://github.com/A4rk4n/ServerHub/compare/v2.61.0...v2.62.0
 [2.61.0]: https://github.com/A4rk4n/ServerHub/compare/v2.60.0...v2.61.0
