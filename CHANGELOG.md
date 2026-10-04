@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.62.0] - 2026-10-04
+
+### Added
+
+- Webhook payload formats: notifications now speak Slack and generic
+  JSON alongside Discord. "Auto" (the default) detects the service from
+  the URL — Discord webhooks get Discord bodies, `hooks.slack.com` URLs
+  get Slack bodies (a `text` field, which Slack requires; payloads
+  without it are rejected as invalid_payload), and everything else gets
+  the existing machine-readable JSON document, unchanged for current
+  consumers. Slack bodies convert Discord-style `**bold**` to Slack's
+  `*bold*`.
+- An explicit format picker in the notifications panel (Auto / Discord
+  / Slack / JSON) for compatible endpoints living on other hostnames —
+  Mattermost accepts Slack payloads, and Discord-style proxies exist.
+  Unknown formats are rejected loudly by the API, and "auto" is never
+  written to the config file, so pre-v2.62 configs stay byte-identical
+  on round-trip.
+
+### Changed
+
+- The planned "server import" queue item was folded away after a scope
+  audit: adopting an existing dedicated-server folder (with directory
+  inspection and game detection) already shipped in an earlier
+  milestone — see the Import button on the Servers page.
+
 ## [2.61.0] - 2026-10-04
 
 ### Added
@@ -703,7 +729,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.61.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.62.0...HEAD
+[2.62.0]: https://github.com/A4rk4n/ServerHub/compare/v2.61.0...v2.62.0
 [2.61.0]: https://github.com/A4rk4n/ServerHub/compare/v2.60.0...v2.61.0
 [2.60.0]: https://github.com/A4rk4n/ServerHub/compare/v2.59.0...v2.60.0
 [2.59.0]: https://github.com/A4rk4n/ServerHub/compare/v2.58.0...v2.59.0
