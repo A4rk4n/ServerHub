@@ -1,6 +1,6 @@
 "use client";
 
-import { Ban, Clock3, Crown, LogOut, ShieldCheck, Search, ShieldOff, Star, Undo2, Users } from "lucide-react";
+import { Ban, BarChart3, Clock3, Crown, Download, LogOut, ShieldCheck, Search, ShieldOff, Star, Undo2, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ModerationActionRecord, Player, PlayerSession } from "@/db/schema";
 type PlayerView=Player&{observedIdentity:boolean;sessionCount:number;totalObservedSeconds:number;currentSessionSeconds:number;firstObservedAt:Date};
@@ -162,6 +162,7 @@ export function PlayersManager({ serverId, accent }: { serverId: number; accent:
           })}
         </div>
       )}
+      <AnalyticsPanel serverId={serverId} accent={accent} />
       {sessions.length>0&&<section className="panel p-5"><h3 className="font-display mb-3 text-sm font-semibold text-plum-900">Recent join and leave history</h3><div className="max-h-72 space-y-2 overflow-auto">{sessions.slice(0,30).map(session=><div key={session.id} className="flex items-center justify-between rounded-xl border border-candy-100 px-3 py-2 text-xs"><div><p className="font-semibold text-plum-800">{session.displayName}</p><p className="text-[10px] text-plum-400">Observed A2S name · unverified identity</p></div><div className="text-right text-plum-500"><p>{session.leftAt?`${Math.max(1,Math.round(session.durationSec/60))} min session`:"Online now"}</p><p className="text-[10px]">joined {timeAgo(session.joinedAt)}</p></div></div>)}</div></section>}
       {banned.length > 0 && (
         <p className="text-[11.5px] text-plum-400">
@@ -200,5 +201,110 @@ function ActionBtn({ children, onClick, title, danger, disabled }: { children: R
     >
       {children}
     </button>
+  );
+}
+
+type AnalyticsPayload = {
+  days: number;
+  summary: {
+    uniquePlayers: number; totalSessions: number; totalPlaytimeSec: number; avgSessionSec: number;
+    peakConcurrent: number; peakAt: number | null; onlineNow: number;
+    topPlayers: Array<{ key: string; name: string; playtimeSec: number; sessions: number; lastSeen: number; online: boolean }>;
+    hourly: number[];
+  };
+  daily: Array<{ day: string; uniquePlayers: number; playtimeSec: number; peakConcurrent: number }>;
+  leaderboard: Array<{ rank: number; key: string; name: string; playtimeSec: number; sessions: number; avgSessionSec: number; firstSeen: number; lastSeen: number; online: boolean }>;
+};
+
+function hours(seconds: number) {
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+  return `${(seconds / 3600).toFixed(seconds < 36000 ? 1 : 0)}h`;
+}
+
+function AnalyticsPanel({ serverId, accent }: { serverId: number; accent: string }) {
+  const [days, setDays] = useState(7);
+  const [data, setData] = useState<AnalyticsPayload | null>(null);
+  useEffect(() => {
+    let dead = false;
+    const load = async () => {
+      try {
+        const r = await fetch(`/api/servers/${serverId}/analytics?days=${days}`, { cache: "no-store" });
+        const j = await r.json();
+        if (!dead && j.summary) setData(j);
+      } catch {}
+    };
+    void load();
+    const t = setInterval(load, 30_000);
+    return () => { dead = true; clearInterval(t); };
+  }, [serverId, days]);
+  const s = data?.summary;
+  const maxDay = Math.max(1, ...(data?.daily.map((d) => d.playtimeSec) ?? [1]));
+  const maxHour = Math.max(1, ...(s?.hourly ?? [1]));
+  return (
+    <section className="panel p-5">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-display flex items-center gap-2 text-sm font-semibold text-plum-900"><BarChart3 size={15} style={{ color: accent }} /> Player analytics</h3>
+        <div className="flex items-center gap-1">
+          {[7, 14, 30].map((option) => (
+            <button key={option} onClick={() => setDays(option)} className={cn("rounded-lg px-2 py-1 text-[10px] font-bold uppercase", days === option ? "bg-candy-100 text-plum-800" : "text-plum-400")}>{option}d</button>
+          ))}
+          <a href={`/api/servers/${serverId}/analytics?days=${days}&format=csv`} className="ml-1" title="Download the full leaderboard as CSV">
+            <Btn size="sm" variant="subtle"><Download size={12} />Export CSV</Btn>
+          </a>
+        </div>
+      </div>
+      {!s ? <Spin label="Crunching sessions…" /> : s.totalSessions === 0 ? (
+        <p className="text-xs text-plum-500">No sessions recorded in this window yet. Join and leave events build the journal while the server runs.</p>
+      ) : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            {[
+              { label: "Unique players", value: String(s.uniquePlayers) },
+              { label: "Playtime", value: hours(s.totalPlaytimeSec) },
+              { label: "Peak online", value: s.peakAt ? `${s.peakConcurrent} · ${new Date(s.peakAt).toLocaleDateString()}` : String(s.peakConcurrent) },
+              { label: "Avg session", value: hours(s.avgSessionSec) },
+            ].map((item) => (
+              <div key={item.label} className="rounded-xl border border-candy-100 p-3">
+                <p className="font-display text-base font-bold leading-none text-plum-900">{item.value}</p>
+                <p className="mt-1 text-[10px] font-medium uppercase tracking-wider text-plum-500">{item.label}</p>
+              </div>
+            ))}
+          </div>
+          <div>
+            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-plum-500">Daily playtime ({data.days}d)</p>
+            <div className="flex h-16 items-end gap-1">
+              {data.daily.map((d) => (
+                <div key={d.day} className="group relative flex-1 rounded-t" style={{ height: `${Math.max(3, (d.playtimeSec / maxDay) * 100)}%`, background: d.playtimeSec ? hexA(accent, 0.55) : "rgba(0,0,0,0.06)" }} title={`${d.day}: ${hours(d.playtimeSec)} · ${d.uniquePlayers} players · peak ${d.peakConcurrent}`} />
+              ))}
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-plum-500">Busy hours (player-minutes)</p>
+              <div className="flex h-12 items-end gap-[2px]">
+                {s.hourly.map((minutes, hour) => (
+                  <div key={hour} className="flex-1 rounded-t" style={{ height: `${Math.max(4, (minutes / maxHour) * 100)}%`, background: minutes ? hexA(accent, 0.4) : "rgba(0,0,0,0.06)" }} title={`${String(hour).padStart(2, "0")}:00 · ${minutes} player-minutes`} />
+                ))}
+              </div>
+              <div className="mt-1 flex justify-between text-[9px] text-plum-400"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
+            </div>
+            <div>
+              <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-plum-500">Playtime leaderboard</p>
+              <div className="max-h-48 space-y-1 overflow-y-auto pr-1">
+                {(data.leaderboard ?? s.topPlayers.map((player, index) => ({ ...player, rank: index + 1, avgSessionSec: player.sessions ? Math.round(player.playtimeSec / player.sessions) : 0 }))).map((player) => (
+                  <div key={player.key} className="flex items-center justify-between rounded-lg border border-candy-100 px-2.5 py-1.5 text-xs">
+                    <span className="flex items-center gap-2 font-semibold text-plum-800">
+                      <span className="text-[10px] text-plum-400">#{player.rank}</span>{player.name}
+                      {player.online && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" title="Online now" />}
+                    </span>
+                    <span className="text-plum-500" title={`avg session ${hours(player.avgSessionSec)}`}>{hours(player.playtimeSec)} · {player.sessions}× · ø{hours(player.avgSessionSec)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

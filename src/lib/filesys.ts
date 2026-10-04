@@ -2,6 +2,7 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import type { Server } from "@/db/schema";
+import { MAX_SAFETY_COPIES, SAFETY_COPY_PATTERN, isSafetyCopy, safetyCopyName } from "./config-editor";
 import { relativeUnix, safePath, serverDir } from "./storage";
 
 export type FsNode = {
@@ -22,7 +23,9 @@ const TREE_LIMIT = 4_000;
 const MAX_DEPTH = 8;
 
 export function isEditable(filePath: string): boolean {
-  const name = path.basename(filePath).toLowerCase();
+  let name = path.basename(filePath).toLowerCase();
+  // Safety copies made by the config editor stay readable/restorable.
+  if (isSafetyCopy(name)) name = name.replace(SAFETY_COPY_PATTERN, "");
   if (["eula.txt", "whitelist.json", "ops.json", "banned-players.json"].includes(name)) return true;
   return EDITABLE_EXT.has(name.split(".").pop() || "");
 }
@@ -101,7 +104,27 @@ export async function writeServerFile(server: Server, relative: string, content:
   const realRoot = await fsp.realpath(root);
   const realParent = await fsp.realpath(parent);
   if (!inside(realRoot, realParent)) throw new Error("File is outside the server directory");
+  // Safety copy: preserve the previous contents next to the file before
+  // overwriting, and keep only the newest MAX_SAFETY_COPIES copies.
+  let safetyCopy: string | null = null;
+  if (existing?.isFile() && !isSafetyCopy(full)) {
+    const previous = await fsp.readFile(full, "utf8").catch(() => null);
+    if (previous !== null && previous !== content) {
+      const copyPath = safetyCopyName(full);
+      await fsp.copyFile(full, copyPath);
+      safetyCopy = relativeUnix(root, copyPath);
+      const base = path.basename(full);
+      const siblings = (await fsp.readdir(parent).catch(() => []))
+        .filter((name) => name.startsWith(`${base}.bak-`) && isSafetyCopy(name))
+        .sort()
+        .reverse();
+      for (const stale of siblings.slice(MAX_SAFETY_COPIES)) {
+        await fsp.unlink(path.join(parent, stale)).catch(() => {});
+      }
+    }
+  }
   const temp = `${full}.serverhub-${process.pid}.tmp`;
   await fsp.writeFile(temp, content, "utf8");
   await fsp.rename(temp, full);
+  return { safetyCopy };
 }

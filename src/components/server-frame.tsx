@@ -16,7 +16,26 @@ export function ServerFrame({ initial, game, children }: { initial: Server; game
   const [server, setServer] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [confirmKill, setConfirmKill] = useState(false);
+  const [gameUpdate, setGameUpdate] = useState<{ status: string; installedBuild?: string | null; latestBuild?: string | null } | null>(null);
   const previousStatus = useRef(initial.status);
+
+  useEffect(() => {
+    let dead = false;
+    const check = async () => {
+      try {
+        const r = await fetch(`/api/servers/${initial.id}/game-update`, { cache: "no-store" });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!dead) setGameUpdate(j);
+      } catch {}
+    };
+    void check();
+    const t = setInterval(check, 30 * 60_000);
+    return () => {
+      dead = true;
+      clearInterval(t);
+    };
+  }, [initial.id]);
 
   useEffect(() => {
     let dead = false;
@@ -91,6 +110,15 @@ export function ServerFrame({ initial, game, children }: { initial: Server; game
           <div className="flex items-center gap-2.5">
             <h1 className="font-display truncate text-xl font-bold tracking-tight text-plum-900 sm:text-2xl">{server.name}</h1>
             <StatusPill status={st} />
+            {gameUpdate?.status === "update-available" && (
+              <Link
+                href={`/servers/${initial.id}/settings`}
+                title={`Installed build ${gameUpdate.installedBuild ?? "?"} → latest ${gameUpdate.latestBuild ?? "?"} · update from Settings`}
+                className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-700 transition hover:bg-amber-200"
+              >
+                <AlertTriangle size={10} /> game update available
+              </Link>
+            )}
           </div>
           <p className="mt-1 truncate text-[12.5px] text-plum-500">
             <span style={{ color: hexA(accent, 0.95) }}>{game.name}</span>

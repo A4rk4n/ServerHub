@@ -3,17 +3,22 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Boxes, Heart, LayoutDashboard, Plus, Sparkles, Server as ServerIcon, Wrench } from "lucide-react";
+import { Boxes, Heart, LayoutDashboard, Plus, ScrollText, Search, Sparkles, Server as ServerIcon, Wrench } from "lucide-react";
 import { cn, hexA } from "@/lib/format";
 import { STATUS_META } from "./ui";
+import { UpdateBanner, useUpdateCheck } from "./update-banner";
 
 type FleetItem = { id: number; name: string; status: string; game: { accent: string; short: string } };
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  // The public status page is shared with visitors — no panel chrome, no fleet polling.
+  const bare = pathname === "/status";
   const [fleet, setFleet] = useState<FleetItem[]>([]);
+  const update = useUpdateCheck();
 
   useEffect(() => {
+    if (bare) return;
     let dead = false;
     const load = async () => {
       try {
@@ -28,13 +33,17 @@ export function Shell({ children }: { children: React.ReactNode }) {
       dead = true;
       clearInterval(t);
     };
-  }, [pathname]);
+  }, [pathname, bare]);
+
+  if (bare) return <>{children}</>;
 
   const NAV = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
     { href: "/servers", label: "Servers", icon: Boxes },
     { href: "/servers/new", label: "New Server", icon: Plus, accent: true },
     { href: "/tools", label: "Tool Health", icon: Wrench },
+    { href: "/audit", label: "Audit Trail", icon: ScrollText },
+    { href: "/search", label: "Search", icon: Search },
   ];
 
   return (
@@ -69,7 +78,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <nav className="flex flex-col gap-1.5 px-3">
             {NAV.map((n) => {
               const isActive =
-                n.href === "/" ? pathname === "/" : n.href === "/servers/new" ? pathname === "/servers/new" : n.href === "/tools" ? pathname.startsWith("/tools") : pathname.startsWith("/servers") && pathname !== "/servers/new";
+                n.href === "/" ? pathname === "/" : n.href === "/servers/new" ? pathname === "/servers/new" : n.href === "/tools" ? pathname.startsWith("/tools") : n.href === "/audit" ? pathname.startsWith("/audit") : n.href === "/search" ? pathname.startsWith("/search") : pathname.startsWith("/servers") && pathname !== "/servers/new";
               return (
                 <Link
                   key={n.href}
@@ -134,8 +143,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
               </div>
             </div>
             <p className="mt-3 flex items-center justify-center gap-1.5 text-[10px] font-medium text-plum-400">
-              Server Hub v1.0.2 <Heart size={9} fill="currentColor" className="text-candy-400" /> MIT
+              Server Hub {update.status ? `v${update.status.current}` : ""} <Heart size={9} fill="currentColor" className="text-candy-400" /> MIT
             </p>
+            {update.muted && (
+              <button
+                onClick={update.unmute}
+                className="mt-1 block w-full text-center text-[9.5px] font-medium text-plum-300 underline-offset-2 transition hover:text-plum-500 hover:underline"
+              >
+                update checks muted · unmute
+              </button>
+            )}
           </div>
         </div>
       </aside>
@@ -150,7 +167,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </Link>
         {NAV.map((n) => {
           const isActive =
-            n.href === "/" ? pathname === "/" : n.href === "/servers/new" ? pathname === "/servers/new" : n.href === "/tools" ? pathname.startsWith("/tools") : pathname.startsWith("/servers") && pathname !== "/servers/new";
+            n.href === "/" ? pathname === "/" : n.href === "/servers/new" ? pathname === "/servers/new" : n.href === "/tools" ? pathname.startsWith("/tools") : n.href === "/audit" ? pathname.startsWith("/audit") : n.href === "/search" ? pathname.startsWith("/search") : pathname.startsWith("/servers") && pathname !== "/servers/new";
           return (
             <Link
               key={n.href}
@@ -165,7 +182,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
       </div>
 
       <main className="relative z-10 md:pl-[248px]">
-        <div className="mx-auto max-w-[1400px] px-4 pb-24 pt-6 sm:px-7 md:pt-8">{children}</div>
+        <div className="mx-auto max-w-[1400px] px-4 pb-24 pt-6 sm:px-7 md:pt-8">
+          <UpdateBanner update={update} />
+          {children}
+        </div>
       </main>
     </div>
   );
