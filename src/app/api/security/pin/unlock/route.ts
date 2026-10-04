@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { callerIp, recordAccess } from "@/lib/access-log";
 import { db } from "@/db";
 import { activity } from "@/db/schema";
 import {
@@ -29,6 +30,8 @@ async function recordAttempt(message: string): Promise<void> {
 
 export async function POST(request: NextRequest) {
   const config = await loadPinLock();
+  const logUnlock = (kind: "unlock-ok" | "unlock-fail") =>
+    void recordAccess({ kind, ip: callerIp(request.headers.get("x-forwarded-for")), userAgent: request.headers.get("user-agent") ?? "", path: "/api/security/pin/unlock" });
   if (!config.enabled) return NextResponse.json({ ok: true, enabled: false });
   const blockedMs = attemptBlocked(attempts);
   if (blockedMs > 0) {
@@ -39,6 +42,7 @@ export async function POST(request: NextRequest) {
   const ok = verifyPin(body?.pin, config);
   attempts = nextAttemptState(attempts, ok);
   if (!ok) {
+    logUnlock("unlock-fail");
     const blocked = attemptBlocked(attempts);
     await recordAttempt(blocked > 0 ? `PIN unlock failed — attempt limit reached, throttled for ${Math.ceil(blocked / 1000)}s` : `PIN unlock failed (${Math.max(0, PIN_MAX_ATTEMPTS - attempts.failures)} attempts left)`);
     return NextResponse.json(
@@ -48,6 +52,7 @@ export async function POST(request: NextRequest) {
       { status: blocked > 0 ? 429 : 401 }
     );
   }
+  logUnlock("unlock-ok");
   await recordAttempt("PIN unlock succeeded");
   const response = NextResponse.json({ ok: true });
   response.cookies.set(PIN_COOKIE, issuePinToken(config), { httpOnly: true, sameSite: "strict", secure: false, path: "/", maxAge: Math.floor(PIN_TOKEN_TTL_MS / 1000) });
