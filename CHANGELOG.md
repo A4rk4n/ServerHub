@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.66.0] - 2026-10-04
+
+### Added
+
+- Startup digest: the dashboard gains a dismissible "Since your last
+  session" card. At boot the runtime measures how long the panel was
+  off, counts servers that were still running when the previous
+  session ended uncleanly (they are marked crashed, as before — now
+  the dashboard says so instead of leaving a silent status change),
+  and summarizes the previous session's trouble from the activity
+  trail: crashes, watchdog auto-restarts, restart limits hit, backup
+  problems (failed, corrupt, or mirror errors), low-disk alerts,
+  guardrail trips, and security events, with the newest highlights
+  listed. A clean quick restart stays silent — the card only appears
+  for trouble, an unclean exit, or an offline gap of 30 minutes or
+  more.
+- The offline gap is tracked by a `panel-session.json` sidecar whose
+  `lastSeenAt` is heartbeated once a minute on the existing 15-second
+  scheduler, so the next boot knows when this session really ended
+  even after a hard kill. New `GET`/`DELETE
+  /api/overview/startup-digest`; dismissal lasts for the current panel
+  session.
+
 ## [2.65.0] - 2026-10-04
 
 ### Added
@@ -799,7 +822,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.65.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.66.0...HEAD
+[2.66.0]: https://github.com/A4rk4n/ServerHub/compare/v2.65.0...v2.66.0
 [2.65.0]: https://github.com/A4rk4n/ServerHub/compare/v2.64.0...v2.65.0
 [2.64.0]: https://github.com/A4rk4n/ServerHub/compare/v2.63.0...v2.64.0
 [2.63.0]: https://github.com/A4rk4n/ServerHub/compare/v2.62.0...v2.63.0
