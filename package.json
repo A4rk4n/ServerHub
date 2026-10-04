@@ -31,6 +31,7 @@
     "test:crash-analyzer": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-crash-analyzer.ts",
     "test:power-schedule": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-power-schedule.ts",
     "test:power-windows": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-power-windows.ts",
+    "test:config-diff": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-config-diff.ts",
     "test:pin-lock": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-pin-lock.ts",
     "test:backup-browser": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-backup-browser.ts",
     "test:macros": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-macros.ts",
