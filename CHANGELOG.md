@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.60.0] - 2026-10-04
+
+### Added
+
+- Config file history: the file manager now understands safety copies
+  (`<file>.bak-YYYYMMDD-HHMMSS`). Selecting a config file with safety
+  copies shows a "File history" strip with each copy's timestamp and a
+  one-click diff; selecting a safety copy itself shows which file it
+  belongs to with "Compare with current" and "Restore" actions.
+- A proper multi-hunk diff viewer (new `src/lib/config-diff.ts`): three
+  separate edits read as three separate changes, each hunk with its own
+  line numbers and three lines of context — unlike the save preview,
+  which collapses everything between the first and last change. Exact
+  LCS diffing with a safety valve: files whose changed middle exceeds
+  ~2000×2000 lines degrade to a single clearly-labeled block instead of
+  hanging the browser.
+- One-click restore: restoring writes the copy's content back through
+  the normal save path, so the replaced version is automatically kept
+  as a new safety copy — restores are always undoable (proven live:
+  restore v1 over v3, then v3 reappears as the newest copy).
+
+### Changed
+
+- The planned "server resource caps" milestone was folded away after a
+  scope audit: CPU/RAM guardrails with alert-or-restart actions, 48-hour
+  metrics history, and fleet dashboard charts already shipped in earlier
+  milestones. This release's config history took its slot.
+
 ## [2.59.0] - 2026-10-03
 
 ### Added
@@ -657,7 +685,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.59.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.60.0...HEAD
+[2.60.0]: https://github.com/A4rk4n/ServerHub/compare/v2.59.0...v2.60.0
 [2.59.0]: https://github.com/A4rk4n/ServerHub/compare/v2.58.0...v2.59.0
 [2.58.0]: https://github.com/A4rk4n/ServerHub/compare/v2.57.0...v2.58.0
 [2.57.0]: https://github.com/A4rk4n/ServerHub/compare/v2.56.0...v2.57.0
