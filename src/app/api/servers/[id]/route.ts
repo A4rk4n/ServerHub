@@ -9,6 +9,7 @@ import { protectAndVerify } from "@/lib/credential-vault";
 import { getGame } from "@/lib/games";
 import { act, applyBackupRetention, cancelInstallation, ensureRuntimeInitialized, cancelPendingRestart, killFlow, logLine, metricsFor, writeServerConfig } from "@/lib/runtime";
 import { clampRetentionCount, clampRetentionDays } from "@/lib/backup-retention";
+import { deleteServerNotes } from "@/lib/server-notes";
 import { backupsDir, serverDir } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
@@ -187,6 +188,7 @@ export async function DELETE(_req: Request, ctx: Ctx) {
   await db.delete(installationEvents).where(eq(installationEvents.serverId, s.id));
   await db.delete(installationJobs).where(eq(installationJobs.serverId, s.id));
   await db.delete(servers).where(eq(servers.id, s.id));
+  await deleteServerNotes(s.id).catch(() => {});
   await act(null, "server", `Server "${s.name}" was permanently deleted`);
   return NextResponse.json({ ok: true });
 }

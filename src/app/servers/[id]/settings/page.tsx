@@ -5,6 +5,7 @@ import { servers } from "@/db/schema";
 import { getGame } from "@/lib/games";
 import { SettingsManager } from "@/components/settings-manager";
 import { TagsEditor } from "@/components/tags-editor";
+import { NotesPanel } from "@/components/notes-panel";
 import { MaintenancePanel } from "@/components/maintenance-panel";
 import { PowerWindowsPanel } from "@/components/power-windows-panel";
 import { BackupTiersPanel } from "@/components/backup-tiers-panel";
@@ -34,6 +35,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
         }}
       />
       <TagsEditor serverId={s.id} accent={g.accent} />
+      <NotesPanel serverId={s.id} />
       <PowerWindowsPanel serverId={s.id} accent={g.accent} />
       <BackupTiersPanel serverId={s.id} accent={g.accent} />
       <MaintenancePanel serverId={s.id} accent={g.accent} />
