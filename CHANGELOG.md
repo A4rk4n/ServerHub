@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.67.0] - 2026-10-04
+
+### Added
+
+- Server notes & runbook: each server's Settings page gains a "Notes &
+  runbook" panel — free-form plain-text notes that live with the
+  server: launch quirks, mod install order, restore steps, who to ping
+  when it breaks. Admin knowledge stays next to the server it belongs
+  to instead of in someone's head. Shows a character counter and when
+  the notes were last edited; saving is disabled until something
+  actually changed.
+- Stored in a `server-notes.json` app-data sidecar (same convention as
+  server tags — no schema migration, server exports untouched, plain
+  text that is never executed or rendered as markup). CRLF line
+  endings are folded, a 20,000-character cap is enforced server-side
+  (over-limit text is rejected, never silently truncated), saving
+  empty text removes the entry, malformed JSON can never wipe a
+  runbook, and deleting a server deletes its notes. New
+  `GET`/`PUT /api/servers/:id/notes`.
+
 ## [2.66.0] - 2026-10-04
 
 ### Added
@@ -822,7 +842,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.66.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.67.0...HEAD
+[2.67.0]: https://github.com/A4rk4n/ServerHub/compare/v2.66.0...v2.67.0
 [2.66.0]: https://github.com/A4rk4n/ServerHub/compare/v2.65.0...v2.66.0
 [2.65.0]: https://github.com/A4rk4n/ServerHub/compare/v2.64.0...v2.65.0
 [2.64.0]: https://github.com/A4rk4n/ServerHub/compare/v2.63.0...v2.64.0
