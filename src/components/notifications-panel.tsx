@@ -6,7 +6,13 @@ import { timeAgo } from "@/lib/format";
 import { Btn, Field, Spin, Toggle, inputCls } from "./ui";
 
 type Digest = { enabled: boolean; cadence: "daily" | "weekly"; hour: number };
-type Config = { url: string; events: { status: boolean; crash: boolean; backup: boolean }; digest: Digest };
+type Config = { url: string; events: { status: boolean; crash: boolean; backup: boolean }; digest: Digest; format?: "auto" | "discord" | "slack" | "json" };
+const FORMAT_OPTIONS = [
+  { value: "auto", label: "Auto", hint: "detect from the URL" },
+  { value: "discord", label: "Discord", hint: "Discord-style content" },
+  { value: "slack", label: "Slack", hint: "Slack text payload" },
+  { value: "json", label: "JSON", hint: "generic machine-readable" },
+] as const;
 type Delivery = { at: string; kind: string; server: string; ok: boolean; status: number; error: string; durationMs: number; target: string };
 
 export function NotificationsPanel() {
@@ -92,7 +98,7 @@ export function NotificationsPanel() {
         <BellRing size={16} className="text-candy-500" /> Notifications
       </h3>
       <p className="mb-4 text-[12px] text-plum-500">
-        Send fleet events to a webhook — Discord webhook URLs are formatted automatically. The URL is stored locally with restricted
+        Send fleet events to a webhook — Discord and Slack URLs are formatted automatically, or pick a payload format below. The URL is stored locally with restricted
         permissions and is never included in support bundles.
       </p>
       <Field label="Webhook URL">
@@ -104,6 +110,28 @@ export function NotificationsPanel() {
           spellCheck={false}
         />
       </Field>
+      <div className="mt-3">
+        <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-plum-500">Payload format</p>
+        <div className="flex flex-wrap gap-1.5">
+          {FORMAT_OPTIONS.map((option) => {
+            const active = (config.format ?? "auto") === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                title={option.hint}
+                onClick={() => setConfig({ ...config, format: option.value })}
+                className={`rounded-full px-3 py-1.5 text-[11px] font-bold transition ${active ? "bg-candy-500 text-white" : "bg-candy-50 text-plum-500 hover:text-plum-700"}`}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-1.5 text-[11px] text-plum-400">
+          Auto detects Discord and Slack from the URL; pick a format explicitly for compatible endpoints on other hosts (Mattermost, proxies).
+        </p>
+      </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-3">
         {(
           [

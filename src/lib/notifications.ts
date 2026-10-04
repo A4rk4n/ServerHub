@@ -32,6 +32,8 @@ export type NotificationConfig = {
   events: { status: boolean; crash: boolean; backup: boolean };
   /** Activity digest settings; absent in configs written before v2.39. */
   digest?: { enabled: boolean; cadence: "daily" | "weekly"; hour: number };
+  /** Webhook body format; absent means "auto" (and in configs before v2.63). */
+  format?: WebhookFormat;
 };
 
 export const DEFAULT_NOTIFICATION_CONFIG: NotificationConfig = {
@@ -72,6 +74,29 @@ export function isDiscordWebhook(url: string): boolean {
   return /^https:\/\/(?:discord\.com|discordapp\.com)\/api\/webhooks\//.test(url);
 }
 
+// ---------------------------------------------------------------------------
+// Webhook formats. "auto" keeps the pre-v2.63 behavior: Discord webhooks get
+// Discord bodies, Slack webhooks get Slack bodies ({text} — Slack rejects
+// payloads without it as invalid_payload), everything else gets the generic
+// JSON document. An explicit format wins, for Discord/Slack-compatible
+// endpoints living on other hostnames (Mattermost, ntfy bridges, proxies).
+// ---------------------------------------------------------------------------
+
+export type WebhookFormat = "auto" | "discord" | "slack" | "json";
+
+export const WEBHOOK_FORMATS: readonly WebhookFormat[] = ["auto", "discord", "slack", "json"];
+
+export function isSlackWebhook(url: string): boolean {
+  return /^https:\/\/hooks\.slack\.com\//.test(url);
+}
+
+export function resolveWebhookFormat(url: string, format: WebhookFormat = "auto"): Exclude<WebhookFormat, "auto"> {
+  if (format !== "auto") return format;
+  if (isDiscordWebhook(url)) return "discord";
+  if (isSlackWebhook(url)) return "slack";
+  return "json";
+}
+
 const EVENT_TEXT: Record<NotificationEventKind, (name: string, detail: string) => string> = {
   crash: (name, detail) => `🔥 **${name}** crashed unexpectedly${detail ? ` (${detail})` : ""}.`,
   "auto-restart": (name, detail) => `♻️ **${name}**: automatic restart scheduled${detail ? ` — ${detail}` : ""}.`,
@@ -90,10 +115,15 @@ const EVENT_TEXT: Record<NotificationEventKind, (name: string, detail: string) =
 
 // Discord expects {content}; anything else receives the structured event.
 // Mentions are always suppressed so log text can never ping @everyone.
-export function buildWebhookBody(url: string, event: NotificationEvent, now = new Date()): string {
+export function buildWebhookBody(url: string, event: NotificationEvent, now = new Date(), format: WebhookFormat = "auto"): string {
   const text = EVENT_TEXT[event.kind](event.serverName, event.detail ?? "");
-  if (isDiscordWebhook(url)) {
+  const resolved = resolveWebhookFormat(url, format);
+  if (resolved === "discord") {
     return JSON.stringify({ content: `**Server Hub** · ${text}`, allowed_mentions: { parse: [] } });
+  }
+  if (resolved === "slack") {
+    // Slack bolds with single asterisks and requires a text field.
+    return JSON.stringify({ text: `Server Hub · ${text.replaceAll("**", "*")}` });
   }
   return JSON.stringify({
     source: "serverhub",
@@ -122,6 +152,10 @@ export async function readNotificationConfig(): Promise<NotificationConfig> {
       // Keep pre-v2.39 configs byte-identical on round-trip: only carry the
       // digest block when the file actually has one.
       ...(raw.digest !== undefined ? { digest: raw.digest } : {}),
+      // Same discipline for the format: only carry a real, non-default value.
+      ...(typeof raw.format === "string" && raw.format !== "auto" && WEBHOOK_FORMATS.includes(raw.format as WebhookFormat)
+        ? { format: raw.format as WebhookFormat }
+        : {}),
     };
   } catch {
     return structuredClone(DEFAULT_NOTIFICATION_CONFIG);
@@ -157,7 +191,7 @@ export async function attemptDelivery(
     const response = await fetchImpl(config.url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: buildWebhookBody(config.url, event),
+      body: buildWebhookBody(config.url, event, new Date(), config.format ?? "auto"),
       signal: AbortSignal.timeout(5000),
     });
     return { sent: response.ok, skipped: false, status: response.status, error: "", durationMs: Date.now() - startedAt };
