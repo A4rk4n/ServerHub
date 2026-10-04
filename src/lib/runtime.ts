@@ -17,6 +17,7 @@ import { isAssignedLocalAddress, validateDragonwildsPreflight } from "./provider
 import { minimumProcessStabilityMs, processStabilityReady, readinessProbeFor, readinessRemediation, readinessWaitingReason } from "./readiness-policy";
 import { activateServerStaging } from "./server-activation";
 import { recoverInterruptedUpdateState } from "./update-recovery";
+import { buildStartupDigest, heartbeatDue, loadPanelSession, savePanelSession, setStartupDigest, type DigestActivityRow } from "./startup-digest";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -92,6 +93,8 @@ type RuntimeState = {
   installPumpRunning: boolean;
   sweeping: boolean;
   closing: boolean;
+  panelBootAt?: number;
+  panelSessionWrittenAt?: number;
 };
 
 const globalRuntime = globalThis as typeof globalThis & { __serverHubRuntime?: RuntimeState };
@@ -163,6 +166,17 @@ async function migrateCredentialVault() {
   }
 }
 
+/**
+ * Scheduler-tick heartbeat, throttled to one sidecar write per minute:
+ * keeps panel-session.json's lastSeenAt fresh so the next boot knows
+ * when this session really ended (clean exit or not).
+ */
+async function heartbeatPanelSession(nowMs = Date.now()): Promise<void> {
+  if (!state.panelBootAt || !heartbeatDue(state.panelSessionWrittenAt ?? 0, nowMs)) return;
+  state.panelSessionWrittenAt = nowMs;
+  await savePanelSession({ bootAt: state.panelBootAt, lastSeenAt: nowMs });
+}
+
 async function initializeRuntime() {
   ensureDataDirs();
   await migrateCredentialVault();
@@ -172,11 +186,14 @@ async function initializeRuntime() {
     .from(installationJobs)
     .where(inArray(installationJobs.status, ["queued", "running", "cancelling"]));
   const installingServers = new Set(activeJobs.map((job) => job.serverId));
+  const previousSession = await loadPanelSession();
+  let interruptedServers = 0;
   const rows = await db.select().from(servers);
   for (const server of rows) {
     const recoveredUpdate=recoverInterruptedUpdateState(server.updateValidationStatus,installingServers.has(server.id));
     if(recoveredUpdate){await db.update(servers).set({updateValidationStatus:recoveredUpdate.status,updatedAt:new Date()}).where(eq(servers.id,server.id));await logLine(server.id,"warn","Updater",recoveredUpdate.message);}
     if (["online", "starting", "stopping"].includes(server.status)) {
+      interruptedServers += 1;
       await setStatus(server.id, "crashed");
       await logLine(server.id, "warn", "Runtime", "The Server Hub runtime restarted; the previous process is no longer attached.");
     } else if (server.status === "installing" && !installingServers.has(server.id)) {
@@ -189,8 +206,30 @@ async function initializeRuntime() {
   }
   scheduleInstallPump();
 
+  // Startup digest: summarize the previous session's trouble (crashes,
+  // watchdog restarts, failed backups, …) plus the offline gap, then
+  // open this session's panel-session record. Best effort — never
+  // blocks boot.
+  const bootAt = Date.now();
+  try {
+    let digestRows: DigestActivityRow[] = [];
+    if (previousSession) {
+      const raw = await db
+        .select({ kind: activity.kind, message: activity.message, ts: activity.ts, serverId: activity.serverId })
+        .from(activity)
+        .where(and(gt(activity.ts, new Date(previousSession.bootAt - 1000)), lte(activity.ts, new Date(previousSession.lastSeenAt + 1000))))
+        .orderBy(desc(activity.id))
+        .limit(500);
+      digestRows = raw.map((r) => ({ kind: r.kind, message: r.message, ts: r.ts instanceof Date ? r.ts.getTime() : Number(r.ts), serverId: r.serverId }));
+    }
+    setStartupDigest(buildStartupDigest(digestRows, previousSession, interruptedServers, bootAt));
+  } catch { /* best effort */ }
+  state.panelBootAt = bootAt;
+  state.panelSessionWrittenAt = bootAt;
+  await savePanelSession({ bootAt, lastSeenAt: bootAt });
+
   if (!state.scheduler) {
-    state.scheduler = setInterval(() => { void sweepTasks().catch(() => {}); void sweepAnnouncements().catch(() => {}); void sweepDiskAlerts().catch(() => {}); void sweepLogRetention().catch(() => {}); void sweepUptimeHistory().catch(() => {}); void sweepBackupVerification().catch(() => {}); void sweepPowerSchedule().catch(() => {}); }, 15_000);
+    state.scheduler = setInterval(() => { void sweepTasks().catch(() => {}); void sweepAnnouncements().catch(() => {}); void sweepDiskAlerts().catch(() => {}); void sweepLogRetention().catch(() => {}); void sweepUptimeHistory().catch(() => {}); void sweepBackupVerification().catch(() => {}); void sweepPowerSchedule().catch(() => {}); void heartbeatPanelSession().catch(() => {}); }, 15_000);
     state.scheduler.unref?.();
   }
 
