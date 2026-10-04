@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.65.0] - 2026-10-04
+
+### Added
+
+- Panel access log: the Tools page gains a "Panel access log" panel —
+  a local timeline of when Server Hub was used on this PC. It records
+  page visits (deduped to one entry per browser per 15-minute window,
+  so browsing never floods the log), lock-screen bounces while the PIN
+  lock is armed, every PIN unlock success and failure, and rejected
+  non-loopback requests. Each entry shows a short browser name (Edge,
+  Chrome, Firefox, the desktop app), the path, and when it happened,
+  plus a 24-hour summary line. On a shared machine this answers
+  "did someone open the server controls while I was away?".
+- Stored as a capped 400-entry ring in `access-log.json`, written
+  best-effort through a serialized chain that never blocks or breaks a
+  request. New `GET`/`DELETE /api/security/access-log`; clearing the
+  log writes a security audit entry so the clearing itself is on
+  record.
+
 ## [2.64.0] - 2026-10-04
 
 ### Added
@@ -780,7 +799,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.64.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.65.0...HEAD
+[2.65.0]: https://github.com/A4rk4n/ServerHub/compare/v2.64.0...v2.65.0
 [2.64.0]: https://github.com/A4rk4n/ServerHub/compare/v2.63.0...v2.64.0
 [2.63.0]: https://github.com/A4rk4n/ServerHub/compare/v2.62.0...v2.63.0
 [2.62.0]: https://github.com/A4rk4n/ServerHub/compare/v2.61.0...v2.62.0
