@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.61.0] - 2026-10-04
+
+### Added
+
+- Fleet-wide search: a new Search entry in the sidebar opens one box
+  that searches the whole fleet at once — server names, games, ports,
+  player names and notes, backup names and notes, and the activity
+  feed. Results come back grouped with match highlighting, relevance
+  ranking (exact > prefix > word boundary > substring, ties broken by
+  recency), and links straight to the right page.
+- New `GET /api/search?q=` endpoint: queries shorter than two
+  characters return nothing, SQL LIKE wildcards in user input are
+  stripped so `%%` cannot match everything, and the activity scan is
+  SQL-prefiltered and bounded to the newest 200 candidate rows. Group
+  caps: 5 servers, 5 players, 5 backups, 10 activity entries.
+- The search page keeps the query in the URL (`/search?q=heim`), so a
+  search is shareable and survives a refresh.
+
 ## [2.60.0] - 2026-10-04
 
 ### Added
@@ -685,7 +703,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.60.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.61.0...HEAD
+[2.61.0]: https://github.com/A4rk4n/ServerHub/compare/v2.60.0...v2.61.0
 [2.60.0]: https://github.com/A4rk4n/ServerHub/compare/v2.59.0...v2.60.0
 [2.59.0]: https://github.com/A4rk4n/ServerHub/compare/v2.58.0...v2.59.0
 [2.58.0]: https://github.com/A4rk4n/ServerHub/compare/v2.57.0...v2.58.0
