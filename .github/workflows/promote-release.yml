@@ -80,7 +80,7 @@ jobs:
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
 
       - name: Check out the tagged source (immutable provenance source)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.identity.outputs.commit }}
 
@@ -98,7 +98,7 @@ jobs:
             *) echo "::error::Tag ${INPUT_TAG} commit ${TAG_COMMIT} is not part of ${DEFAULT_BRANCH} (compare status: ${status})"; exit 1 ;;
           esac
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
           cache: npm
@@ -187,7 +187,7 @@ jobs:
           echo "sha256=$(jq -r .sha256 bundle/release-manifest.json)" >> "$GITHUB_OUTPUT"
 
       - name: Stage the verified bundle for publication
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: verified-release-bundle
           path: |
