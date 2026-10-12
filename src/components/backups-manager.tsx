@@ -291,6 +291,7 @@ function BackupBrowser({ serverId, backup, accent, serverStatus, onClose }: { se
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("");
   const [preview, setPreview] = useState<{ path: string; text: string } | null>(null);
+  const [diffView, setDiffView] = useState<{ path: string; state: string; summary: string; diff: { hunks: { aStart: number; bStart: number; lines: { type: string; text: string }[] }[]; truncated: boolean } | null } | null>(null);
   const [busyPath, setBusyPath] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -319,6 +320,19 @@ function BackupBrowser({ serverId, backup, accent, serverStatus, onClose }: { se
       const j = await r.json();
       if (!r.ok) return setNotice(j.error ?? "Preview failed");
       setPreview({ path: j.path, text: j.text });
+    } finally {
+      setBusyPath("");
+    }
+  }
+
+  async function diffFile(entry: ArchiveEntry) {
+    setBusyPath(entry.path);
+    setNotice("");
+    try {
+      const r = await fetch(`/api/servers/${serverId}/backups/${backup.id}/diff?path=${encodeURIComponent(entry.path)}`, { cache: "no-store" });
+      const j = await r.json();
+      if (!r.ok) return setNotice(j.error ?? "Could not compare the file");
+      setDiffView(j);
     } finally {
       setBusyPath("");
     }
@@ -358,6 +372,29 @@ function BackupBrowser({ serverId, backup, accent, serverStatus, onClose }: { se
         <p className="text-sm text-red-500">{error}</p>
       ) : entries === null ? (
         <Spin label="Reading archive…" />
+      ) : diffView ? (
+        <div>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <code className="truncate text-xs text-plum-600">{diffView.path}</code>
+            <Btn size="sm" variant="subtle" onClick={() => setDiffView(null)}>Back to files</Btn>
+          </div>
+          <p className={`mb-2 text-xs ${diffView.state === "identical" ? "text-emerald-600" : diffView.state === "live-missing" ? "text-amber-600" : "text-plum-600"}`}>{diffView.summary}</p>
+          {diffView.diff && (
+            <div className="max-h-96 overflow-auto rounded-xl border border-candy-200 bg-plum-900 p-3 font-mono text-[11px] leading-relaxed">
+              {diffView.diff.truncated && <p className="mb-2 text-amber-300">Large file — the changed middle is shown as one block.</p>}
+              {diffView.diff.hunks.map((hunk, hi) => (
+                <div key={hi} className={hi > 0 ? "mt-3 border-t border-white/10 pt-3" : ""}>
+                  <div className="mb-1 text-[10px] text-white/40">@ backup line {hunk.aStart} · live line {hunk.bStart}</div>
+                  {hunk.lines.map((line, li) => (
+                    <div key={li} className={line.type === "add" ? "bg-emerald-500/15 text-emerald-300" : line.type === "del" ? "bg-red-500/15 text-red-300" : "text-white/60"}>
+                      <span className="select-none pr-2">{line.type === "add" ? "+" : line.type === "del" ? "-" : " "}</span>{line.text}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       ) : preview ? (
         <div>
           <div className="mb-2 flex items-center justify-between gap-2">
@@ -383,6 +420,11 @@ function BackupBrowser({ serverId, backup, accent, serverStatus, onClose }: { se
                   {canPreview(entry) && (
                     <button className="rounded-md border border-candy-200 px-2 py-1 text-[10px] font-semibold text-plum-600 hover:bg-candy-50" disabled={busyPath !== ""} onClick={() => void previewFile(entry)}>
                       {busyPath === entry.path ? "…" : "Preview"}
+                    </button>
+                  )}
+                  {canPreview(entry) && (
+                    <button className="rounded-md border border-candy-200 px-2 py-1 text-[10px] font-semibold text-plum-600 hover:bg-candy-50" disabled={busyPath !== ""} title="What changed since this backup?" onClick={() => void diffFile(entry)}>
+                      {busyPath === entry.path ? "…" : "Diff"}
                     </button>
                   )}
                   <button className="rounded-md border border-candy-200 px-2 py-1 text-[10px] font-semibold text-plum-600 hover:bg-candy-50" onClick={() => downloadFile(entry)}>Download</button>
