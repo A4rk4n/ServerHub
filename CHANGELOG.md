@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.78.0] - 2026-10-12
+
+### Added
+
+- System check: a Tools panel that audits the panel's own house on
+  demand — database integrity (PRAGMA quick_check) and size,
+  console-log backlog, validity of every app-data settings file,
+  backup archives the database expects versus what is actually on
+  disk (a completed backup missing its archive is flagged as
+  unrestorable; archives with no database record are listed as safe
+  to delete), tracked mod files that vanished from the mods folder,
+  and free disk space. Each finding carries a verdict (ok / warn /
+  fail) and a plain-language remedy; the rollup is worst-of. New
+  `GET /api/self-check`.
+
 ## [2.77.0] - 2026-10-12
 
 ### Added
@@ -1025,7 +1040,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.77.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.78.0...HEAD
+[2.78.0]: https://github.com/A4rk4n/ServerHub/compare/v2.77.0...v2.78.0
 [2.77.0]: https://github.com/A4rk4n/ServerHub/compare/v2.76.0...v2.77.0
 [2.76.0]: https://github.com/A4rk4n/ServerHub/compare/v2.75.0...v2.76.0
 [2.75.0]: https://github.com/A4rk4n/ServerHub/compare/v2.74.0...v2.75.0
