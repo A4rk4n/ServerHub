@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.68.0] - 2026-10-12
+
+### Added
+
+- Settings-export refresh: the panel settings bundle now carries the
+  configuration added since the bundle was first built — tiered backup
+  retention, power windows, resource guardrails, and server
+  notes/runbooks — so moving to a new machine no longer silently drops
+  them. State and privacy sidecars (the panel access log, session
+  bookkeeping, uptime history) remain excluded, as do the PIN lock and
+  transient maintenance flags. Pre-refresh bundles import unchanged:
+  the new sections are optional, so there is no version bump and no
+  migration step, and older panels simply ignore the new sections.
+
+### Security
+
+- Updated Next.js 16.3.7 → 16.4.0, resolving six published advisories
+  including cache poisoning of SSG/ISR pages, SSRF in image
+  optimization, and information-disclosure issues (GHSA-3w37-wq28-93x7,
+  GHSA-4jqv-mc3x-m676, GHSA-39w2-rjm5-chcv, GHSA-f87g-xv8r-7p7x,
+  GHSA-mcj8-r9mp-w47p, GHSA-cjq9-62q9-8jv4).
+- Updated the transitive source-map-js dependency past the
+  event-loop denial-of-service advisory GHSA-68fv-2mgg-jv7q.
+  `npm audit --omit=dev` is back to zero vulnerabilities.
+
 ## [2.67.0] - 2026-10-04
 
 ### Added
@@ -842,7 +867,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.67.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.68.0...HEAD
+[2.68.0]: https://github.com/A4rk4n/ServerHub/compare/v2.67.0...v2.68.0
 [2.67.0]: https://github.com/A4rk4n/ServerHub/compare/v2.66.0...v2.67.0
 [2.66.0]: https://github.com/A4rk4n/ServerHub/compare/v2.65.0...v2.66.0
 [2.65.0]: https://github.com/A4rk4n/ServerHub/compare/v2.64.0...v2.65.0
