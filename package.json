@@ -57,6 +57,7 @@
     "test:backup-diff": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-backup-diff.ts",
     "test:addon-updates": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-addon-updates.ts",
     "test:addon-update-sweep": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-addon-update-sweep.ts",
+    "test:bulk-backup": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-bulk-backup.ts",
     "test:palworld-api": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-palworld-api.ts",
     "test:update-notification": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-update-notification.ts",
     "test:console-filter": "node --import tsx --require ./scripts/register-better-sqlite3-stub.cjs --test --test-reporter=spec scripts/test-console-filter.ts",

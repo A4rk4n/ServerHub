@@ -1,10 +1,11 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Boxes, FolderInput, Play, Plus, RotateCw, Search, Square } from "lucide-react";
+import { Archive, Boxes, FolderInput, Play, Plus, RotateCw, Search, Square } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type BulkAction, partitionBulkAction } from "@/lib/bulk-power";
+import { partitionBulkBackup, summarizeBulkBackup, type BulkBackupOutcome } from "@/lib/bulk-backup";
 import type { CardServer } from "./server-card";
 import { ServerCard } from "./server-card";
 import { Btn, Empty, Modal, inputCls } from "./ui";
@@ -22,7 +23,7 @@ export function ServersView({ initial }: { initial: CardServer[] }) {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<(typeof FILTERS)[number]>("all");
   const [tagFilter, setTagFilter] = useState<string | null>(null);
-  const [arming, setArming] = useState<BulkAction | null>(null);
+  const [arming, setArming] = useState<BulkAction | "backup" | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const armTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -114,6 +115,35 @@ export function ServersView({ initial }: { initial: CardServer[] }) {
       }
     } catch {
       setNotice("Bulk action failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runBulkBackup() {
+    const { eligible } = partitionBulkBackup(filtered);
+    if (eligible.length === 0) return;
+    // Same two-click arming as the power actions: a fleet-wide tar is
+    // cheap to click and expensive to run.
+    if (arming !== "backup") {
+      setArming("backup");
+      if (armTimer.current) clearTimeout(armTimer.current);
+      armTimer.current = setTimeout(() => setArming(null), 4000);
+      return;
+    }
+    setArming(null);
+    setBusy(true);
+    try {
+      const r = await fetch("/api/servers/bulk-backup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: eligible.map((s) => s.id) }),
+      });
+      const j = await r.json();
+      if (!r.ok) setNotice(j.error ?? "Fleet backup failed");
+      else setNotice(summarizeBulkBackup(j.results as BulkBackupOutcome[]));
+    } catch {
+      setNotice("Fleet backup failed");
     } finally {
       setBusy(false);
     }
@@ -306,6 +336,21 @@ export function ServersView({ initial }: { initial: CardServer[] }) {
                 </Btn>
               );
             })}
+            {(() => {
+              const count = partitionBulkBackup(filtered).eligible.length;
+              const armed = arming === "backup";
+              return (
+                <Btn
+                  size="sm"
+                  variant={armed ? "primary" : "subtle"}
+                  disabled={count === 0 || busy}
+                  onClick={() => void runBulkBackup()}
+                  title={`Back up the ${count} eligible server${count === 1 ? "" : "s"} shown`}
+                >
+                  <Archive size={13} /> {armed ? `Confirm backup ${count}?` : `Backup ${count > 0 ? count : ""}`}
+                </Btn>
+              );
+            })()}
             {notice && <span className="ml-1 text-[11.5px] font-semibold text-plum-500">{notice}</span>}
           </div>
         )}
