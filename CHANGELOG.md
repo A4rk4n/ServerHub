@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.73.0] - 2026-10-12
+
+### Added
+
+- Fleet-wide backup: a "Backup" button joins Start/Restart/Stop in the
+  servers-view fleet bar (same two-click arming) and snapshots every
+  eligible server shown — filters and tag selections scope it exactly
+  like the power actions. The whole batch shares one
+  `fleet-YYYY-MM-DD-HHMM` label so it reads as a single event across
+  every server's backup list. Servers mid-install or mid-update are
+  skipped (a half-written directory would archive as something that
+  merely looks restorable), as is any server that already has an
+  archive building. Each snapshot runs through the existing backup
+  pipeline — checksums, retention, mirroring and notifications
+  included. New `POST /api/servers/bulk-backup`.
+
 ## [2.72.0] - 2026-10-12
 
 ### Added
@@ -943,7 +959,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.72.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.73.0...HEAD
+[2.73.0]: https://github.com/A4rk4n/ServerHub/compare/v2.72.0...v2.73.0
 [2.72.0]: https://github.com/A4rk4n/ServerHub/compare/v2.71.0...v2.72.0
 [2.71.0]: https://github.com/A4rk4n/ServerHub/compare/v2.70.0...v2.71.0
 [2.70.0]: https://github.com/A4rk4n/ServerHub/compare/v2.69.0...v2.70.0
