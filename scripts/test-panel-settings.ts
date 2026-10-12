@@ -19,7 +19,38 @@ test("panel settings: the whitelist is configuration, never state or secrets", (
   assert.ok(!files.includes("pin-lock.json"), "the PIN lock must never travel in a bundle");
   assert.ok(!files.includes("maintenance.json"), "maintenance is a transient flag, not a setting");
   assert.ok(files.every((file) => !file.endsWith("-state.json")), "runtime state files are excluded");
-  assert.equal(files.length, 8);
+  // v2.68.0 refresh: configuration shipped after the bundle was first
+  // built now travels too — but state and privacy sidecars still never do.
+  assert.ok(files.includes("backup-tiers.json"));
+  assert.ok(files.includes("power-windows.json"));
+  assert.ok(files.includes("guardrails.json"));
+  assert.ok(files.includes("server-notes.json"));
+  assert.ok(!files.includes("access-log.json"), "the access log is local history, not a setting");
+  assert.ok(!files.includes("panel-session.json"), "session bookkeeping never travels");
+  assert.ok(!files.includes("uptime-history.json"), "history is state, not configuration");
+  assert.equal(files.length, 12);
+});
+
+test("panel settings: refreshed sections round-trip and old bundles stay importable", async () => {
+  const src = fs.mkdtempSync(path.join(os.tmpdir(), "panelsettings-src-"));
+  const dst = fs.mkdtempSync(path.join(os.tmpdir(), "panelsettings-dst-"));
+  fs.writeFileSync(path.join(src, "backup-tiers.json"), JSON.stringify({ "1": { enabled: true, keepDaily: 2, keepWeekly: 3 } }));
+  fs.writeFileSync(path.join(src, "server-notes.json"), JSON.stringify({ "1": { text: "Needs 20 min warmup", updatedAt: 1234 } }));
+  const settings = await readPanelSettings(src);
+  assert.deepEqual(settings.backupTiers, { "1": { enabled: true, keepDaily: 2, keepWeekly: 3 } });
+  assert.deepEqual(settings.serverNotes, { "1": { text: "Needs 20 min warmup", updatedAt: 1234 } });
+  const applied = await writePanelSettings(settings, dst);
+  assert.deepEqual(applied.sort(), ["backupTiers", "serverNotes"]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dst, "server-notes.json"), "utf8")), { "1": { text: "Needs 20 min warmup", updatedAt: 1234 } });
+  // A pre-refresh bundle (version 1, only the original eight sections)
+  // must import unchanged — the new sections are optional, so no
+  // version bump and no migration step.
+  const legacy = buildPanelSettingsBundle({ diskAlerts: { enabled: true, minFreeMb: 2048 } }, "2.54.0");
+  const verdict = verifyPanelSettingsBundle(JSON.parse(JSON.stringify(legacy)));
+  assert.ok(verdict.ok, "legacy bundles still verify");
+  if (verdict.ok) assert.deepEqual(verdict.bundle.settings, { diskAlerts: { enabled: true, minFreeMb: 2048 } });
+  await fs.promises.rm(src, { recursive: true, force: true });
+  await fs.promises.rm(dst, { recursive: true, force: true });
 });
 
 test("panel settings: build + verify round-trip", () => {

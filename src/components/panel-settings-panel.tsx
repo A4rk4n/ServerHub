@@ -67,7 +67,7 @@ export function PanelSettingsPanel() {
       </div>
       <p className="mb-3 text-[12px] text-plum-500">
         Export every panel-level setting — notifications, disk alerts, log retention, restart warnings, announcements, tags, status page,
-        backup mirror — as one JSON bundle for backups or moving to a new machine. The PIN lock is never included; per-server settings
+        backup mirror, backup tiers, power windows, guardrails, server notes — as one JSON bundle for backups or moving to a new machine. The PIN lock is never included; per-server settings
         apply by server ID, so import on a panel with matching servers. The bundle contains your webhook URL and status token — treat it
         like a secret.
       </p>

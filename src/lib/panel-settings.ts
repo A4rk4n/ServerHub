@@ -29,6 +29,12 @@ export const SECTION_FILES = {
   serverTags: "server-tags.json",
   statusPage: "status-page.json",
   backupMirror: "backup-mirror.json",
+  // Added in the v2.68.0 refresh — configuration shipped after the bundle
+  // was first built, which a migration would otherwise silently drop:
+  backupTiers: "backup-tiers.json",
+  powerWindows: "power-windows.json",
+  guardrails: "guardrails.json",
+  serverNotes: "server-notes.json",
 } as const;
 
 export type PanelSettingsSection = keyof typeof SECTION_FILES;
