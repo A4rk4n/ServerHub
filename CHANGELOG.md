@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.77.0] - 2026-10-12
+
+### Added
+
+- Manual mod upload: an "Upload .jar" button in the mod manager drops a
+  local .jar/.zip straight into the server's mods folder and registers
+  it as a tracked addon — enable/disable, uninstall and the rest of
+  the manager treat it exactly like a store install, and the console
+  log records its SHA-256. Names are validated (no path separators,
+  .jar/.zip only), duplicates — including disabled copies — are
+  refused, uploads are capped at 100 MB, and the file lands via
+  temp-then-rename so the mods folder never sees a partial jar.
+  Manual uploads report "unknown" in update checks by design. New
+  `POST /api/servers/:id/addons/upload`.
+
 ## [2.76.0] - 2026-10-12
 
 ### Added
@@ -1010,7 +1025,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.76.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.77.0...HEAD
+[2.77.0]: https://github.com/A4rk4n/ServerHub/compare/v2.76.0...v2.77.0
 [2.76.0]: https://github.com/A4rk4n/ServerHub/compare/v2.75.0...v2.76.0
 [2.75.0]: https://github.com/A4rk4n/ServerHub/compare/v2.74.0...v2.75.0
 [2.74.0]: https://github.com/A4rk4n/ServerHub/compare/v2.73.0...v2.74.0
