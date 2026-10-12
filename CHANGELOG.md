@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.76.0] - 2026-10-12
+
+### Added
+
+- CurseForge installs now resolve required dependencies automatically,
+  exactly like the Modrinth path: anything a mod declares as a hard
+  requirement (relationType 3) is SHA-1-verified and installed first —
+  so a failure mid-chain can never leave the requested mod in place
+  without a library it needs — and appears in the manager as a
+  "CurseForge dependency". Optional and incompatible relations are
+  never touched, duplicate requirements are deduplicated, and the
+  chain is capped at 30 mods.
+
 ## [2.75.0] - 2026-10-12
 
 ### Added
@@ -997,7 +1010,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.75.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.76.0...HEAD
+[2.76.0]: https://github.com/A4rk4n/ServerHub/compare/v2.75.0...v2.76.0
 [2.75.0]: https://github.com/A4rk4n/ServerHub/compare/v2.74.0...v2.75.0
 [2.74.0]: https://github.com/A4rk4n/ServerHub/compare/v2.73.0...v2.74.0
 [2.73.0]: https://github.com/A4rk4n/ServerHub/compare/v2.72.0...v2.73.0
