@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.79.0] - 2026-10-12
+
+### Added
+
+- Copy mods between servers: a "Copy from…" button in the mod manager
+  clones another Fabric server's full mod set — jar files and tracking
+  rows, including each mod's enabled/disabled state. Mods already
+  installed on the destination (same project, any version, or same
+  file name) are skipped and reported, so the operation is safe to
+  re-run. Both servers must run the same Minecraft version; mismatches
+  are refused with the versions named. New
+  `POST /api/servers/:id/addons/copy`.
+
 ## [2.78.0] - 2026-10-12
 
 ### Added
@@ -1040,7 +1053,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.78.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.79.0...HEAD
+[2.79.0]: https://github.com/A4rk4n/ServerHub/compare/v2.78.0...v2.79.0
 [2.78.0]: https://github.com/A4rk4n/ServerHub/compare/v2.77.0...v2.78.0
 [2.77.0]: https://github.com/A4rk4n/ServerHub/compare/v2.76.0...v2.77.0
 [2.76.0]: https://github.com/A4rk4n/ServerHub/compare/v2.75.0...v2.76.0
