@@ -15,16 +15,18 @@ function fmtDl(n: number) {
 }
 
 export function AddonsManager({ serverId, accent, label, status }: { serverId: number; accent: string; label: string; status: string }) {
-  const [data, setData] = useState<{ installed: Addon[]; catalog: CatalogItem[]; source: string } | null>(null);
+  const [data, setData] = useState<{ installed: Addon[]; catalog: CatalogItem[]; source: string; needsKey?: boolean; warning?: string } | null>(null);
   const [tab, setTab] = useState<"installed" | "browse">("installed");
   const [q, setQ] = useState("");
+  const [src, setSrc] = useState<"modrinth" | "curseforge">("modrinth");
+  const [cfKey, setCfKey] = useState("");
   const [pending, setPending] = useState<string | null>(null);
   const [checks, setChecks] = useState<Record<number, { latest: string | null; status: string }> | null>(null);
   const [checking, setChecking] = useState(false);
 
-  async function load() {
+  async function load(provider: "modrinth" | "curseforge" = src) {
     try {
-      const r = await fetch(`/api/servers/${serverId}/addons`, { cache: "no-store" });
+      const r = await fetch(`/api/servers/${serverId}/addons${provider === "curseforge" ? "?source=curseforge" : ""}`, { cache: "no-store" });
       const j = await r.json();
       setData(j);
     } catch {}
@@ -32,7 +34,24 @@ export function AddonsManager({ serverId, accent, label, status }: { serverId: n
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverId]);
+  }, [serverId, src]);
+
+  async function saveCfKey() {
+    setPending("cf-key");
+    try {
+      const r = await fetch("/api/curseforge", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: cfKey }),
+      });
+      if (r.ok) {
+        setCfKey("");
+        await load();
+      }
+    } finally {
+      setPending(null);
+    }
+  }
 
   async function install(item: CatalogItem) {
     setPending(item.id);
@@ -40,7 +59,7 @@ export function AddonsManager({ serverId, accent, label, status }: { serverId: n
       const response = await fetch(`/api/servers/${serverId}/addons`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: item.id }),
+        body: JSON.stringify({ projectId: item.id, source: src }),
       });
       if (!response.ok) {
         const result = await response.json().catch(() => ({}));
@@ -173,7 +192,7 @@ export function AddonsManager({ serverId, accent, label, status }: { serverId: n
                     </p>
                     <p className="mt-0.5 line-clamp-2 text-[11.5px] leading-snug text-plum-500">{a.summary}</p>
                     <p className="mt-1.5 text-[10.5px] text-plum-400">
-                      by {a.author} · {fmtDl(a.downloads)} downloads · {timeAgo(a.installedAt)}
+                      by {a.author} · {a.source} · {fmtDl(a.downloads)} downloads · {timeAgo(a.installedAt)}
                     </p>
                   </div>
                   <Toggle checked={a.enabled} onChange={() => toggleA(a)} accent={accent} />
@@ -202,10 +221,52 @@ export function AddonsManager({ serverId, accent, label, status }: { serverId: n
         )
       ) : (
         <>
-          <div className="relative max-w-sm">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-plum-400" />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${data.source}…`} className={cn(inputCls, "pl-9")} />
+          <div className="flex flex-wrap items-center gap-2">
+            {(["modrinth", "curseforge"] as const).map((provider) => (
+              <button
+                key={provider}
+                onClick={() => setSrc(provider)}
+                className={cn(
+                  "rounded-lg px-2.5 py-1.5 text-[12px] font-semibold transition",
+                  src === provider ? "bg-candy-100 text-plum-900" : "text-plum-500 hover:bg-candy-50 hover:text-plum-700"
+                )}
+              >
+                {provider === "modrinth" ? "Modrinth" : "CurseForge"}
+              </button>
+            ))}
+            <div className="relative max-w-sm flex-1">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-plum-400" />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${data.source}…`} className={cn(inputCls, "pl-9")} />
+            </div>
           </div>
+          {data.needsKey && (
+            <div className="panel max-w-xl p-4">
+              <p className="mb-1 text-[13px] font-semibold text-plum-900">Connect CurseForge</p>
+              <p className="mb-3 text-[12px] text-plum-500">
+                CurseForge&apos;s API needs a personal key — free from console.curseforge.com. It is stored only on this machine and never
+                shown again once saved.
+              </p>
+              <form
+                className="flex gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (cfKey.trim()) void saveCfKey();
+                }}
+              >
+                <input
+                  type="password"
+                  value={cfKey}
+                  onChange={(e) => setCfKey(e.target.value)}
+                  placeholder="CurseForge API key…"
+                  className={cn(inputCls, "flex-1 font-mono")}
+                />
+                <Btn size="sm" variant="primary" type="submit" disabled={!cfKey.trim()} loading={pending === "cf-key"}>
+                  Save key
+                </Btn>
+              </form>
+            </div>
+          )}
+          {data.warning && <p className="text-[12px] font-semibold text-amber-600">{data.warning}</p>}
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
             {filtered.map((c) => (
               <div key={c.name} className="panel panel-hover flex flex-col p-4">

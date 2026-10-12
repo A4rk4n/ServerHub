@@ -39,7 +39,10 @@ import { getGame, type InstallerKind } from "./games";
 import { observationKey, reconcileObservationKeys } from "./player-observations";
 import { findMacro, macroSummary, type Macro } from "./macros";
 import { addonSweepDue, findingsSignature, formatAddonUpdateDetail, normalizeAddonSweepConfig, type AddonSweepConfig, type AddonUpdateFinding } from "./addon-update-sweep";
-import { modrinthVersionsUrl, pickLatestVersion, planAddonUpdates, type ModrinthVersionLike } from "./addon-updates";
+import { planAddonUpdates } from "./addon-updates";
+import { curseforgeLatest, modrinthLatest } from "./addon-sources";
+import { isCurseforgeAddon } from "./curseforge";
+import { readCurseforgeKey } from "./curseforge-key";
 import { listBackupEntries, sanitizeArchiveEntryPath } from "./backup-browser";
 import { MAX_VERIFY_FORCED, MAX_VERIFY_PER_SWEEP, VERIFY_SWEEP_EVERY_MS, normalizeVerificationState, pruneVerificationState, selectBackupsToVerify, summarizeVerification, type VerificationRecord, type VerificationState } from "./backup-verification";
 import { inspectBackupArchive } from "./backup-validation";
@@ -2208,8 +2211,7 @@ export async function sweepAddonUpdates(nowMs = Date.now(), force = false): Prom
     return { checkedServers: 0, checkedAddons: 0, updatesFound: 0, skipped: true };
   }
   state.lastRunAt = nowMs;
-  const base = process.env.SERVERHUB_MODRINTH_BASE ?? "https://api.modrinth.com/v2";
-  const headers = { "User-Agent": "ServerHub/1.0 (local desktop server manager)" };
+  const curseforgeKey = await readCurseforgeKey();
   const fleet = await db.select().from(servers);
   let checkedServers = 0;
   let checkedAddons = 0;
@@ -2219,20 +2221,28 @@ export async function sweepAddonUpdates(nowMs = Date.now(), force = false): Prom
     if (!installed.some((a) => a.projectId)) continue;
     checkedServers += 1;
     checkedAddons += installed.length;
-    const latestByProject: Record<string, { versionNumber: string } | null> = {};
-    for (const addon of installed) {
-      if (!addon.projectId || addon.projectId in latestByProject) continue;
-      try {
-        const response = await fetch(modrinthVersionsUrl(base, addon.projectId, server.version), { headers, cache: "no-store" });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const latest = pickLatestVersion((await response.json()) as ModrinthVersionLike[]);
-        latestByProject[addon.projectId] = latest ? { versionNumber: latest.versionNumber } : null;
-      } catch {
-        // Unreachable project → "unknown" for its addons; never fails the sweep.
-        latestByProject[addon.projectId] = null;
+    // Per-provider lookup maps: Modrinth and CurseForge project ids live
+    // in different namespaces, so a single map could collide.
+    const planFor = async (subset: typeof installed) => {
+      const latestByProject: Record<string, { versionNumber: string } | null> = {};
+      for (const addon of subset) {
+        if (!addon.projectId || addon.projectId in latestByProject) continue;
+        try {
+          const latest = isCurseforgeAddon(addon.source)
+            ? await curseforgeLatest(curseforgeKey, addon.projectId, server.version)
+            : await modrinthLatest(addon.projectId, server.version);
+          latestByProject[addon.projectId] = latest ? { versionNumber: latest.versionNumber } : null;
+        } catch {
+          // Unreachable project / missing key → "unknown"; never fails the sweep.
+          latestByProject[addon.projectId] = null;
+        }
       }
-    }
-    const checks = planAddonUpdates(installed, latestByProject);
+      return planAddonUpdates(subset, latestByProject);
+    };
+    const checks = [
+      ...(await planFor(installed.filter((a) => !isCurseforgeAddon(a.source)))),
+      ...(await planFor(installed.filter((a) => isCurseforgeAddon(a.source)))),
+    ];
     const findings: AddonUpdateFinding[] = checks
       .filter((c) => c.status === "update" && c.latest !== null)
       .map((c) => ({ name: c.name, installed: c.installed, latest: c.latest as string }));

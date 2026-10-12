@@ -66,7 +66,9 @@ test("planAddonUpdates: manual installs and unreachable projects are unknown", (
 
 test("wiring is pinned: route safety order, test hook, manager UI", () => {
   const route = readFileSync("src/app/api/servers/[id]/addons/updates/route.ts", "utf8");
-  assert.ok(route.includes('process.env.SERVERHUB_MODRINTH_BASE ?? "https://api.modrinth.com/v2"'), "base URL is overridable for tests only");
+  const sources = readFileSync("src/lib/addon-sources.ts", "utf8");
+  assert.ok(sources.includes('process.env.SERVERHUB_MODRINTH_BASE ?? "https://api.modrinth.com/v2"'), "base URL is overridable for tests only");
+  assert.ok(route.includes("modrinthLatest") && route.includes("curseforgeLatest"), "route resolves builds through the shared source helpers");
   assert.ok(route.includes("Downloaded mod failed its checksum — nothing was changed"), "sha512 gate before anything is replaced");
   assert.ok(route.indexOf("await download(") < route.indexOf("only now retire the old one"), "new file lands before the old one is removed");
   assert.ok(route.includes("The mod filename is not a safe path"));
