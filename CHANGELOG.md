@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.74.0] - 2026-10-12
+
+### Added
+
+- Ban-list manager for Minecraft Java servers: the players page gains a
+  panel showing exactly who is in `banned-players.json` and
+  `banned-ips.json` — including players the panel has never seen and IP
+  bans, which previously had no UI at all. Ban and pardon by name or
+  IP, with an optional reason recorded on new bans. On a live server
+  everything goes through the console (the game resolves real account
+  UUIDs and kicks affected players); while the server is offline the
+  files are edited directly in vanilla's own format, so entries are
+  indistinguishable from the game's. New
+  `GET`/`POST /api/servers/:id/banlist`.
+
+### Fixed
+
+- `banned-ips.json` is now recognized as an editable file by the file
+  manager and config editor, matching `banned-players.json`.
+
 ## [2.73.0] - 2026-10-12
 
 ### Added
@@ -959,7 +979,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.73.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.74.0...HEAD
+[2.74.0]: https://github.com/A4rk4n/ServerHub/compare/v2.73.0...v2.74.0
 [2.73.0]: https://github.com/A4rk4n/ServerHub/compare/v2.72.0...v2.73.0
 [2.72.0]: https://github.com/A4rk4n/ServerHub/compare/v2.71.0...v2.72.0
 [2.71.0]: https://github.com/A4rk4n/ServerHub/compare/v2.70.0...v2.71.0
