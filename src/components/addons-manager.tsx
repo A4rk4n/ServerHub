@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Puzzle, Search, Trash2 } from "lucide-react";
+import { Download, Puzzle, RefreshCw, Search, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { Addon } from "@/db/schema";
 import { cn, hexA, timeAgo } from "@/lib/format";
@@ -19,6 +19,8 @@ export function AddonsManager({ serverId, accent, label, status }: { serverId: n
   const [tab, setTab] = useState<"installed" | "browse">("installed");
   const [q, setQ] = useState("");
   const [pending, setPending] = useState<string | null>(null);
+  const [checks, setChecks] = useState<Record<number, { latest: string | null; status: string }> | null>(null);
+  const [checking, setChecking] = useState(false);
 
   async function load() {
     try {
@@ -59,6 +61,38 @@ export function AddonsManager({ serverId, accent, label, status }: { serverId: n
     await load();
   }
 
+  async function checkUpdates() {
+    setChecking(true);
+    try {
+      const r = await fetch(`/api/servers/${serverId}/addons/updates`, { cache: "no-store" });
+      const j = await r.json();
+      if (r.ok) {
+        const map: Record<number, { latest: string | null; status: string }> = {};
+        for (const c of j.checks ?? []) map[c.addonId] = { latest: c.latest, status: c.status };
+        setChecks(map);
+      }
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function updateAddon(a: Addon) {
+    setPending(a.name);
+    try {
+      const r = await fetch(`/api/servers/${serverId}/addons/updates`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ addonId: a.id }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) window.alert(j.error ?? "Update failed");
+      await load();
+      await checkUpdates();
+    } finally {
+      setPending(null);
+    }
+  }
+
   async function uninstall(a: Addon) {
     setPending(a.name);
     try {
@@ -89,6 +123,11 @@ export function AddonsManager({ serverId, accent, label, status }: { serverId: n
             {status === "online" ? " · changes apply on restart" : ""}
           </p>
         </div>
+        {data.installed.length > 0 && (
+          <Btn variant="subtle" loading={checking} onClick={() => void checkUpdates()}>
+            <RefreshCw size={13} /> Check for updates
+          </Btn>
+        )}
         <div className="flex gap-1 rounded-xl border border-candy-200 bg-white p-1">
           {(["installed", "browse"] as const).map((t) => (
             <button
@@ -129,6 +168,8 @@ export function AddonsManager({ serverId, accent, label, status }: { serverId: n
                     <p className="flex flex-wrap items-center gap-2 text-[13.5px] font-semibold text-plum-900">
                       {a.name}
                       <span className="rounded bg-candy-50 px-1.5 py-px font-mono text-[10px] text-plum-500">v{a.version}</span>
+                      {checks?.[a.id]?.status === "update" && <span className="rounded bg-emerald-50 px-1.5 py-px text-[10px] font-semibold text-emerald-600">{checks[a.id].latest} available</span>}
+                      {checks?.[a.id]?.status === "current" && <span className="rounded bg-plum-50 px-1.5 py-px text-[10px] font-medium text-plum-400">up to date</span>}
                     </p>
                     <p className="mt-0.5 line-clamp-2 text-[11.5px] leading-snug text-plum-500">{a.summary}</p>
                     <p className="mt-1.5 text-[10.5px] text-plum-400">
@@ -137,7 +178,16 @@ export function AddonsManager({ serverId, accent, label, status }: { serverId: n
                   </div>
                   <Toggle checked={a.enabled} onChange={() => toggleA(a)} accent={accent} />
                 </div>
-                <div className="mt-3 flex justify-end border-t border-candy-200/60 pt-2.5">
+                <div className="mt-3 flex justify-end gap-2 border-t border-candy-200/60 pt-2.5">
+                  {checks?.[a.id]?.status === "update" && (
+                    <button
+                      onClick={() => updateAddon(a)}
+                      disabled={pending === a.name}
+                      className="flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-600 transition hover:border-emerald-300 disabled:opacity-40"
+                    >
+                      <Download size={11} /> {pending === a.name ? "Updating…" : `Update to ${checks[a.id].latest}`}
+                    </button>
+                  )}
                   <button
                     onClick={() => uninstall(a)}
                     disabled={pending === a.name}
