@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.69.0] - 2026-10-12
+
+### Added
+
+- Weekly server report card: each server's Diagnostics page now opens
+  with a seven-day health summary — uptime (computed from the
+  existing day buckets, with maintenance windows excluded from the
+  denominator and "no data yet" instead of a misleading 0% for new
+  servers), crashes, watchdog saves, restart limits hit, backup
+  success rate, and player stats (unique players, peak concurrent,
+  hours played) from the session journal.
+- Verdicts are earned, not given: "Rock solid" requires at least
+  99.5% uptime with zero crashes and zero failed backups, "Mostly
+  healthy" tolerates a wobble, a hit restart limit always demands
+  attention, and a quiet server simply says "No data yet".
+- "Send to webhook" posts the compact text rendering through the
+  existing notification pipeline (and its Slack/JSON format support).
+  New `GET`/`POST /api/servers/:id/report-card`; sending without a
+  configured webhook is a clear 409, a rejected delivery a 502.
+
 ## [2.68.0] - 2026-10-12
 
 ### Added
@@ -867,7 +887,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.68.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.69.0...HEAD
+[2.69.0]: https://github.com/A4rk4n/ServerHub/compare/v2.68.0...v2.69.0
 [2.68.0]: https://github.com/A4rk4n/ServerHub/compare/v2.67.0...v2.68.0
 [2.67.0]: https://github.com/A4rk4n/ServerHub/compare/v2.66.0...v2.67.0
 [2.66.0]: https://github.com/A4rk4n/ServerHub/compare/v2.65.0...v2.66.0
