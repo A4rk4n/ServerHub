@@ -1,10 +1,10 @@
 "use client";
 
-import { Download, Puzzle, RefreshCw, Search, Trash2, Upload } from "lucide-react";
+import { Copy, Download, Puzzle, RefreshCw, Search, Trash2, Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Addon } from "@/db/schema";
 import { cn, hexA, timeAgo } from "@/lib/format";
-import { Btn, Empty, Spin, Toggle, inputCls } from "./ui";
+import { Btn, Empty, Modal, Spin, Toggle, inputCls } from "./ui";
 
 type CatalogItem = { id: string; name: string; version: string; author: string; downloads: number; summary: string; installed: boolean };
 
@@ -23,6 +23,10 @@ export function AddonsManager({ serverId, accent, label, status }: { serverId: n
   const [pending, setPending] = useState<string | null>(null);
   const [checks, setChecks] = useState<Record<number, { latest: string | null; status: string }> | null>(null);
   const [checking, setChecking] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copySources, setCopySources] = useState<{ id: number; name: string; version: string }[]>([]);
+  const [copyChoice, setCopyChoice] = useState(0);
+  const [copyResult, setCopyResult] = useState<string | null>(null);
 
   async function load(provider: "modrinth" | "curseforge" = src) {
     try {
@@ -48,6 +52,37 @@ export function AddonsManager({ serverId, accent, label, status }: { serverId: n
       if (!r.ok) window.alert(j.error ?? "Upload failed");
       await load();
       setTab("installed");
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function openCopy() {
+    setCopyOpen(true);
+    setCopyResult(null);
+    const r = await fetch("/api/servers", { cache: "no-store" });
+    const j = (await r.json().catch(() => ({ servers: [] }))) as { servers: { id: number; name: string; gameId: string; loader: string; version: string }[] };
+    setCopySources((j.servers ?? []).filter((s) => s.id !== serverId && s.gameId === "minecraft-modded" && s.loader === "fabric"));
+  }
+
+  async function copyFrom() {
+    if (!copyChoice) return;
+    setPending("copy");
+    try {
+      const r = await fetch(`/api/servers/${serverId}/addons/copy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fromServerId: copyChoice }),
+      });
+      const j = (await r.json().catch(() => ({}))) as { copied?: string[]; skipped?: { name: string; reason: string }[]; error?: string };
+      if (!r.ok) {
+        setCopyResult(j.error ?? "Copy failed");
+      } else {
+        const parts = [`Copied ${j.copied?.length ?? 0} mod${(j.copied?.length ?? 0) === 1 ? "" : "s"}`];
+        if (j.skipped?.length) parts.push(`skipped ${j.skipped.length} (${j.skipped.map((s) => `${s.name}: ${s.reason}`).join("; ")})`);
+        setCopyResult(parts.join(" · "));
+        await load();
+      }
     } finally {
       setPending(null);
     }
@@ -164,6 +199,9 @@ export function AddonsManager({ serverId, accent, label, status }: { serverId: n
             <RefreshCw size={13} /> Check for updates
           </Btn>
         )}
+        <Btn variant="subtle" onClick={() => void openCopy()}>
+          <Copy size={13} /> Copy from…
+        </Btn>
         <Btn variant="subtle" loading={pending === "upload"} onClick={() => fileInput.current?.click()}>
           <Upload size={13} /> Upload .jar
         </Btn>
@@ -330,6 +368,30 @@ export function AddonsManager({ serverId, accent, label, status }: { serverId: n
           </div>
         </>
       )}
+      <Modal open={copyOpen} onClose={() => setCopyOpen(false)} title="Copy mods from another server">
+        <p className="mb-3 text-[12px] text-plum-500">
+          Copies every mod (files and tracking) from another Fabric server onto this one. Mods already installed here are
+          skipped, and the servers must run the same Minecraft version.
+        </p>
+        {copySources.length === 0 ? (
+          <p className="text-[12.5px] text-plum-500">No other Fabric servers to copy from.</p>
+        ) : (
+          <div className="flex items-center gap-2">
+            <select className={cn(inputCls, "flex-1")} value={copyChoice} onChange={(e) => setCopyChoice(Number(e.target.value))}>
+              <option value={0}>Choose a server…</option>
+              {copySources.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} ({s.version})
+                </option>
+              ))}
+            </select>
+            <Btn variant="primary" accent={accent} disabled={!copyChoice} loading={pending === "copy"} onClick={() => void copyFrom()}>
+              Copy mods
+            </Btn>
+          </div>
+        )}
+        {copyResult && <p className="mt-3 text-[12px] font-semibold text-plum-700">{copyResult}</p>}
+      </Modal>
     </div>
   );
 }
