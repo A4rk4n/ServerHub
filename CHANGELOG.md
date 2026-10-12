@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.75.0] - 2026-10-12
+
+### Added
+
+- CurseForge integration for the mod manager: the Browse tab gains a
+  Modrinth / CurseForge provider switch. Searching, one-click
+  installing (SHA-1 verified — the strongest digest CurseForge
+  publishes), per-mod update checks, one-click updates and the
+  scheduled fleet-wide update sweep all work for CurseForge mods
+  exactly like Modrinth ones, and a server can mix mods from both
+  stores. CurseForge requires a personal API key (free from
+  console.curseforge.com): the panel prompts once, stores it in a
+  0600 file outside the database and support bundles, and only ever
+  echoes a masked tail back to the browser. Mods whose authors
+  disabled third-party downloads are detected and explained instead
+  of failing cryptically. New `GET`/`PUT /api/curseforge`;
+  `/api/servers/:id/addons` accepts `?source=curseforge`.
+
 ## [2.74.0] - 2026-10-12
 
 ### Added
@@ -979,7 +997,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.74.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.75.0...HEAD
+[2.75.0]: https://github.com/A4rk4n/ServerHub/compare/v2.74.0...v2.75.0
 [2.74.0]: https://github.com/A4rk4n/ServerHub/compare/v2.73.0...v2.74.0
 [2.73.0]: https://github.com/A4rk4n/ServerHub/compare/v2.72.0...v2.73.0
 [2.72.0]: https://github.com/A4rk4n/ServerHub/compare/v2.71.0...v2.72.0
