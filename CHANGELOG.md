@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.71.0] - 2026-10-12
+
+### Added
+
+- Mod update checker: the addons manager gains a "Check for updates"
+  button that compares every installed Modrinth mod against its
+  latest compatible (Fabric + game version) release. Real version
+  ordering where possible — v-prefixes are cosmetic, numeric segments
+  compare numerically ("1.10" beats "1.9"), a release beats its own
+  pre-release, and a featured version older than what you run is
+  never flagged as an update. Unorderable-but-different versions are
+  surfaced for the operator to judge; manually-installed files and
+  unreachable projects report "unknown" instead of failing the sweep.
+- One-click update per mod: the new jar is downloaded and its SHA-512
+  checksum verified before anything is touched — only once the new
+  file is in place is the old one retired, then the addon row's
+  version and file path follow and the activity trail records
+  "Updated <mod> old → new". New
+  `GET`/`POST /api/servers/:id/addons/updates`.
+
 ## [2.70.0] - 2026-10-12
 
 ### Added
@@ -907,7 +927,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.70.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.71.0...HEAD
+[2.71.0]: https://github.com/A4rk4n/ServerHub/compare/v2.70.0...v2.71.0
 [2.70.0]: https://github.com/A4rk4n/ServerHub/compare/v2.69.0...v2.70.0
 [2.69.0]: https://github.com/A4rk4n/ServerHub/compare/v2.68.0...v2.69.0
 [2.68.0]: https://github.com/A4rk4n/ServerHub/compare/v2.67.0...v2.68.0
