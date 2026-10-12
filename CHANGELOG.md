@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.72.0] - 2026-10-12
+
+### Added
+
+- Scheduled mod update checks: an opt-in fleet-wide sweep (every 6–168
+  hours, default daily) re-runs the Modrinth update check for every
+  server's installed mods and surfaces findings in the activity feed
+  and over the notification webhook (new `addon-update` event). The
+  sweep only speaks up when the set of available updates actually
+  changes — the same pending update is never re-announced day after
+  day, and a Modrinth outage neither fails the sweep nor tricks it
+  into repeating itself once the API returns. Last-run time and
+  per-server findings persist across panel restarts. New Tools panel
+  with a "Check fleet now" button and
+  `GET`/`PUT`/`POST /api/addon-update-sweep`.
+
 ## [2.71.0] - 2026-10-12
 
 ### Added
@@ -927,7 +943,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.71.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.72.0...HEAD
+[2.72.0]: https://github.com/A4rk4n/ServerHub/compare/v2.71.0...v2.72.0
 [2.71.0]: https://github.com/A4rk4n/ServerHub/compare/v2.70.0...v2.71.0
 [2.70.0]: https://github.com/A4rk4n/ServerHub/compare/v2.69.0...v2.70.0
 [2.69.0]: https://github.com/A4rk4n/ServerHub/compare/v2.68.0...v2.69.0
