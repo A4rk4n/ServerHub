@@ -33,11 +33,13 @@ import yauzl from "yauzl";
 import * as tar from "tar";
 import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, sql } from "drizzle-orm";
 import { db, dbPath, sqliteClient } from "@/db";
-import { activity, backups, consoleLogs, incidents, installationEvents, installationJobs, moderationActions, playerSessions, players, servers, taskRuns, tasks } from "@/db/schema";
+import { activity, addons, backups, consoleLogs, incidents, installationEvents, installationJobs, moderationActions, playerSessions, players, servers, taskRuns, tasks } from "@/db/schema";
 import type { Backup, InstallationJob, Server } from "@/db/schema";
 import { getGame, type InstallerKind } from "./games";
 import { observationKey, reconcileObservationKeys } from "./player-observations";
 import { findMacro, macroSummary, type Macro } from "./macros";
+import { addonSweepDue, findingsSignature, formatAddonUpdateDetail, normalizeAddonSweepConfig, type AddonSweepConfig, type AddonUpdateFinding } from "./addon-update-sweep";
+import { modrinthVersionsUrl, pickLatestVersion, planAddonUpdates, type ModrinthVersionLike } from "./addon-updates";
 import { listBackupEntries, sanitizeArchiveEntryPath } from "./backup-browser";
 import { MAX_VERIFY_FORCED, MAX_VERIFY_PER_SWEEP, VERIFY_SWEEP_EVERY_MS, normalizeVerificationState, pruneVerificationState, selectBackupsToVerify, summarizeVerification, type VerificationRecord, type VerificationState } from "./backup-verification";
 import { inspectBackupArchive } from "./backup-validation";
@@ -229,7 +231,7 @@ async function initializeRuntime() {
   await savePanelSession({ bootAt, lastSeenAt: bootAt });
 
   if (!state.scheduler) {
-    state.scheduler = setInterval(() => { void sweepTasks().catch(() => {}); void sweepAnnouncements().catch(() => {}); void sweepDiskAlerts().catch(() => {}); void sweepLogRetention().catch(() => {}); void sweepUptimeHistory().catch(() => {}); void sweepBackupVerification().catch(() => {}); void sweepPowerSchedule().catch(() => {}); void heartbeatPanelSession().catch(() => {}); }, 15_000);
+    state.scheduler = setInterval(() => { void sweepTasks().catch(() => {}); void sweepAnnouncements().catch(() => {}); void sweepDiskAlerts().catch(() => {}); void sweepLogRetention().catch(() => {}); void sweepUptimeHistory().catch(() => {}); void sweepBackupVerification().catch(() => {}); void sweepPowerSchedule().catch(() => {}); void sweepAddonUpdates().catch(() => {}); void heartbeatPanelSession().catch(() => {}); }, 15_000);
     state.scheduler.unref?.();
   }
 
@@ -2143,6 +2145,118 @@ export async function sweepLogRetention(nowMs = Date.now(), force = false): Prom
   }
   logRetentionState.lastResult = { prunedLines, archivedFiles, sweptAt: nowMs };
   return { prunedLines, archivedFiles };
+}
+
+// ---- scheduled mod-update sweep -------------------------------------------
+// Fleet-wide, opt-in re-run of the per-server "Check for updates" button.
+// lastRunAt and per-server finding signatures persist in a state sidecar so
+// a panel restart neither re-hammers Modrinth nor repeats yesterday's
+// notification about the same pending update.
+
+type AddonSweepState = {
+  lastRunAt: number;
+  /** serverId → findingsSignature of the updates last notified about. */
+  signatures: Record<string, string>;
+  lastResult: { checkedServers: number; checkedAddons: number; updatesFound: number; sweptAt: number } | null;
+};
+
+function addonSweepConfigFile() { return path.join(appDataDir(), "addon-update-sweep.json"); }
+function addonSweepStateFile() { return path.join(appDataDir(), "addon-update-state.json"); }
+
+export async function readAddonSweepConfig(): Promise<AddonSweepConfig> {
+  try {
+    return normalizeAddonSweepConfig(JSON.parse(await fsp.readFile(addonSweepConfigFile(), "utf8")));
+  } catch { return normalizeAddonSweepConfig(undefined); }
+}
+
+export async function writeAddonSweepConfig(config: AddonSweepConfig): Promise<void> {
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(addonSweepConfigFile(), JSON.stringify(config, null, 2), "utf8");
+}
+
+async function loadAddonSweepState(): Promise<AddonSweepState> {
+  try {
+    const raw = JSON.parse(await fsp.readFile(addonSweepStateFile(), "utf8")) as Partial<AddonSweepState>;
+    return {
+      lastRunAt: typeof raw.lastRunAt === "number" && raw.lastRunAt > 0 ? raw.lastRunAt : 0,
+      signatures: typeof raw.signatures === "object" && raw.signatures !== null ? (raw.signatures as Record<string, string>) : {},
+      lastResult: raw.lastResult ?? null,
+    };
+  } catch { return { lastRunAt: 0, signatures: {}, lastResult: null }; }
+}
+
+async function saveAddonSweepState(state: AddonSweepState): Promise<void> {
+  await fsp.mkdir(appDataDir(), { recursive: true });
+  await fsp.writeFile(addonSweepStateFile(), JSON.stringify(state, null, 2), "utf8");
+}
+
+export async function getAddonSweepStatus(): Promise<{ lastRunAt: string | null; lastResult: { checkedServers: number; checkedAddons: number; updatesFound: number; sweptAt: string } | null }> {
+  const state = await loadAddonSweepState();
+  const last = state.lastResult;
+  return {
+    lastRunAt: state.lastRunAt > 0 ? new Date(state.lastRunAt).toISOString() : null,
+    lastResult: last ? { checkedServers: last.checkedServers, checkedAddons: last.checkedAddons, updatesFound: last.updatesFound, sweptAt: new Date(last.sweptAt).toISOString() } : null,
+  };
+}
+
+/** Scheduler-tick sweep; force=true is the "Check fleet now" button and
+ *  bypasses both the enabled flag and the interval. */
+export async function sweepAddonUpdates(nowMs = Date.now(), force = false): Promise<{ checkedServers: number; checkedAddons: number; updatesFound: number; skipped: boolean }> {
+  const config = await readAddonSweepConfig();
+  const state = await loadAddonSweepState();
+  if (!force && !addonSweepDue(state.lastRunAt, nowMs, config)) {
+    return { checkedServers: 0, checkedAddons: 0, updatesFound: 0, skipped: true };
+  }
+  state.lastRunAt = nowMs;
+  const base = process.env.SERVERHUB_MODRINTH_BASE ?? "https://api.modrinth.com/v2";
+  const headers = { "User-Agent": "ServerHub/1.0 (local desktop server manager)" };
+  const fleet = await db.select().from(servers);
+  let checkedServers = 0;
+  let checkedAddons = 0;
+  let updatesFound = 0;
+  for (const server of fleet) {
+    const installed = await db.select().from(addons).where(eq(addons.serverId, server.id));
+    if (!installed.some((a) => a.projectId)) continue;
+    checkedServers += 1;
+    checkedAddons += installed.length;
+    const latestByProject: Record<string, { versionNumber: string } | null> = {};
+    for (const addon of installed) {
+      if (!addon.projectId || addon.projectId in latestByProject) continue;
+      try {
+        const response = await fetch(modrinthVersionsUrl(base, addon.projectId, server.version), { headers, cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const latest = pickLatestVersion((await response.json()) as ModrinthVersionLike[]);
+        latestByProject[addon.projectId] = latest ? { versionNumber: latest.versionNumber } : null;
+      } catch {
+        // Unreachable project → "unknown" for its addons; never fails the sweep.
+        latestByProject[addon.projectId] = null;
+      }
+    }
+    const checks = planAddonUpdates(installed, latestByProject);
+    const findings: AddonUpdateFinding[] = checks
+      .filter((c) => c.status === "update" && c.latest !== null)
+      .map((c) => ({ name: c.name, installed: c.installed, latest: c.latest as string }));
+    updatesFound += findings.length;
+    const signature = findingsSignature(findings);
+    const key = String(server.id);
+    if (findings.length === 0) {
+      // Clear the "already notified" marker only on a positive all-clear:
+      // an unreachable Modrinth (every check unknown) says nothing about
+      // whether yesterday's pending update was applied, and clearing on an
+      // outage would re-notify the same update once the API returns.
+      if (checks.some((c) => c.status === "current" || c.status === "update")) delete state.signatures[key];
+      continue;
+    }
+    if (signature !== (state.signatures[key] ?? "")) {
+      state.signatures[key] = signature;
+      const detail = formatAddonUpdateDetail(findings);
+      await act(server.id, "addon", `${findings.length} mod update${findings.length === 1 ? "" : "s"} available: ${detail}`).catch(() => {});
+      void notify({ kind: "addon-update", serverName: server.name, detail });
+    }
+  }
+  state.lastResult = { checkedServers, checkedAddons, updatesFound, sweptAt: nowMs };
+  await saveAddonSweepState(state);
+  return { checkedServers, checkedAddons, updatesFound, skipped: false };
 }
 
 // ---- disk-space alerts ---------------------------------------------------

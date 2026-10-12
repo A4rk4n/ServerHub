@@ -23,6 +23,7 @@ export type NotificationEventKind =
   | "backup-corrupt"
   | "disk-low"
   | "digest"
+  | "addon-update"
   | "test";
 
 export type NotificationEvent = { kind: NotificationEventKind; serverName: string; detail?: string };
@@ -110,6 +111,7 @@ const EVENT_TEXT: Record<NotificationEventKind, (name: string, detail: string) =
   "backup-corrupt": (name, detail) => `🧨 Backup verification FAILED on **${name}**${detail ? `: ${detail}` : ""}.`,
   "disk-low": (name, detail) => `💽 **${name}**: disk space is low${detail ? ` — ${detail}` : ""}.`,
   digest: (_name, detail) => detail,
+  "addon-update": (name, detail) => `🧩 **${name}**: mod updates available${detail ? ` — ${detail}` : ""}.`,
   test: () => "👋 Test notification — Server Hub webhooks are working.",
 };
 

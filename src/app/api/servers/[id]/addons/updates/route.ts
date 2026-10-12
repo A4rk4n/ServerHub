@@ -8,7 +8,7 @@ import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { addons, servers } from "@/db/schema";
-import { pickLatestVersion, planAddonUpdates, type ModrinthVersionLike } from "@/lib/addon-updates";
+import { modrinthVersionsUrl, pickLatestVersion, planAddonUpdates, type ModrinthVersionLike } from "@/lib/addon-updates";
 import { act } from "@/lib/runtime";
 import { safePath, serverDir } from "@/lib/storage";
 
@@ -19,9 +19,7 @@ const BASE = process.env.SERVERHUB_MODRINTH_BASE ?? "https://api.modrinth.com/v2
 const headers = { "User-Agent": "ServerHub/1.0 (local desktop server manager)" };
 
 async function latestFor(projectId: string, gameVersion: string): Promise<ReturnType<typeof pickLatestVersion>> {
-  const loaders = encodeURIComponent(JSON.stringify(["fabric"]));
-  const versions = encodeURIComponent(JSON.stringify([gameVersion]));
-  const response = await fetch(`${BASE}/project/${encodeURIComponent(projectId)}/version?loaders=${loaders}&game_versions=${versions}&featured=true`, { headers, cache: "no-store" });
+  const response = await fetch(modrinthVersionsUrl(BASE, projectId, gameVersion), { headers, cache: "no-store" });
   if (!response.ok) throw new Error(`Modrinth returned HTTP ${response.status}`);
   return pickLatestVersion((await response.json()) as ModrinthVersionLike[]);
 }

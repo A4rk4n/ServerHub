@@ -1,4 +1,5 @@
 import { AccessLogPanel } from "@/components/access-log-panel";
+import { AddonUpdateSweepPanel } from "@/components/addon-update-sweep-panel";
 import { BackupMirrorPanel } from "@/components/backup-mirror-panel";
 import { NotificationsPanel } from "@/components/notifications-panel";
 import { DiskAlertsPanel } from "@/components/disk-alerts-panel";
@@ -18,6 +19,7 @@ export default function ToolsPage() {
       <DiskAlertsPanel />
       <BackupVerificationPanel />
       <LogRetentionPanel />
+      <AddonUpdateSweepPanel />
       <PanelSettingsPanel />
       <BackupMirrorPanel />
       <StatusPagePanel />

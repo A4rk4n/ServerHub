@@ -45,6 +45,15 @@ export function compareAddonVersions(installed: string, latest: string): AddonUp
   return b.tail > a.tail ? "update" : "current";
 }
 
+/** Version-list URL shared by the manual check route and the scheduled
+ *  sweep: Fabric loader, pinned to the server's game version, featured
+ *  releases only. */
+export function modrinthVersionsUrl(base: string, projectId: string, gameVersion: string): string {
+  const loaders = encodeURIComponent(JSON.stringify(["fabric"]));
+  const versions = encodeURIComponent(JSON.stringify([gameVersion]));
+  return `${base}/project/${encodeURIComponent(projectId)}/version?loaders=${loaders}&game_versions=${versions}&featured=true`;
+}
+
 export type ModrinthVersionLike = {
   id: string;
   version_number: string;
