@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.70.0] - 2026-10-12
+
+### Added
+
+- Backup-vs-live diff: the backup browser gains a "Diff" button next
+  to every text file — before restoring a single file, see exactly
+  what changed since that backup was taken. The archived copy is the
+  "before" side and the live file the "after" side, so added lines
+  are what the live file gained since the backup and removed lines
+  are what restoring would bring back. A deleted live file is a
+  first-class answer ("restoring would bring it back"), and an
+  unchanged file says so instead of showing an empty diff.
+- New `GET /api/servers/:id/backups/:bid/diff?path=…` reusing the
+  config-editor diff engine: archive paths are sanitized, the live
+  path is pinned inside the server directory, binary files are
+  rejected as text diffs (415), and both sides are capped at the
+  preview byte limit. Single-file restore itself already shipped in
+  v2.33.0 — this completes the restore decision rather than
+  duplicating it.
+
 ## [2.69.0] - 2026-10-12
 
 ### Added
@@ -887,7 +907,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.69.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.70.0...HEAD
+[2.70.0]: https://github.com/A4rk4n/ServerHub/compare/v2.69.0...v2.70.0
 [2.69.0]: https://github.com/A4rk4n/ServerHub/compare/v2.68.0...v2.69.0
 [2.68.0]: https://github.com/A4rk4n/ServerHub/compare/v2.67.0...v2.68.0
 [2.67.0]: https://github.com/A4rk4n/ServerHub/compare/v2.66.0...v2.67.0
