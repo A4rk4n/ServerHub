@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { servers } from "@/db/schema";
 import { getGame } from "@/lib/games";
 import { isMinecraftJava } from "@/lib/roster";
+import { BanlistManager } from "@/components/banlist-manager";
 import { PlayersManager } from "@/components/players-manager";
 import { RosterManager } from "@/components/roster-manager";
 
@@ -17,6 +18,7 @@ export default async function PlayersPage({ params }: { params: Promise<{ id: st
   return (
     <div className="space-y-4">
       {isMinecraftJava(s.gameId) && <RosterManager serverId={s.id} accent={g.accent} />}
+      {isMinecraftJava(s.gameId) && <BanlistManager serverId={s.id} accent={g.accent} />}
       <PlayersManager serverId={s.id} accent={g.accent} />
     </div>
   );

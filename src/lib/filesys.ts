@@ -26,7 +26,7 @@ export function isEditable(filePath: string): boolean {
   let name = path.basename(filePath).toLowerCase();
   // Safety copies made by the config editor stay readable/restorable.
   if (isSafetyCopy(name)) name = name.replace(SAFETY_COPY_PATTERN, "");
-  if (["eula.txt", "whitelist.json", "ops.json", "banned-players.json"].includes(name)) return true;
+  if (["eula.txt", "whitelist.json", "ops.json", "banned-players.json", "banned-ips.json"].includes(name)) return true;
   return EDITABLE_EXT.has(name.split(".").pop() || "");
 }
 
