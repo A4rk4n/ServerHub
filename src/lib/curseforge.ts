@@ -41,7 +41,23 @@ export type CurseforgeFileLike = {
   fileName: string;
   downloadUrl?: string | null;
   hashes?: { value: string; algo: number }[];
+  dependencies?: { modId: number; relationType: number }[];
 };
+
+// Relation types: 1 embedded, 2 optional, 3 REQUIRED, 4 tool,
+// 5 incompatible, 6 include. Only 3 blocks a server from booting.
+const CF_RELATION_REQUIRED = 3;
+
+/** Mod ids this file cannot run without (deduplicated, order kept). */
+export function requiredDependencyIds(file: CurseforgeFileLike): number[] {
+  const ids: number[] = [];
+  for (const dependency of file.dependencies ?? []) {
+    if (dependency?.relationType !== CF_RELATION_REQUIRED) continue;
+    if (typeof dependency.modId !== "number" || !Number.isInteger(dependency.modId)) continue;
+    if (!ids.includes(dependency.modId)) ids.push(dependency.modId);
+  }
+  return ids;
+}
 
 /** SHA-1 is the strongest digest CurseForge publishes (algo 1). */
 export function cfSha1(file: CurseforgeFileLike): string | undefined {
@@ -62,7 +78,7 @@ export function versionFromFileName(fileName: string): string {
  */
 export function pickLatestCurseforgeFile(
   files: CurseforgeFileLike[]
-): { fileId: number; versionNumber: string; url: string | null; filename: string; sha1?: string } | null {
+): { fileId: number; versionNumber: string; url: string | null; filename: string; sha1?: string; requiredDependencies: number[] } | null {
   let newest: CurseforgeFileLike | null = null;
   for (const file of files) {
     if (!file || typeof file.id !== "number" || typeof file.fileName !== "string") continue;
@@ -75,6 +91,7 @@ export function pickLatestCurseforgeFile(
     url: newest.downloadUrl ?? null,
     filename: newest.fileName,
     sha1: cfSha1(newest),
+    requiredDependencies: requiredDependencyIds(newest),
   };
 }
 

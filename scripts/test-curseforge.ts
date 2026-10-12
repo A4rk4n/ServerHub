@@ -14,6 +14,7 @@ import {
   maskApiKey,
   normalizeCurseforgeKey,
   pickLatestCurseforgeFile,
+  requiredDependencyIds,
   versionFromFileName,
 } from "../src/lib/curseforge";
 
@@ -73,11 +74,32 @@ test("isCurseforgeAddon routes by source prefix", () => {
   assert.equal(isCurseforgeAddon("Manual upload"), false);
 });
 
+test("requiredDependencyIds keeps only relationType 3, deduplicated", () => {
+  const file = {
+    id: 1,
+    fileName: "coolmod-2.1.0.jar",
+    dependencies: [
+      { modId: 888, relationType: 3 },
+      { modId: 999, relationType: 2 }, // optional — never forced
+      { modId: 888, relationType: 3 }, // duplicate
+      { modId: 555, relationType: 5 }, // incompatible — certainly not
+      { modId: Number.NaN, relationType: 3 }, // malformed
+      { modId: 777, relationType: 3 },
+    ],
+  };
+  assert.deepEqual(requiredDependencyIds(file), [888, 777]);
+  assert.deepEqual(requiredDependencyIds({ id: 1, fileName: "x.jar" }), [], "no dependency array means no requirements");
+  const latest = pickLatestCurseforgeFile([file]);
+  assert.deepEqual(latest?.requiredDependencies, [888, 777], "the picked file carries its requirements");
+});
+
 test("wiring pins: search/install branch, update route, sweep, key sidecar, UI", () => {
   const addonsRoute = fs.readFileSync("src/app/api/servers/[id]/addons/route.ts", "utf8");
   assert.ok(addonsRoute.includes('params.get("source") === "curseforge"'), "search branches on ?source=curseforge");
   assert.ok(addonsRoute.includes('"x-api-key": apiKey'), "CurseForge calls carry the key header");
   assert.ok(addonsRoute.includes("disabled third-party downloads"), "denied distribution gets a human explanation");
+  assert.ok(addonsRoute.includes("latest.requiredDependencies") && addonsRoute.includes("installCfMod(String(requiredId), true)"), "required dependencies install recursively");
+  assert.ok(addonsRoute.indexOf("installCfMod(String(requiredId), true)") < addonsRoute.indexOf('source: dependency ? "CurseForge dependency" : "CurseForge"'), "dependencies land before the requesting mod");
   const updatesRoute = fs.readFileSync("src/app/api/servers/[id]/addons/updates/route.ts", "utf8");
   assert.ok(updatesRoute.includes("curseforgeLatest") && updatesRoute.includes("modrinthLatest"), "update check consults both providers");
   assert.ok(updatesRoute.includes("isCurseforgeAddon(addon.source)"), "provider is chosen per addon source");

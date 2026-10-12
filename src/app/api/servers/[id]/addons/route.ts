@@ -139,44 +139,64 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const existing = await db.select().from(addons).where(eq(addons.serverId, server.id));
   if (existing.some((addon) => addon.projectId === projectId)) return NextResponse.json({ error: "Already installed" }, { status: 409 });
 
-  // ---- CurseForge installs: single mod, SHA-1 verified. CurseForge
-  // dependency metadata lacks pinned files, so unlike Modrinth, required
-  // dependencies are reported rather than auto-installed.
+  // ---- CurseForge installs: SHA-1 verified, with required dependencies
+  // resolved recursively (relationType 3) exactly like the Modrinth path —
+  // a mod without its required libraries is a server that will not boot.
   if (source === "curseforge") {
     if (!/^\d+$/.test(projectId)) return NextResponse.json({ error: "A valid CurseForge mod ID is required" }, { status: 400 });
     const apiKey = await readCurseforgeKey();
     if (!apiKey) return NextResponse.json({ error: "Add your CurseForge API key first" }, { status: 400 });
     const cfHeaders = { ...headers, "x-api-key": apiKey };
     try {
-      const modResponse = await fetch(cfModUrl(curseforgeBase(), projectId), { headers: cfHeaders, cache: "no-store" });
-      if (!modResponse.ok) throw new Error(`CurseForge returned HTTP ${modResponse.status}`);
-      const mod = ((await modResponse.json()) as { data: { id: number; name: string; summary?: string; downloadCount?: number; authors?: { name: string }[] } }).data;
-      const filesResponse = await fetch(cfFilesUrl(curseforgeBase(), projectId, server.version), { headers: cfHeaders, cache: "no-store" });
-      if (!filesResponse.ok) throw new Error(`CurseForge returned HTTP ${filesResponse.status}`);
-      const files = ((await filesResponse.json()) as { data?: CurseforgeFileLike[] }).data ?? [];
-      const latest = pickLatestCurseforgeFile(files);
-      if (!latest) throw new Error(`${mod.name} has no Fabric file compatible with Minecraft ${server.version}`);
-      if (!latest.url) throw new Error(`The author of ${mod.name} has disabled third-party downloads — install it manually from CurseForge`);
-      const cleanName = path.basename(latest.filename);
-      if (!/\.(jar|zip)$/i.test(cleanName)) throw new Error(`${mod.name} supplied an unsupported file type`);
-      const relative = `mods/${cleanName}`;
-      const destination = safePath(serverDir(server), relative);
-      if (!destination) throw new Error("Unsafe mod filename rejected");
-      await downloadMod(latest.url, destination, latest.sha1 ? { algo: "sha1", hex: latest.sha1, label: "CurseForge SHA-1" } : undefined);
-      const [row] = await db.insert(addons).values({
-        serverId: server.id,
-        name: mod.name,
-        version: versionFromFileName(cleanName),
-        author: mod.authors?.[0]?.name ?? "CurseForge",
-        source: "CurseForge",
-        summary: mod.summary ?? "",
-        downloads: mod.downloadCount ?? 0,
-        projectId,
-        filePath: relative,
-      }).returning();
-      await logLine(server.id, "success", "Mods", `Installed ${mod.name} (${cleanName}) from CurseForge; SHA-1 verified.`);
-      await act(server.id, "addon", `${mod.name} installed on ${server.name} (CurseForge)`);
-      return NextResponse.json({ addons: [row] }, { status: 201 });
+      const installedIds = new Set(existing.map((addon) => addon.projectId));
+      const installing = new Set<string>();
+      const added: typeof existing = [];
+
+      async function installCfMod(modId: string, dependency = false) {
+        if (installedIds.has(modId) || installing.has(modId)) return;
+        if (installing.size >= 30) throw new Error("Dependency chain exceeded 30 mods");
+        installing.add(modId);
+        const modResponse = await fetch(cfModUrl(curseforgeBase(), modId), { headers: cfHeaders, cache: "no-store" });
+        if (!modResponse.ok) throw new Error(`CurseForge returned HTTP ${modResponse.status}`);
+        const mod = ((await modResponse.json()) as { data: { id: number; name: string; summary?: string; downloadCount?: number; authors?: { name: string }[] } }).data;
+        const filesResponse = await fetch(cfFilesUrl(curseforgeBase(), modId, server.version), { headers: cfHeaders, cache: "no-store" });
+        if (!filesResponse.ok) throw new Error(`CurseForge returned HTTP ${filesResponse.status}`);
+        const files = ((await filesResponse.json()) as { data?: CurseforgeFileLike[] }).data ?? [];
+        const latest = pickLatestCurseforgeFile(files);
+        if (!latest) throw new Error(`${mod.name} has no Fabric file compatible with Minecraft ${server.version}`);
+        if (!latest.url) throw new Error(`The author of ${mod.name} has disabled third-party downloads — install it manually from CurseForge`);
+
+        // Required libraries land first, so a failure mid-chain can never
+        // leave the requested mod installed without something it needs.
+        for (const requiredId of latest.requiredDependencies) {
+          await installCfMod(String(requiredId), true);
+        }
+
+        const cleanName = path.basename(latest.filename);
+        if (!/\.(jar|zip)$/i.test(cleanName)) throw new Error(`${mod.name} supplied an unsupported file type`);
+        const relative = `mods/${cleanName}`;
+        const destination = safePath(serverDir(server), relative);
+        if (!destination) throw new Error("Unsafe mod filename rejected");
+        await downloadMod(latest.url, destination, latest.sha1 ? { algo: "sha1", hex: latest.sha1, label: "CurseForge SHA-1" } : undefined);
+        const [row] = await db.insert(addons).values({
+          serverId: server.id,
+          name: mod.name,
+          version: versionFromFileName(cleanName),
+          author: mod.authors?.[0]?.name ?? "CurseForge",
+          source: dependency ? "CurseForge dependency" : "CurseForge",
+          summary: mod.summary ?? "",
+          downloads: mod.downloadCount ?? 0,
+          projectId: modId,
+          filePath: relative,
+        }).returning();
+        installedIds.add(modId);
+        added.push(row);
+        await logLine(server.id, "success", "Mods", `Installed ${mod.name} (${cleanName}) from CurseForge${dependency ? " (required dependency)" : ""}; SHA-1 verified.`);
+      }
+
+      await installCfMod(projectId);
+      await act(server.id, "addon", `${added.map((addon) => addon.name).join(", ")} installed on ${server.name} (CurseForge)`);
+      return NextResponse.json({ addons: added }, { status: 201 });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await logLine(server.id, "error", "Mods", `Installation failed: ${message}`);
