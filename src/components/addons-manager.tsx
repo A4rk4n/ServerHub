@@ -1,7 +1,7 @@
 "use client";
 
-import { Download, Puzzle, RefreshCw, Search, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Download, Puzzle, RefreshCw, Search, Trash2, Upload } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Addon } from "@/db/schema";
 import { cn, hexA, timeAgo } from "@/lib/format";
 import { Btn, Empty, Spin, Toggle, inputCls } from "./ui";
@@ -35,6 +35,23 @@ export function AddonsManager({ serverId, accent, label, status }: { serverId: n
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverId, src]);
+
+  const fileInput = useRef<HTMLInputElement | null>(null);
+
+  async function uploadMod(file: File) {
+    setPending("upload");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const r = await fetch(`/api/servers/${serverId}/addons/upload`, { method: "POST", body: form });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) window.alert(j.error ?? "Upload failed");
+      await load();
+      setTab("installed");
+    } finally {
+      setPending(null);
+    }
+  }
 
   async function saveCfKey() {
     setPending("cf-key");
@@ -147,6 +164,20 @@ export function AddonsManager({ serverId, accent, label, status }: { serverId: n
             <RefreshCw size={13} /> Check for updates
           </Btn>
         )}
+        <Btn variant="subtle" loading={pending === "upload"} onClick={() => fileInput.current?.click()}>
+          <Upload size={13} /> Upload .jar
+        </Btn>
+        <input
+          ref={fileInput}
+          type="file"
+          accept=".jar,.zip"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = "";
+            if (f) void uploadMod(f);
+          }}
+        />
         <div className="flex gap-1 rounded-xl border border-candy-200 bg-white p-1">
           {(["installed", "browse"] as const).map((t) => (
             <button
