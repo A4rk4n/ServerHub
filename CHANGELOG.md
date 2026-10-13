@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.83.0] - 2026-10-13
+
+### Changed
+
+- Decluttered the Tools and server-settings pages: panels are now
+  grouped into titled, collapsible sections (Tools: Notifications &
+  alerts, Backups, Housekeeping, Panel & security; settings:
+  Gameplay & worlds, Organization, Automation & protection). Health
+  surfaces and the core settings form stay visible at the top.
+  Collapsed sections are not just hidden — their panels do not mount
+  (and fire no requests) until first opened, so these pages load
+  noticeably lighter; once opened, closing a section preserves its
+  state.
+
 ## [2.82.0] - 2026-10-13
 
 ### Added
@@ -1098,7 +1112,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.82.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.83.0...HEAD
+[2.83.0]: https://github.com/A4rk4n/ServerHub/compare/v2.82.0...v2.83.0
 [2.82.0]: https://github.com/A4rk4n/ServerHub/compare/v2.81.0...v2.82.0
 [2.81.0]: https://github.com/A4rk4n/ServerHub/compare/v2.80.0...v2.81.0
 [2.80.0]: https://github.com/A4rk4n/ServerHub/compare/v2.79.0...v2.80.0
