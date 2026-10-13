@@ -8,7 +8,9 @@ import { test } from "node:test";
 import { GAMES } from "../src/lib/games";
 import {
   activationFor,
+  collectionRequestBody,
   detailsRequestBody,
+  mapCollectionChildren,
   mapPublishedFile,
   parseWorkshopInput,
   steamcmdDownloadCommand,
@@ -70,12 +72,36 @@ test("update verdicts and the games catalog wiring", () => {
   assert.ok(GAMES.every((game) => !game.workshop || game.modSource === WORKSHOP_SOURCE), "workshop games label their mod source");
 });
 
+test("collection payloads: ordered children, nested collections skipped, failures null", () => {
+  const body = collectionRequestBody("424242");
+  assert.equal(body.get("collectioncount"), "1");
+  assert.equal(body.get("publishedfileids[0]"), "424242");
+
+  const children = mapCollectionChildren({
+    result: 1,
+    children: [
+      { publishedfileid: "30", sortorder: 2, filetype: 0 },
+      { publishedfileid: "10", sortorder: 0, filetype: 0 },
+      { publishedfileid: "99", sortorder: 1, filetype: 2 }, // nested collection — skipped
+      { publishedfileid: "oops", sortorder: 3, filetype: 0 },
+      { publishedfileid: "20", sortorder: 1, filetype: 0 },
+    ],
+  });
+  assert.deepEqual(children, ["10", "20", "30"], "collection order kept, junk and nesting dropped");
+  assert.equal(mapCollectionChildren({ result: 9 }), null, "not-a-collection maps to null");
+  assert.deepEqual(mapCollectionChildren({ result: 1 }), [], "a collection with no children is empty, not null");
+});
+
 test("wiring pins: routes, mods page, nav", () => {
   const route = fs.readFileSync("src/app/api/servers/[id]/workshop/route.ts", "utf8");
   assert.ok(route.includes("consumerAppId !== workshop.appId"), "items for other games are refused");
   assert.ok(route.includes("WORKSHOP_SOURCE"), "rows carry the Workshop source marker");
   const updates = fs.readFileSync("src/app/api/servers/[id]/workshop/updates/route.ts", "utf8");
   assert.ok(updates.includes("workshopUpdateStatus"));
+  assert.ok(updates.includes("export async function POST"), "updates can be acknowledged (re-stamp)");
+  const collection = fs.readFileSync("src/app/api/servers/[id]/workshop/collection/route.ts", "utf8");
+  assert.ok(collection.includes("fetchCollectionChildren") && collection.includes("COLLECTION_CAP"), "collection import is capped");
+  assert.ok(collection.includes("consumerAppId !== workshop.appId"), "collection children for other games are skipped");
   const page = fs.readFileSync("src/app/servers/[id]/mods/page.tsx", "utf8");
   assert.ok(page.includes("WorkshopManager") && page.indexOf("g.workshop") < page.indexOf("redirect(`/servers"), "workshop games render the manager instead of redirecting");
   const frame = fs.readFileSync("src/components/server-frame.tsx", "utf8");

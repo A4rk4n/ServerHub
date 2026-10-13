@@ -61,6 +61,43 @@ export function WorkshopManager({ serverId, accent, status }: { serverId: number
     }
   }
 
+  async function importCollection() {
+    setPending("collection");
+    setNote(null);
+    try {
+      const r = await fetch(`/api/servers/${serverId}/workshop/collection`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input }),
+      });
+      const j = (await r.json().catch(() => ({}))) as { added?: string[]; skipped?: { id: string; reason: string }[]; error?: string };
+      if (!r.ok) {
+        setNote(j.error ?? "Could not import the collection");
+      } else {
+        const parts = [`Imported ${j.added?.length ?? 0} item${(j.added?.length ?? 0) === 1 ? "" : "s"}`];
+        if (j.skipped?.length) parts.push(`skipped ${j.skipped.length}`);
+        setNote(parts.join(" · "));
+        setInput("");
+        await load();
+      }
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function markUpdated() {
+    setPending("ack");
+    try {
+      const r = await fetch(`/api/servers/${serverId}/workshop/updates`, { method: "POST" });
+      if (r.ok) {
+        setChecks(null);
+        await load();
+      }
+    } finally {
+      setPending(null);
+    }
+  }
+
   async function toggle(item: Item, enabled: boolean) {
     await fetch(`/api/servers/${serverId}/addons/${item.id}`, {
       method: "PATCH",
@@ -100,6 +137,11 @@ export function WorkshopManager({ serverId, accent, status }: { serverId: number
             <RefreshCw size={13} /> Check for updates
           </Btn>
         )}
+        {checks && Object.values(checks).some((c) => c.status === "update") && (
+          <Btn variant="subtle" loading={pending === "ack"} onClick={() => void markUpdated()}>
+            Mark all updated
+          </Btn>
+        )}
       </div>
 
       <div className="mt-3 flex items-center gap-2">
@@ -112,6 +154,9 @@ export function WorkshopManager({ serverId, accent, status }: { serverId: number
         />
         <Btn variant="primary" accent={accent} disabled={!input.trim()} loading={pending === "add"} onClick={() => void add()}>
           <Plus size={13} /> Track item
+        </Btn>
+        <Btn variant="outline" accent={accent} disabled={!input.trim()} loading={pending === "collection"} onClick={() => void importCollection()}>
+          Import collection
         </Btn>
       </div>
       {note && <p className="mt-2 text-[12px] font-semibold text-red-600">{note}</p>}

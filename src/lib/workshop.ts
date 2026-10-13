@@ -83,6 +83,40 @@ export async function fetchWorkshopDetails(ids: string[]): Promise<Map<string, W
   return out;
 }
 
+/** POST body for GetCollectionDetails (form-encoded, indexed ids). */
+export function collectionRequestBody(collectionId: string): URLSearchParams {
+  const body = new URLSearchParams();
+  body.set("collectioncount", "1");
+  body.set("publishedfileids[0]", collectionId);
+  return body;
+}
+
+/** Ordered child item ids of a collection payload. Nested collections
+ *  (filetype 2) are skipped — one level only, no surprise recursion. */
+export function mapCollectionChildren(raw: Record<string, unknown>): string[] | null {
+  if (Number(raw.result) !== 1) return null;
+  const children = Array.isArray(raw.children) ? (raw.children as Record<string, unknown>[]) : [];
+  return children
+    .filter((child) => Number(child.filetype ?? 0) === 0 && /^\d+$/.test(String(child.publishedfileid ?? "")))
+    .sort((a, b) => Number(a.sortorder ?? 0) - Number(b.sortorder ?? 0))
+    .map((child) => String(child.publishedfileid));
+}
+
+/** Child item ids of a Workshop collection, in collection order.
+ *  null when the id is not a public collection. */
+export async function fetchCollectionChildren(collectionId: string): Promise<string[] | null> {
+  const response = await fetch(`${steamApiBase()}/ISteamRemoteStorage/GetCollectionDetails/v1/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: collectionRequestBody(collectionId).toString(),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`Steam API responded ${response.status}`);
+  const json = (await response.json()) as { response?: { collectiondetails?: Record<string, unknown>[] } };
+  const details = json.response?.collectiondetails?.[0];
+  return details ? mapCollectionChildren(details) : null;
+}
+
 /** The SteamCMD one-liner that downloads an item's content. */
 export function steamcmdDownloadCommand(workshopAppId: number, fileId: string): string {
   return `steamcmd +login anonymous +workshop_download_item ${workshopAppId} ${fileId} +quit`;
