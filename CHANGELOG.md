@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.84.1] - 2026-10-13
+
+### Fixed
+
+- "LAN works but friends can't connect" on RuneScape: Dragonwilds
+  (reported): the Connection doctor now knows title-specific rules.
+  For Dragonwilds it spells out the two quirks the generic checklist
+  misses — the router forward must use the SAME external and internal
+  UDP port (asymmetric forwards kick joining players back to the
+  title screen with nothing in the log), and players should join via
+  the in-game "Custom IP address" option (LAN players with the LAN
+  address, internet players with the public address; needing the LAN
+  address at home is normal because home routers don't hairpin). ARK
+  servers now also get a reminder to forward the UDP 27015 query port
+  alongside the game port. docs/TROUBLESHOOTING.md gained a dedicated
+  Dragonwilds external-connection section.
+
 ## [2.84.0] - 2026-10-13
 
 ### Added
@@ -1128,7 +1145,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.84.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.84.1...HEAD
+[2.84.1]: https://github.com/A4rk4n/ServerHub/compare/v2.84.0...v2.84.1
 [2.84.0]: https://github.com/A4rk4n/ServerHub/compare/v2.83.0...v2.84.0
 [2.83.0]: https://github.com/A4rk4n/ServerHub/compare/v2.82.0...v2.83.0
 [2.82.0]: https://github.com/A4rk4n/ServerHub/compare/v2.81.0...v2.82.0
