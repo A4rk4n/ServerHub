@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.84.2] - 2026-10-13
+
+### Fixed
+
+- SteamCMD installations failing with "Installer exited with code 8 …
+  App state is 0xN after update job" (reported during a Dragonwilds
+  install): this failure class is now diagnosed as recoverable. Before
+  the next retry, Server Hub clears the stale Steam update state in
+  the install directory — partial downloads (steamapps/downloading,
+  steamapps/temp) and the app manifest — and the retry re-runs with
+  `validate`, which re-checks all files and downloads only what is
+  missing. Worlds and existing game files are untouched. Previously
+  the installer gave up immediately even though retry attempts
+  remained.
+
 ## [2.84.1] - 2026-10-13
 
 ### Fixed
@@ -1145,7 +1160,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.84.1...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.84.2...HEAD
+[2.84.2]: https://github.com/A4rk4n/ServerHub/compare/v2.84.1...v2.84.2
 [2.84.1]: https://github.com/A4rk4n/ServerHub/compare/v2.84.0...v2.84.1
 [2.84.0]: https://github.com/A4rk4n/ServerHub/compare/v2.83.0...v2.84.0
 [2.83.0]: https://github.com/A4rk4n/ServerHub/compare/v2.82.0...v2.83.0
