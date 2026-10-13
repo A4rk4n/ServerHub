@@ -26,6 +26,10 @@ export type GameDef = {
   installer: InstallerKind;
   installerLabel: string;
   steamAppId?: number;
+  /** Steam Workshop support: the appid the Workshop content is published
+   *  under (the game client's appid — often different from the dedicated
+   *  server depot in steamAppId) and what the content is called. */
+  workshop?: { appId: number; contentLabel: string };
   requiresPassword?: boolean;
 };
 
@@ -156,6 +160,8 @@ export const GAMES: GameDef[] = [
     installer: "steamcmd",
     installerLabel: "SteamCMD app 376030",
     steamAppId: 376030,
+    workshop: { appId: 346110, contentLabel: "mods" },
+    modSource: "Steam Workshop",
   },
   {
     id: "terraria",
@@ -180,6 +186,8 @@ export const GAMES: GameDef[] = [
     installer: "steamcmd",
     installerLabel: "SteamCMD app 105600",
     steamAppId: 105600,
+    workshop: { appId: 105600, contentLabel: "worlds & resource packs" },
+    modSource: "Steam Workshop",
   },
   {
     id: "rust",

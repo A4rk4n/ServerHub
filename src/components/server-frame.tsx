@@ -9,7 +9,7 @@ import { cn, hexA } from "@/lib/format";
 import { InstallationProgress } from "./installation-progress";
 import { Btn, Modal, StatusPill } from "./ui";
 
-export type FrameGame = { id: string; name: string; short: string; accent: string; art: string; protocol: string; modSource: string | null; supportsMods: boolean };
+export type FrameGame = { id: string; name: string; short: string; accent: string; art: string; protocol: string; modSource: string | null; supportsMods: boolean; workshop?: boolean };
 
 export function ServerFrame({ initial, game, children }: { initial: Server; game: FrameGame; children: React.ReactNode }) {
   const pathname = usePathname();
@@ -85,7 +85,7 @@ export function ServerFrame({ initial, game, children }: { initial: Server; game
     { href: `${base}/connect`, label: "Connect", icon: Globe2 },
     { href: `${base}/backups`, label: "Backups", icon: DatabaseBackup },
     { href: `${base}/tasks`, label: "Scheduler", icon: CalendarClock },
-    ...(game.supportsMods ? [{ href: `${base}/mods`, label: modsLabel, icon: Puzzle }] : []),
+    ...(game.supportsMods || game.workshop ? [{ href: `${base}/mods`, label: modsLabel, icon: Puzzle }] : []),
     { href: `${base}/files`, label: "Files", icon: FolderTree },
     { href: `${base}/diagnostics`, label: "Diagnostics", icon: Activity },
     { href: `${base}/settings`, label: "Settings", icon: Settings },

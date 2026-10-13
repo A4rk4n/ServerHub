@@ -18,7 +18,7 @@ export default async function ServerLayout({ children, params }: { children: Rea
   return (
     <ServerFrame
       initial={plain}
-      game={{ id: g.id, name: g.name, short: g.short, accent: g.accent, art: g.art, protocol: g.protocol, modSource: g.modSource ?? null, supportsMods: g.supportsMods }}
+      game={{ id: g.id, name: g.name, short: g.short, accent: g.accent, art: g.art, protocol: g.protocol, modSource: g.modSource ?? null, supportsMods: g.supportsMods, workshop: Boolean(g.workshop) }}
     >
       {children}
     </ServerFrame>
