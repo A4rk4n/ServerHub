@@ -1427,7 +1427,7 @@ async function executeInstallation(job: InstallationJob, server: Server, signal:
 // Configuration and launch recipes
 // ---------------------------------------------------------------------------
 
-function propertiesText(existing: string, values: Record<string, string | number | boolean>): string {
+export function propertiesText(existing: string, values: Record<string, string | number | boolean>): string {
   const remaining = new Map(Object.entries(values).map(([key, value]) => [key, String(value).replace(/[\r\n]/g, " ")]));
   const lines = existing ? existing.split(/\r?\n/) : [];
   const output = lines.map((line) => {
