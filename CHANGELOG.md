@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.80.0] - 2026-10-13
+
+### Added
+
+- Gameplay settings: a curated, typed form on each Minecraft server's
+  settings page for the server.properties options the panel didn't
+  already manage — game mode, hardcore, flight, the Nether, monster
+  spawning, command blocks, view/simulation distance, spawn protection
+  and idle kick. Values are validated (enums, ranges, types) with the
+  reason named on rejection; keys the panel owns (MOTD, port,
+  difficulty, PvP…) are refused with a pointer to the right form.
+  Saves merge in place — comments, unknown and mod-added keys survive,
+  and a safety copy is kept. New `GET`/`PUT`
+  `/api/servers/:id/game-settings`.
+
 ## [2.79.0] - 2026-10-12
 
 ### Added
@@ -1053,7 +1068,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.79.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.80.0...HEAD
+[2.80.0]: https://github.com/A4rk4n/ServerHub/compare/v2.79.0...v2.80.0
 [2.79.0]: https://github.com/A4rk4n/ServerHub/compare/v2.78.0...v2.79.0
 [2.78.0]: https://github.com/A4rk4n/ServerHub/compare/v2.77.0...v2.78.0
 [2.77.0]: https://github.com/A4rk4n/ServerHub/compare/v2.76.0...v2.77.0
