@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.84.0] - 2026-10-13
+
+### Added
+
+- Workshop collection import: paste a Steam Workshop collection URL
+  (or id) and every item in it is tracked in one go, in collection
+  order — duplicates, items published for a different game, and
+  deleted/private entries are skipped with the reason listed.
+  Nested collections are ignored (one level, no surprise recursion)
+  and imports are capped at 50 items. New
+  `POST /api/servers/:id/workshop/collection`.
+- Workshop update acknowledgement: after re-downloading updated
+  content, "Mark all updated" re-stamps tracked items with Steam's
+  current metadata so the update badges clear. New
+  `POST /api/servers/:id/workshop/updates`.
+
 ## [2.83.0] - 2026-10-13
 
 ### Changed
@@ -1112,7 +1128,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.83.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.84.0...HEAD
+[2.84.0]: https://github.com/A4rk4n/ServerHub/compare/v2.83.0...v2.84.0
 [2.83.0]: https://github.com/A4rk4n/ServerHub/compare/v2.82.0...v2.83.0
 [2.82.0]: https://github.com/A4rk4n/ServerHub/compare/v2.81.0...v2.82.0
 [2.81.0]: https://github.com/A4rk4n/ServerHub/compare/v2.80.0...v2.81.0
