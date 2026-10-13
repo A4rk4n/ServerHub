@@ -10,6 +10,7 @@ import { MaintenancePanel } from "@/components/maintenance-panel";
 import { PowerWindowsPanel } from "@/components/power-windows-panel";
 import { BackupTiersPanel } from "@/components/backup-tiers-panel";
 import { GameSettingsPanel } from "@/components/game-settings-panel";
+import { WorldsPanel } from "@/components/worlds-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,10 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
         }}
       />
       {(s.gameId === "minecraft" || s.gameId === "minecraft-modded") && (
-        <GameSettingsPanel serverId={s.id} accent={g.accent} status={s.status} />
+        <>
+          <GameSettingsPanel serverId={s.id} accent={g.accent} status={s.status} />
+          <WorldsPanel serverId={s.id} accent={g.accent} />
+        </>
       )}
       <TagsEditor serverId={s.id} accent={g.accent} />
       <NotesPanel serverId={s.id} />
