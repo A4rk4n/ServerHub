@@ -9,6 +9,7 @@ import { NotesPanel } from "@/components/notes-panel";
 import { MaintenancePanel } from "@/components/maintenance-panel";
 import { PowerWindowsPanel } from "@/components/power-windows-panel";
 import { BackupTiersPanel } from "@/components/backup-tiers-panel";
+import { CollapseSection } from "@/components/collapse-section";
 import { GameSettingsPanel } from "@/components/game-settings-panel";
 import { WorldsPanel } from "@/components/worlds-panel";
 
@@ -37,16 +38,20 @@ export default async function SettingsPage({ params }: { params: Promise<{ id: s
         }}
       />
       {(s.gameId === "minecraft" || s.gameId === "minecraft-modded") && (
-        <>
+        <CollapseSection title="Gameplay & worlds" subtitle="server.properties options, world folders" defaultOpen>
           <GameSettingsPanel serverId={s.id} accent={g.accent} status={s.status} />
           <WorldsPanel serverId={s.id} accent={g.accent} />
-        </>
+        </CollapseSection>
       )}
-      <TagsEditor serverId={s.id} accent={g.accent} />
-      <NotesPanel serverId={s.id} />
-      <PowerWindowsPanel serverId={s.id} accent={g.accent} />
-      <BackupTiersPanel serverId={s.id} accent={g.accent} />
-      <MaintenancePanel serverId={s.id} accent={g.accent} />
+      <CollapseSection title="Organization" subtitle="Tags, notes">
+        <TagsEditor serverId={s.id} accent={g.accent} />
+        <NotesPanel serverId={s.id} />
+      </CollapseSection>
+      <CollapseSection title="Automation & protection" subtitle="Power windows, backup retention, maintenance mode">
+        <PowerWindowsPanel serverId={s.id} accent={g.accent} />
+        <BackupTiersPanel serverId={s.id} accent={g.accent} />
+        <MaintenancePanel serverId={s.id} accent={g.accent} />
+      </CollapseSection>
     </div>
   );
 }
