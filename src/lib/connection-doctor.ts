@@ -33,6 +33,8 @@ export type DoctorFacts = {
   configuredPublic: string;
   /** Public IP detected from this machine, or null when detection failed. */
   detectedPublic: string | null;
+  /** Game id for title-specific connection quirks (join flow, port rules). */
+  gameId?: string;
 };
 
 export type Verdict = { id: string; level: "ok" | "warn" | "fail"; title: string; advice: string };
@@ -81,5 +83,41 @@ export function buildVerdicts(facts: DoctorFacts): Verdict[] {
   verdicts.push({ id: "forward", level: "warn", title: `Forward ${forward} on your router`, advice: `The rule must be ${proto} (TCP-only rules silently fail for ${proto} games) and must point at ${facts.bindAddress}. Give this machine a DHCP reservation so the rule never goes stale.` });
   verdicts.push({ id: "hairpin", level: "warn", title: "Test from OUTSIDE your network", advice: "Most home routers cannot loop a public IP back inside (NAT hairpin). From inside the LAN use the LAN address; have a friend — or your phone on mobile data — test the public one." });
 
+  // 5. Title-specific quirks that generic checks cannot know.
+  verdicts.push(...gameSpecificVerdicts(facts));
+
   return verdicts;
+}
+
+/** Connection rules that are specific to one game's netcode or join flow. */
+export function gameSpecificVerdicts(facts: DoctorFacts): Verdict[] {
+  const publicEndpoint = `${facts.configuredPublic || "<public IP>"}:${facts.port}`;
+  const lanEndpoint = `${facts.bindAddress}:${facts.port}`;
+  if (facts.gameId === "dragonwilds") {
+    return [
+      {
+        id: "dw-port-symmetry",
+        level: "warn",
+        title: "Dragonwilds: the router rule must use the SAME external and internal port",
+        advice: `Forward UDP ${facts.port} → ${facts.port} (identical numbers). An asymmetric forward (e.g. external 9000 → internal ${facts.port}) kicks joining players back to the title screen with nothing in the server log. One UDP port is all the game needs — there is no TCP port to open.`,
+      },
+      {
+        id: "dw-join-method",
+        level: "warn",
+        title: "Dragonwilds: players should join with the in-game “Custom IP address” option",
+        advice: `Select the world in the server browser, tick “Custom IP address”, then: players on YOUR network enter ${lanEndpoint}; players on the internet enter ${publicEndpoint}. Joining straight from the browser list often fails behind home NAT (the game cannot loop your public IP back inside), so needing the LAN address at home is normal — it does not mean the server is broken for your friends.`,
+      },
+    ];
+  }
+  if (facts.gameId === "ark") {
+    return [
+      {
+        id: "ark-query-port",
+        level: "warn",
+        title: "ARK: forward the query port too",
+        advice: `Besides UDP ${facts.port}, forward UDP 27015 (Steam query) to ${facts.bindAddress}. The server browser, Steam favourites and most “open <ip>” joins go through the query port — with only the game port open the server exists but nobody can find or join it.`,
+      },
+    ];
+  }
+  return [];
 }

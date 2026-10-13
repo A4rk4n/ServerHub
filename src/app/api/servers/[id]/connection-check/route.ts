@@ -25,6 +25,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     protocol: game.protocol,
     configuredPublic: server.publicAddress,
     detectedPublic,
+    gameId: server.gameId,
   };
   return NextResponse.json({ facts, verdicts: buildVerdicts(facts) });
 }

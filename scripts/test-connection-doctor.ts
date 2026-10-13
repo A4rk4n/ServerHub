@@ -86,6 +86,30 @@ test("probePortBound tells a bound UDP port from a free one", async () => {
   }
 });
 
+test("game-specific verdicts: Dragonwilds port symmetry + join method, ARK query port", () => {
+  const base = {
+    serverStatus: "online", portBound: true, bindAddress: "192.168.1.210", port: 7777,
+    protocol: "UDP", configuredPublic: "185.83.148.20", detectedPublic: "185.83.148.20",
+  };
+  const dragonwilds = buildVerdicts({ ...base, gameId: "dragonwilds" });
+  const symmetry = dragonwilds.find((v) => v.id === "dw-port-symmetry");
+  assert.ok(symmetry, "Dragonwilds gets the symmetric-port rule");
+  assert.ok(symmetry.advice.includes("UDP 7777 → 7777"), "the exact forward is spelled out");
+  assert.ok(symmetry.advice.includes("title screen"), "names the silent-kick symptom of an asymmetric forward");
+  const join = dragonwilds.find((v) => v.id === "dw-join-method");
+  assert.ok(join, "Dragonwilds gets the Custom IP join guidance");
+  assert.ok(join.advice.includes("192.168.1.210:7777") && join.advice.includes("185.83.148.20:7777"), "both endpoints are given verbatim");
+  assert.ok(join.advice.includes("does not mean the server is broken"), "LAN-address-at-home is explained as normal");
+
+  const ark = buildVerdicts({ ...base, gameId: "ark" });
+  const query = ark.find((v) => v.id === "ark-query-port");
+  assert.ok(query, "ARK gets the query-port rule");
+  assert.ok(query.advice.includes("27015"));
+
+  assert.equal(buildVerdicts({ ...base, gameId: "minecraft" }).filter((v) => v.id.startsWith("dw-") || v.id.startsWith("ark-")).length, 0, "other games get no foreign quirks");
+  assert.equal(buildVerdicts(base).filter((v) => v.id.startsWith("dw-")).length, 0, "no gameId → no game verdicts");
+});
+
 test("wiring is pinned: route probes both facts, UI section exists", () => {
   const route = readFileSync("src/app/api/servers/[id]/connection-check/route.ts", "utf8");
   assert.ok(route.includes("probePortBound(game.protocol, server.bindAddress, server.port)"));
