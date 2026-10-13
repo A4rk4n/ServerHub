@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.81.0] - 2026-10-13
+
+### Added
+
+- Steam Workshop integration for games whose servers run Workshop
+  content — ARK: Survival Evolved (mods) and Terraria (worlds &
+  resource packs) to start. Paste a Workshop URL or item id on the new
+  Workshop tab: ServerHub fetches live metadata from Steam's public
+  API (title, subscribers, last update — no API key needed), refuses
+  items published for a different game, tracks the item, and checks
+  for updates against Steam's `time_updated` on demand. Each item
+  carries a copyable SteamCMD download one-liner, and an activation
+  panel generates the game's config (`ActiveMods=` for ARK, rebuilt
+  live from the enabled toggles) with placement instructions. New
+  `GET`/`POST` `/api/servers/:id/workshop` and
+  `GET /api/servers/:id/workshop/updates`; the Steam API base is
+  overridable via `SERVERHUB_STEAM_API_BASE`.
+
 ## [2.80.0] - 2026-10-13
 
 ### Added
@@ -1068,7 +1086,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.80.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.81.0...HEAD
+[2.81.0]: https://github.com/A4rk4n/ServerHub/compare/v2.80.0...v2.81.0
 [2.80.0]: https://github.com/A4rk4n/ServerHub/compare/v2.79.0...v2.80.0
 [2.79.0]: https://github.com/A4rk4n/ServerHub/compare/v2.78.0...v2.79.0
 [2.78.0]: https://github.com/A4rk4n/ServerHub/compare/v2.77.0...v2.78.0
