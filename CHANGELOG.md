@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.82.0] - 2026-10-13
+
+### Added
+
+- World manager: a Worlds card on Minecraft Java servers' settings
+  pages listing every world folder found in the server directory
+  (a top-level folder with level.dat) with size and last-played time.
+  Switch the active world with one click (level-name is rewritten,
+  applies on the next start) or delete old worlds — the active world
+  and any world on a running server are protected, and deletion is
+  traversal-safe. New `GET`/`DELETE` `/api/servers/:id/worlds`.
+
 ## [2.81.0] - 2026-10-13
 
 ### Added
@@ -1086,7 +1098,8 @@ Repository accuracy and dependency hygiene. Infrastructure-only release with no 
 - First-run onboarding wizard and server configuration templates.
 - Dedicated game server LAN address binding (`192.168.1.210`).
 
-[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.81.0...HEAD
+[Unreleased]: https://github.com/A4rk4n/ServerHub/compare/v2.82.0...HEAD
+[2.82.0]: https://github.com/A4rk4n/ServerHub/compare/v2.81.0...v2.82.0
 [2.81.0]: https://github.com/A4rk4n/ServerHub/compare/v2.80.0...v2.81.0
 [2.80.0]: https://github.com/A4rk4n/ServerHub/compare/v2.79.0...v2.80.0
 [2.79.0]: https://github.com/A4rk4n/ServerHub/compare/v2.78.0...v2.79.0
