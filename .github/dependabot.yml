@@ -11,6 +11,16 @@ updates:
       dependencies:
         patterns:
           - "*"
+    ignore:
+      # typescript majors >5 break npm ci: @typescript-eslint/parser pins
+      # peer typescript ">=4.8.4 <6.1.0". Lift once typescript-eslint
+      # supports the new major.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # @types/node must track the pinned Node 24 runtime line
+      # (.node-version / engines), not the newest Node major.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

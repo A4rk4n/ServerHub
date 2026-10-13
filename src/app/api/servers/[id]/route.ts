@@ -7,7 +7,9 @@ import { db } from "@/db";
 import { addons, backups, consoleLogs, files, installationEvents, installationJobs, players, servers, tasks } from "@/db/schema";
 import { protectAndVerify } from "@/lib/credential-vault";
 import { getGame } from "@/lib/games";
-import { act, cancelInstallation, ensureRuntimeInitialized, cancelPendingRestart, killFlow, logLine, metricsFor, writeServerConfig } from "@/lib/runtime";
+import { act, applyBackupRetention, cancelInstallation, ensureRuntimeInitialized, cancelPendingRestart, killFlow, logLine, metricsFor, writeServerConfig } from "@/lib/runtime";
+import { clampRetentionCount, clampRetentionDays } from "@/lib/backup-retention";
+import { deleteServerNotes } from "@/lib/server-notes";
 import { backupsDir, serverDir } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
@@ -44,7 +46,8 @@ export async function GET(_req: Request, ctx: Ctx) {
 export async function PATCH(req: Request, ctx: Ctx) {
   const s = await load(ctx);
   if (!s) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const body = (await req.json()) as Record<string, unknown>;
+  const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+  if (body === null || typeof body !== "object") return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   const g = getGame(s.gameId);
   if (body.resetCredentials === true) {
     await db.update(servers).set({serverPassword:"",adminPassword:"",ownerId:"",updatedAt:new Date()}).where(eq(servers.id,s.id));
@@ -89,6 +92,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
   if (typeof body.restartWindowSec === "number" && Number.isFinite(body.restartWindowSec)) { patch.restartWindowSec = Math.min(3600, Math.max(30, Math.round(body.restartWindowSec))); changes.push("restart window"); }
   if (typeof body.autoBackupBeforeUpdate === "boolean") { patch.autoBackupBeforeUpdate = body.autoBackupBeforeUpdate; changes.push("update backup policy"); }
   if (typeof body.updateBackupRetention === "number" && Number.isFinite(body.updateBackupRetention)) { patch.updateBackupRetention = Math.min(20, Math.max(1, Math.round(body.updateBackupRetention))); changes.push("update backup retention"); }
+  if (typeof body.backupRetentionCount === "number" && Number.isFinite(body.backupRetentionCount)) { patch.backupRetentionCount = clampRetentionCount(body.backupRetentionCount); changes.push("backup retention count"); }
+  if (typeof body.backupRetentionDays === "number" && Number.isFinite(body.backupRetentionDays)) { patch.backupRetentionDays = clampRetentionDays(body.backupRetentionDays); changes.push("backup retention age"); }
   if (typeof body.publicAddress === "string" && /^(?:[a-z0-9-]+\.)*[a-z0-9-]+$|^(?:\d{1,3}\.){3}\d{1,3}$/i.test(body.publicAddress.trim())) { patch.publicAddress = body.publicAddress.trim(); changes.push("public address"); }
   if (typeof body.bindAddress === "string" && /^(?:\d{1,3}\.){3}\d{1,3}$/.test(body.bindAddress.trim())) { patch.bindAddress = body.bindAddress.trim(); changes.push("bind address"); }
   if (typeof body.readinessTimeoutSec === "number" && Number.isFinite(body.readinessTimeoutSec)) { patch.readinessTimeoutSec = Math.min(300, Math.max(10, Math.round(body.readinessTimeoutSec))); changes.push("readiness timeout"); }
@@ -143,6 +148,9 @@ export async function PATCH(req: Request, ctx: Ctx) {
   }
   const [updated] = await db.update(servers).set(patch).where(eq(servers.id, s.id)).returning();
   if (body.autoRestart === false && await cancelPendingRestart(s.id, "Settings")) updated.status = "offline";
+  // Tightened retention limits take effect immediately instead of waiting
+  // for the next backup to complete.
+  if ("backupRetentionCount" in patch || "backupRetentionDays" in patch) await applyBackupRetention(s.id).catch(() => {});
   if (changes.length) {
     await writeServerConfig(updated).catch(async (error) => logLine(s.id, "warn", "Config", `Could not write managed config: ${String(error)}`));
     await logLine(s.id, "system", "Panel", `Configuration updated (${changes.join(", ")})${s.status === "online" ? " — restart required to apply" : ""}`);
@@ -180,6 +188,7 @@ export async function DELETE(_req: Request, ctx: Ctx) {
   await db.delete(installationEvents).where(eq(installationEvents.serverId, s.id));
   await db.delete(installationJobs).where(eq(installationJobs.serverId, s.id));
   await db.delete(servers).where(eq(servers.id, s.id));
+  await deleteServerNotes(s.id).catch(() => {});
   await act(null, "server", `Server "${s.name}" was permanently deleted`);
   return NextResponse.json({ ok: true });
 }

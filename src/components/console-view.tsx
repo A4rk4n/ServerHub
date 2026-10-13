@@ -7,20 +7,27 @@ import {
   ChevronRight,
   Copy,
   Cpu,
+  Download,
   Eraser,
   Gauge,
   Globe,
   Heart,
   MemoryStick,
   Pause,
+  Pencil,
   Play,
+  Search,
   ShieldCheck,
+  Trash2,
   Users,
   Wifi,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CONSOLE_FILTERS, type ConsoleFilter, consoleSliceFileName, filterConsoleLines, formatConsoleSlice } from "@/lib/console-filter";
 import { clamp, cn, fmtRam, formatClock, initialAvatarHue } from "@/lib/format";
 import { AreaChart, Meter } from "./charts";
+import { Btn, Field, Modal, inputCls } from "./ui";
 
 type LogLine = { id: number; ts: string; level: string; source: string; message: string };
 type OnlineP = { name: string; ping: number; isOp: boolean };
@@ -33,8 +40,6 @@ const LEVEL_COLOR: Record<string, string> = {
   command: "#8ad8ff",
   system: "#ffa9e0",
 };
-
-const FILTERS = ["all", "info", "warn", "error", "command", "system"] as const;
 
 export function ConsoleView({
   serverId,
@@ -59,8 +64,11 @@ export function ConsoleView({
   const [onlinePlayers, setOnlinePlayers] = useState<OnlineP[]>([]);
   const [lastStartedAt, setLastStartedAt] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]>("all");
+  const [filter, setFilter] = useState<ConsoleFilter>("all");
+  const [search, setSearch] = useState("");
   const [history, setHistory] = useState<number[]>([]);
+  const [chartRange, setChartRange] = useState<"live" | "24h">("live");
+  const [dayHistory, setDayHistory] = useState<{ t: number; cpu: number; ram: number; players: number }[]>([]);
   const [uptime, setUptime] = useState("—");
   const lastId = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -123,6 +131,25 @@ export function ConsoleView({
   }, [serverId]);
 
   useEffect(() => {
+    if (chartRange !== "24h") return;
+    let dead = false;
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/servers/${serverId}/stats/history?hours=24`, { cache: "no-store" });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!dead && Array.isArray(j.points)) setDayHistory(j.points);
+      } catch {}
+    };
+    poll();
+    const t = setInterval(poll, 60_000);
+    return () => {
+      dead = true;
+      clearInterval(t);
+    };
+  }, [serverId, chartRange]);
+
+  useEffect(() => {
     const el = scrollRef.current;
     if (el && pinned.current) el.scrollTop = el.scrollHeight;
   }, [logs]);
@@ -167,8 +194,20 @@ export function ConsoleView({
     });
   }, [cmd, serverId]);
 
-  const filtered = logs.filter((l) => filter === "all" || l.level === filter || (filter === "warn" && l.level === "error"));
+  const filtered = filterConsoleLines(logs, filter, search);
+  const searching = search.trim().length > 0;
   const addr = `127.0.0.1:${port}`;
+
+  const downloadSlice = useCallback(() => {
+    if (filtered.length === 0) return;
+    const blob = new Blob([formatConsoleSlice(filtered)], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = consoleSliceFileName(serverId);
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }, [filtered, serverId]);
 
   return (
     <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
@@ -193,8 +232,8 @@ export function ConsoleView({
             </span>
           </div>
 
-          <div className="flex items-center gap-1 border-b border-white/10 px-3 py-2">
-            {FILTERS.map((f) => (
+          <div className="flex flex-wrap items-center gap-1 border-b border-white/10 px-3 py-2">
+            {CONSOLE_FILTERS.map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
@@ -206,9 +245,34 @@ export function ConsoleView({
                 {f}
               </button>
             ))}
+            <div className="ml-2 flex min-w-[140px] flex-1 items-center gap-1.5 rounded-full bg-white/[0.07] px-2.5 py-1">
+              <Search size={11} className="shrink-0 text-white/35" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setSearch("");
+                }}
+                placeholder="search output…"
+                className="w-full min-w-0 bg-transparent font-mono text-[11px] text-white placeholder:text-white/30 outline-none"
+              />
+              {searching && (
+                <>
+                  <span className="shrink-0 whitespace-nowrap font-mono text-[10px] text-white/45">
+                    {filtered.length} match{filtered.length === 1 ? "" : "es"}
+                  </span>
+                  <button onClick={() => setSearch("")} title="Clear search" className="shrink-0 text-white/40 transition hover:text-white">
+                    <X size={11} />
+                  </button>
+                </>
+              )}
+            </div>
             <div className="ml-auto flex items-center gap-1">
               <ToolBtn title={paused ? "Resume stream" : "Pause stream"} onClick={() => setPaused((p) => !p)}>
                 {paused ? <Play size={13} /> : <Pause size={13} />}
+              </ToolBtn>
+              <ToolBtn title={`Download the ${filtered.length} visible line${filtered.length === 1 ? "" : "s"} as a .log file`} onClick={downloadSlice}>
+                <Download size={13} />
               </ToolBtn>
               <ToolBtn title="Clear view" onClick={() => setLogs([])}>
                 <Eraser size={13} />
@@ -236,7 +300,13 @@ export function ConsoleView({
           >
             {filtered.length === 0 && (
               <p className="py-8 text-center text-white/30">
-                {status === "offline" ? "— server is offline · start it to stream the console —" : "waiting for output…"}
+                {logs.length > 0
+                  ? searching
+                    ? `— no lines match “${search.trim()}”${filter === "all" ? "" : ` in ${filter}`} —`
+                    : `— no ${filter} lines yet —`
+                  : status === "offline"
+                    ? "— server is offline · start it to stream the console —"
+                    : "waiting for output…"}
               </p>
             )}
             {filtered.map((l) => (
@@ -278,6 +348,7 @@ export function ConsoleView({
             {!cmd && <span className="caret-blink h-4 w-2 rounded-sm bg-candy-300" />}
           </div>
         </div>
+        <MacrosBar serverId={serverId} accent={accent} online={status === "online"} />
       </div>
 
       {/* ------------------------------ vitals rail ------------------------------ */}
@@ -307,8 +378,33 @@ export function ConsoleView({
             <MiniStat icon={<Wifi size={11} />} label="uptime" value={uptime} />
           </div>
           <div className="mt-4 border-t border-candy-200/70 pt-3">
-            <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-plum-400">cpu · last 8 min</p>
-            <AreaChart id="rail-cpu" values={history.length ? history : [0]} color={accent} height={72} unit="%" />
+            <div className="mb-1 flex items-center justify-between">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-plum-400">{chartRange === "live" ? "cpu · last 8 min" : "cpu · last 24 h"}</p>
+              <div className="flex gap-1">
+                {(["live", "24h"] as const).map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => setChartRange(r)}
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider transition ${chartRange === r ? "bg-candy-100 text-candy-700" : "text-plum-300 hover:text-plum-500"}`}
+                  >
+                    {r === "live" ? "Live" : "24 h"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {chartRange === "live" ? (
+              <AreaChart id="rail-cpu" values={history.length ? history : [0]} color={accent} height={72} unit="%" />
+            ) : dayHistory.length === 0 ? (
+              <p className="py-4 text-center text-[11px] text-plum-400">No history yet — it builds up while the server runs.</p>
+            ) : (
+              <div className="space-y-3">
+                <AreaChart id="day-cpu" values={dayHistory.map((p) => p.cpu)} color={accent} height={72} unit="%" />
+                <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-plum-400">ram · last 24 h</p>
+                <AreaChart id="day-ram" values={dayHistory.map((p) => p.ram)} color="#c77dff" height={56} unit=" MB" />
+                <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-plum-400">players · last 24 h</p>
+                <AreaChart id="day-players" values={dayHistory.map((p) => p.players)} color="#22c58b" height={56} unit="" />
+              </div>
+            )}
           </div>
         </div>
 
@@ -387,6 +483,135 @@ function MiniStat({ icon, label, value }: { icon: React.ReactNode; label: string
     <div className="rounded-2xl bg-candy-50 px-3 py-2">
       <p className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-plum-400">{icon} {label}</p>
       <p className="mt-0.5 truncate font-mono text-[12.5px] font-semibold text-plum-800">{value}</p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Command macros: saved sequences runnable with one click.
+// ---------------------------------------------------------------------------
+
+type MacroRecord = { id: string; name: string; steps: Array<{ command: string; delaySec: number }> };
+
+function MacrosBar({ serverId, accent, online }: { serverId: number; accent: string; online: boolean }) {
+  const [macros, setMacros] = useState<MacroRecord[] | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editing, setEditing] = useState<MacroRecord | null>(null);
+  const [name, setName] = useState("");
+  const [steps, setSteps] = useState<Array<{ command: string; delaySec: number }>>([{ command: "", delaySec: 0 }]);
+  const [running, setRunning] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/servers/${serverId}/macros`, { cache: "no-store" });
+      const j = await r.json();
+      if (j.macros) setMacros(j.macros);
+    } catch {}
+  }, [serverId]);
+  useEffect(() => { void load(); }, [load]);
+
+  function openEditor(macro: MacroRecord | null) {
+    setEditing(macro);
+    setName(macro?.name ?? "");
+    setSteps(macro ? macro.steps.map((s) => ({ ...s })) : [{ command: "", delaySec: 0 }]);
+    setNote("");
+    setEditorOpen(true);
+  }
+
+  async function save() {
+    setBusy(true);
+    setNote("");
+    try {
+      const r = await fetch(editing ? `/api/servers/${serverId}/macros/${editing.id}` : `/api/servers/${serverId}/macros`, {
+        method: editing ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, steps }),
+      });
+      const j = await r.json();
+      if (!r.ok) return setNote(j.error ?? "Could not save the macro");
+      setEditorOpen(false);
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(macro: MacroRecord) {
+    if (!window.confirm(`Delete macro "${macro.name}"?`)) return;
+    await fetch(`/api/servers/${serverId}/macros/${macro.id}`, { method: "DELETE" });
+    await load();
+  }
+
+  async function run(macro: MacroRecord) {
+    const preview = macro.steps.map((s) => s.command).join("\n");
+    if (!window.confirm(`Run macro "${macro.name}"? These exact commands will be sent:\n\n${preview}`)) return;
+    setRunning(macro.id);
+    try {
+      const r = await fetch(`/api/servers/${serverId}/macros/${macro.id}/run`, { method: "POST" });
+      const j = await r.json();
+      if (!r.ok) window.alert(j.error ?? "Macro failed");
+    } finally {
+      setRunning(null);
+    }
+  }
+
+  if (macros === null) return null;
+  return (
+    <div className="panel mt-4 p-4">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="font-display flex items-center gap-2 text-[13px] font-bold text-plum-900">
+          <ChevronRight size={14} style={{ color: accent }} /> Command macros
+        </h3>
+        <Btn size="sm" variant="subtle" onClick={() => openEditor(null)}>New macro</Btn>
+      </div>
+      {macros.length === 0 ? (
+        <p className="text-xs text-plum-500">Save command sequences — like “announce, wait, save, restart” — and fire them with one click or on a schedule from the Tasks tab.</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {macros.map((macro) => (
+            <span key={macro.id} className="inline-flex items-center overflow-hidden rounded-xl border border-candy-200">
+              <button
+                onClick={() => void run(macro)}
+                disabled={!online || running !== null}
+                title={macro.steps.map((s) => s.command).join(" · ")}
+                className={cn("flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold", online ? "text-plum-800 hover:bg-candy-50" : "cursor-not-allowed text-plum-400")}
+              >
+                <Play size={11} style={{ color: accent }} />
+                {running === macro.id ? "Running…" : `${macro.name} (${macro.steps.length})`}
+              </button>
+              <button onClick={() => openEditor(macro)} className="border-l border-candy-200 px-2 py-1.5 text-plum-500 hover:bg-candy-50" title="Edit"><Pencil size={11} /></button>
+              <button onClick={() => void remove(macro)} className="border-l border-candy-200 px-2 py-1.5 text-plum-500 hover:bg-candy-50" title="Delete"><Trash2 size={11} /></button>
+            </span>
+          ))}
+        </div>
+      )}
+      {!online && macros.length > 0 && <p className="mt-2 text-[10px] text-plum-400">Macros run against the live console — start the server to use them.</p>}
+      {editorOpen && (
+        <Modal open={editorOpen} title={editing ? "Edit macro" : "New macro"} onClose={() => setEditorOpen(false)}>
+          <div className="space-y-3">
+            <Field label="Name"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder="Nightly restart warning" /></Field>
+            <Field label="Steps (commands run in order; the pause waits before the next step)">
+              <div className="space-y-2">
+                {steps.map((step, index) => (
+                  <div key={index} className="flex items-center gap-2">
+                    <input className={cn(inputCls, "flex-1 font-mono")} value={step.command} maxLength={200} placeholder={`Step ${index + 1} — e.g. say Restarting in 30s`} onChange={(e) => setSteps(steps.map((s, i) => (i === index ? { ...s, command: e.target.value } : s)))} />
+                    <input className={cn(inputCls, "w-20")} type="number" min={0} max={120} value={step.delaySec} title="Pause after this step (seconds, 0-120)" onChange={(e) => setSteps(steps.map((s, i) => (i === index ? { ...s, delaySec: Number(e.target.value) } : s)))} />
+                    <button onClick={() => setSteps(steps.filter((_, i) => i !== index))} disabled={steps.length === 1} className="text-plum-400 hover:text-plum-700 disabled:opacity-30"><X size={14} /></button>
+                  </div>
+                ))}
+                {steps.length < 12 && <Btn size="sm" variant="subtle" onClick={() => setSteps([...steps, { command: "", delaySec: 0 }])}>Add step</Btn>}
+              </div>
+            </Field>
+            {note && <p className="text-xs text-red-500">{note}</p>}
+            <div className="flex justify-end gap-2">
+              <Btn variant="subtle" onClick={() => setEditorOpen(false)}>Cancel</Btn>
+              <Btn variant="primary" accent={accent} loading={busy} onClick={() => void save()}>{editing ? "Save changes" : "Create macro"}</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

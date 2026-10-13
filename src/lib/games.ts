@@ -26,6 +26,10 @@ export type GameDef = {
   installer: InstallerKind;
   installerLabel: string;
   steamAppId?: number;
+  /** Steam Workshop support: the appid the Workshop content is published
+   *  under (the game client's appid — often different from the dedicated
+   *  server depot in steamAppId) and what the content is called. */
+  workshop?: { appId: number; contentLabel: string };
   requiresPassword?: boolean;
 };
 
@@ -156,6 +160,8 @@ export const GAMES: GameDef[] = [
     installer: "steamcmd",
     installerLabel: "SteamCMD app 376030",
     steamAppId: 376030,
+    workshop: { appId: 346110, contentLabel: "mods" },
+    modSource: "Steam Workshop",
   },
   {
     id: "terraria",
@@ -180,6 +186,8 @@ export const GAMES: GameDef[] = [
     installer: "steamcmd",
     installerLabel: "SteamCMD app 105600",
     steamAppId: 105600,
+    workshop: { appId: 105600, contentLabel: "worlds & resource packs" },
+    modSource: "Steam Workshop",
   },
   {
     id: "rust",
@@ -205,6 +213,54 @@ export const GAMES: GameDef[] = [
     installer: "steamcmd",
     installerLabel: "SteamCMD app 258550",
     steamAppId: 258550,
+  },
+  {
+    id: "satisfactory",
+    name: "Satisfactory",
+    short: "Satisfactory",
+    tagline: "Official dedicated server installed anonymously through SteamCMD.",
+    art: "",
+    accent: "#f28c3c",
+    accentSoft: "rgba(242,140,60,0.12)",
+    defaultPort: 7777,
+    protocol: "UDP",
+    defaultMemory: 12288,
+    minMemory: 6144,
+    maxMemory: 65536,
+    defaultMaxPlayers: 4,
+    maxPlayersCap: 64,
+    versions: ["latest"],
+    supportsMods: false,
+    difficulty: false,
+    worldLabel: "Session name",
+    installSizeMb: 15000,
+    installer: "steamcmd",
+    installerLabel: "SteamCMD app 1690800",
+    steamAppId: 1690800,
+  },
+  {
+    id: "palworld",
+    name: "Palworld",
+    short: "Palworld",
+    tagline: "Official dedicated server installed anonymously through SteamCMD.",
+    art: "",
+    accent: "#4aa8e0",
+    accentSoft: "rgba(74,168,224,0.12)",
+    defaultPort: 8211,
+    protocol: "UDP",
+    defaultMemory: 16384,
+    minMemory: 8192,
+    maxMemory: 65536,
+    defaultMaxPlayers: 8,
+    maxPlayersCap: 32,
+    versions: ["latest"],
+    supportsMods: false,
+    difficulty: false,
+    worldLabel: "World name",
+    installSizeMb: 9000,
+    installer: "steamcmd",
+    installerLabel: "SteamCMD app 2394010",
+    steamAppId: 2394010,
   },
   {
     id: "dragonwilds",

@@ -26,6 +26,8 @@ The executable is not code-signed with a commercial certificate; Windows SmartSc
 | ARK: Survival Evolved | SteamCMD app `376030` | Official `ShooterGameServer` executable |
 | Terraria | SteamCMD app `105600` | Official Terraria server executable and generated config |
 | Rust | SteamCMD app `258550` | Official `RustDedicated` executable |
+| Satisfactory | SteamCMD app `1690800` | Official `FactoryServer` launcher with `-multihome` LAN binding |
+| Palworld | SteamCMD app `2394010` | Official `PalServer` launcher; managed `PalWorldSettings.ini` (no bind-address flag — listens on all interfaces); graceful save + stop via the official loopback REST API when an admin password is set |
 | Dragonwilds / Hytale | SteamCMD / manual registration | Managed or user-supplied executable with preflight checks and LAN binding |
 | Custom | Manual registration | Any executable, `.bat`, `.cmd`, or shell script in a managed or existing folder |
 
@@ -42,7 +44,7 @@ Publisher availability and anonymous SteamCMD access can change. If a publisher 
 - **Real process metrics:** Resident memory and CPU usage sampled directly from the operating system.
 - **Player observation & queries:** Minecraft and Bedrock join/leave events parsed from live logs; Steam A2S query protocols for player counts, server metadata, and challenge queries.
 - **Filesystem manager:** Browses the real installation tree and atomically edits safe text/config formats. Path traversal and symlink escapes outside the root are strictly rejected.
-- **Checksum-verified backups:** Creates real `.tar.gz` archives, records SHA-256 digests, and validates archives before restore with preview verification.
+- **Checksum-verified backups:** Creates real `.tar.gz` archives, records SHA-256 digests, and validates archives before restore with preview verification. Configurable retention (count and age limits) prunes old completed backups automatically and never removes the active pre-update safety backup.
 - **Credential vault:** Protects server passwords and sensitive tokens using Windows DPAPI (CurrentUser scope) with recoverable migration.
 - **Windows Firewall & Network Center:** Inspects and creates required Windows Defender Firewall rules; displays LAN bind addresses and public NAT endpoints.
 - **Tool Health & repair pipeline:** Monitors managed tool inventory (SteamCMD, Java runtimes), verifies Authenticode digital signatures, and stages non-destructive repairs.
@@ -84,7 +86,7 @@ npm test
 npm audit --omit=dev
 ```
 
-`npm test` runs every suite on Node 24's built-in test runner (`node --test`): test files execute in parallel with per-test timing and a pass/fail summary. Use `npm run test:unit` for everything except the POSIX-only installation-job lifecycle integration, and `npm run test:<suite>` (for example `npm run test:security`) to run a single suite in isolation.
+`npm test` runs every suite on Node 24's built-in test runner (`node --test`): test files execute in parallel with per-test timing and a pass/fail summary. Use `npm run test:unit` for everything except the installation-job lifecycle integration (which runs natively on both Linux and Windows), and `npm run test:<suite>` (for example `npm run test:security`) to run a single suite in isolation.
 
 ### Building the Windows portable package
 

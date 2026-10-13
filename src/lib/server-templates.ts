@@ -2,6 +2,7 @@ export type TemplateSource = {
   gameId:string; version:string; loader:string; memoryMb:number; maxPlayers:number; motd:string; difficulty:string; pvp:boolean;
   bindAddress:string; publicAddress:string; readinessTimeoutSec:number; autoRestart:boolean; maxCrashRestarts:number;
   restartWindowSec:number; autoBackupBeforeUpdate:boolean; updateBackupRetention:number;
+  backupRetentionCount:number; backupRetentionDays:number;
 };
 
 export function templateConfigFromServer(server:TemplateSource){return {
@@ -9,6 +10,7 @@ export function templateConfigFromServer(server:TemplateSource){return {
   difficulty:server.difficulty,pvp:server.pvp,bindAddress:server.bindAddress,publicAddress:server.publicAddress,
   readinessTimeoutSec:server.readinessTimeoutSec,autoRestart:server.autoRestart,maxCrashRestarts:server.maxCrashRestarts,
   restartWindowSec:server.restartWindowSec,autoBackupBeforeUpdate:server.autoBackupBeforeUpdate,updateBackupRetention:server.updateBackupRetention,
+  backupRetentionCount:server.backupRetentionCount,backupRetentionDays:server.backupRetentionDays,
 };}
 
 export function nextFreeServerPort(start:number,usedPorts:readonly number[]){const used=new Set(usedPorts);let candidate=Math.max(1024,Math.round(start));while(candidate<=65535&&used.has(candidate))candidate++;if(candidate>65535)throw new Error("No free server port is available");return candidate;}

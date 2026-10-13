@@ -23,6 +23,8 @@ jobs:
         # bisectable commit instead of an unannounced change under a release.
         os: [ubuntu-26.04, windows-2025]
     runs-on: ${{ matrix.os }}
+    # A hung suite must fail fast instead of consuming the 6-hour default.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v6
@@ -60,13 +62,16 @@ jobs:
             fi
             exit "$status"
           fi
-      # This lifecycle integration relies on POSIX process signals; Windows is
-      # covered by the native portable-package job below.
-      - if: runner.os != 'Windows'
-        run: npm run test:installation-jobs
+      # The lifecycle integration runs natively on both platforms: the
+      # runtime kills process trees with taskkill on Windows and process
+      # groups on POSIX, and the suite's fixtures are platform-neutral. The
+      # portable-package job below additionally covers the packaged Windows
+      # launcher lifecycle.
+      - run: npm run test:installation-jobs
       - run: npm run sbom
   windows-portable:
     runs-on: windows-2025
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v6
@@ -90,6 +95,11 @@ jobs:
           if (Test-Path smoke/ServerHub/resources/server/build) { throw "Recursive build directory packaged" }
           Write-Host "NODE24_SEA_NATIVE_LIFECYCLE_OK"
           Write-Host "FINAL_NATIVE_PACKAGE_INTEGRITY_OK"
+      # Boot the exact server bundle end users receive: wait for /api/health,
+      # probe the catalog, then exercise the native launcher's graceful
+      # shutdown path (serverhub:shutdown) and require a clean exit 0.
+      - name: Boot packaged server and verify graceful shutdown
+        run: node scripts/package-smoke.mjs smoke/ServerHub/resources/server
       - uses: actions/upload-artifact@v6
         with:
           name: ServerHub-Windows-x64
@@ -98,3 +108,30 @@ jobs:
             release/SHA256SUMS
             release/release-manifest.json
             release/serverhub-*-sbom.cdx.json
+  # Cheap documentation and workflow hygiene: Markdown relative links and
+  # anchors must resolve, workflow YAML must parse, and shell scripts must
+  # pass a syntax check. These were previously manual pre-push steps only.
+  docs:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+      - name: Check Markdown relative links and anchors
+        run: node scripts/check-docs.mjs
+      - name: Check release metadata consistency
+        run: node scripts/release-notes.mjs check
+      - name: Validate workflow YAML
+        run: |
+          for f in .github/workflows/*.yml .github/dependabot.yml; do
+            npx --yes js-yaml@4 "$f" > /dev/null
+            echo "parsed: $f"
+          done
+      - name: Shell script syntax check
+        run: |
+          git ls-files '*.sh' | while IFS= read -r f; do
+            bash -n "$f"
+            echo "syntax ok: $f"
+          done

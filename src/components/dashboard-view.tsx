@@ -24,6 +24,7 @@ import { cn, fmtRam, hexA, timeAgo } from "@/lib/format";
 import { AreaChart, Meter, Ring } from "./charts";
 import { ServerCard } from "./server-card";
 import { FirstRunOnboarding } from "./first-run-onboarding";
+import { StartupDigestCard } from "./startup-digest-card";
 import { Btn, Empty } from "./ui";
 
 const ease = [0.22, 1, 0.36, 1] as const;
@@ -56,6 +57,7 @@ export function DashboardView({ initial }: { initial: OverviewData }) {
   return (
     <div className="space-y-6">
       <FirstRunOnboarding hasServers={data.servers.length > 0} />
+      <StartupDigestCard />
       {/* ------------------------------ hero ------------------------------ */}
       <section className="relative overflow-hidden rounded-3xl border border-candy-200">
         <div className="pointer-events-none absolute inset-0">

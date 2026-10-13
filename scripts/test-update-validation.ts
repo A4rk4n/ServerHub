@@ -18,7 +18,7 @@ test("the runtime gates completion on readiness and rolls back failures once", (
 
 test("the schema records validation state at the current migration version", () => {
   const schema = fs.readFileSync("src/db/index.ts", "utf8");
-  assert.ok(schema.includes("SCHEMA_VERSION = 21500"));
+  assert.ok(schema.includes("SCHEMA_VERSION = 21600"));
   assert.ok(schema.includes("update_validation_status"));
   console.log("READINESS_GATED_UPDATE_VALIDATION_OK");
 });

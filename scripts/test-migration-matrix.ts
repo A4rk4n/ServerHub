@@ -28,7 +28,7 @@ for (const version of [2600, 2700]) {
     const result = spawnSync(process.execPath, ["--require", "./scripts/register-better-sqlite3-stub.cjs", "--import", "tsx", "scripts/migration-worker.ts"], { cwd: process.cwd(), env: { ...process.env, SERVERHUB_DB: file }, encoding: "utf8" });
     assert.equal(result.status, 0, `v${version}: ${result.stderr || result.stdout}`);
     const migrated = new DatabaseSync(file);
-    assert.equal((migrated.prepare("SELECT COUNT(*) n FROM schema_migrations WHERE version=21500").get() as { n: number }).n, 1);
+    assert.equal((migrated.prepare("SELECT COUNT(*) n FROM schema_migrations WHERE version=21600").get() as { n: number }).n, 1);
     assert.equal((migrated.prepare("SELECT COUNT(*) n FROM servers").get() as { n: number }).n, 1);
     migrated.close();
   });

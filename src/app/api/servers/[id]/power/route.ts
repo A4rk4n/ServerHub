@@ -11,7 +11,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const num = Number(id);
   const [s] = await db.select().from(servers).where(eq(servers.id, num));
   if (!s) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const { action } = (await req.json()) as { action?: string };
+  const { action } = (await req.json().catch(() => ({}))) as { action?: string };
   switch (action) {
     case "start":
       return NextResponse.json(await startFlow(num));

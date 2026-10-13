@@ -48,6 +48,8 @@ export const servers = sqliteTable("servers", {
   restartWindowSec: integer("restart_window_sec").notNull().default(300),
   autoBackupBeforeUpdate: integer("auto_backup_before_update", { mode: "boolean" }).notNull().default(true),
   updateBackupRetention: integer("update_backup_retention").notNull().default(5),
+  backupRetentionCount: integer("backup_retention_count").notNull().default(0),
+  backupRetentionDays: integer("backup_retention_days").notNull().default(0),
   updateValidationStatus: text("update_validation_status").notNull().default("none"),
   updatePreviousVersion: text("update_previous_version").notNull().default(""),
   updateTargetVersion: text("update_target_version").notNull().default(""),

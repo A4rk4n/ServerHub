@@ -26,9 +26,9 @@ tested bytes without rebuilding.
   npm audit --omit=dev     # must report zero vulnerabilities
   ```
 
-  On Windows, `npm run test:unit` runs everything except the POSIX-only
-  installation-job lifecycle integration; every `npm run test:<suite>` script
-  runs one suite in isolation for focused debugging.
+  The installation-job lifecycle integration runs natively on both Linux
+  and Windows; every `npm run test:<suite>` script runs one suite in
+  isolation for focused debugging.
 
 ## Ship it
 
@@ -44,10 +44,12 @@ tested bytes without rebuilding.
 4. Dispatch the **Promote release** workflow from `main` with the tag and the
    ID of the CI run that built the artifact. It re-verifies provenance,
    checksums, and the embedded build record, and refuses to publish on any
-   mismatch. Leave the draft option enabled, review the draft release, then
-   publish it.
-5. Record artifact size, SHA-256, source commit, SBOM checksum, CI run ID,
-   and download URL in the release notes.
+   mismatch. Release notes are generated from the tagged `CHANGELOG.md`
+   section plus the verified provenance block. Leave the draft option
+   enabled, review the draft release, then publish it.
+5. The generated notes already record artifact size, SHA-256, source commit,
+   and CI run ID; add the SBOM checksum and download URL when reviewing the
+   draft.
 
 ## If something goes wrong
 

@@ -4,6 +4,8 @@ import { db } from "@/db";
 import { servers } from "@/db/schema";
 import { getGame } from "@/lib/games";
 import { TasksManager } from "@/components/tasks-manager";
+import { RestartWarningsPanel } from "@/components/restart-warnings-panel";
+import { AnnouncementsPanel } from "@/components/announcements-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -12,5 +14,11 @@ export default async function TasksPage({ params }: { params: Promise<{ id: stri
   const [s] = await db.select().from(servers).where(eq(servers.id, Number(id)));
   if (!s) notFound();
   const g = getGame(s.gameId);
-  return <TasksManager serverId={s.id} accent={g.accent} />;
+  return (
+    <div className="space-y-4">
+      <TasksManager serverId={s.id} accent={g.accent} />
+      <RestartWarningsPanel serverId={s.id} accent={g.accent} />
+      <AnnouncementsPanel serverId={s.id} accent={g.accent} />
+    </div>
+  );
 }

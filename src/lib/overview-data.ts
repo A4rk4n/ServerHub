@@ -2,6 +2,8 @@ import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { activity, backups, players, servers, tasks } from "@/db/schema";
 import { getGame } from "./games";
+import { readAllServerTags } from "./server-tags";
+import { readAllMaintenance } from "./maintenance";
 import { ensureRuntimeInitialized, metricsFor } from "./runtime";
 
 export type ServerCardData = Awaited<ReturnType<typeof getOverview>>["servers"][number];
@@ -10,6 +12,8 @@ export type OverviewData = Awaited<ReturnType<typeof getOverview>>;
 export async function getOverview() {
   await ensureRuntimeInitialized();
   const rows = await db.select().from(servers);
+  const allTags = await readAllServerTags();
+  const allMaintenance = await readAllMaintenance();
   const cards = [];
   let cpu = 0;
   let ram = 0;
@@ -32,6 +36,8 @@ export async function getOverview() {
       ...s,
       game: { id: g.id, short: g.short, name: g.name, accent: g.accent, art: g.art, protocol: g.protocol },
       live: m ? { cpu: m.cpu, ram: m.ram, players: m.players, tps: m.tps } : null,
+      tags: allTags[String(s.id)] ?? [],
+      maintenance: allMaintenance[String(s.id)]?.enabled ?? false,
     });
   }
   const acts = await db.select().from(activity).orderBy(desc(activity.id)).limit(26);

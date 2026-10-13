@@ -32,12 +32,12 @@ test("a v13 database migrates in place to the current schema version", async () 
 
     const migrated = new DatabaseSync(file);
     const columns = new Set((migrated.prepare("PRAGMA table_info(servers)").all() as { name: string }[]).map((x) => x.name));
-    for (const name of ["auto_restart", "max_crash_restarts", "restart_window_sec", "auto_backup_before_update", "update_backup_retention", "bind_address", "public_address", "readiness_timeout_sec"]) {
+    for (const name of ["auto_restart", "max_crash_restarts", "restart_window_sec", "auto_backup_before_update", "update_backup_retention", "backup_retention_count", "backup_retention_days", "bind_address", "public_address", "readiness_timeout_sec"]) {
       assert.ok(columns.has(name), name);
     }
     assert.equal((migrated.prepare("SELECT COUNT(*) AS n FROM servers").get() as { n: number }).n, 1);
     assert.equal((migrated.prepare("SELECT bind_address FROM servers WHERE id=1").get() as { bind_address: string }).bind_address, "192.168.1.210");
-    assert.equal((migrated.prepare("SELECT COUNT(*) AS n FROM schema_migrations WHERE version=21500").get() as { n: number }).n, 1);
+    assert.equal((migrated.prepare(`SELECT COUNT(*) AS n FROM schema_migrations WHERE version=${serverDb.SCHEMA_VERSION}`).get() as { n: number }).n, 1);
     migrated.close();
     assert.equal((await fsp.readdir(root)).some((name) => name.includes("pre-migration") && name.endsWith(".bak")), true);
     console.log("V13_TO_V215_MIGRATION_OK");
