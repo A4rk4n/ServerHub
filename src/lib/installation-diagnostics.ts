@@ -18,6 +18,12 @@ export function diagnoseInstallationFailure(message: string): InstallationDiagno
     remediation: "Check whether the provider now requires an entitled Steam account or has temporarily withdrawn anonymous server downloads.",
     transient: false,
   };
+  if (/app\s*['"]?\d+['"]?\s*state is 0x[0-9a-f]+ after update job/i.test(message)) return {
+    code: "steam-app-state",
+    summary: "SteamCMD left the app's local update state inconsistent — typically an interrupted download or a stale steamapps manifest from a previous installation.",
+    remediation: "Server Hub clears the stale Steam update state (partial downloads and the app manifest) and revalidates automatically on the next attempt.",
+    transient: true,
+  };
   if (/timed?\s*out|connection (?:reset|failed)|could not connect|content servers? unreachable|http request failed/i.test(message)) return {
     code: "provider-network",
     summary: "The installation provider could not be reached reliably.",

@@ -1029,7 +1029,18 @@ async function runLogged(context: InstallContext, executable: string, args: stri
   });
 }
 
-async function runSteamCmdLogged(context: InstallContext, executable: string, args: string[], cwd: string) {
+/** Remove the pieces of <root>/steamapps that make SteamCMD refuse with
+ *  "state is 0xN after update job": partial downloads and the app manifest.
+ *  Game files (and worlds) stay; the retry runs with `validate`, which
+ *  re-checks everything and re-downloads only what is actually missing. */
+async function clearStaleSteamAppState(root: string, appId: number) {
+  const steamapps = path.join(root, "steamapps");
+  await fsp.rm(path.join(steamapps, "downloading"), { recursive: true, force: true });
+  await fsp.rm(path.join(steamapps, "temp"), { recursive: true, force: true });
+  await fsp.rm(path.join(steamapps, `appmanifest_${appId}.acf`), { force: true });
+}
+
+async function runSteamCmdLogged(context: InstallContext, executable: string, args: string[], cwd: string, steamApp?: { root: string; appId: number }) {
   let recoveryStartedAt = 0;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
@@ -1043,6 +1054,10 @@ async function runSteamCmdLogged(context: InstallContext, executable: string, ar
       const diagnosis = diagnoseInstallationFailure(message);
       const transientProviderFailure = diagnosis?.transient === true;
       if ((!bootstrapRestart && !transientProviderFailure) || attempt === 3) throw error;
+      if (diagnosis?.code === "steam-app-state" && steamApp) {
+        await context.report("recovering", 25, `Clearing the stale Steam update state for app ${steamApp.appId} (partial downloads + manifest) before retrying with validation`, "warn");
+        await clearStaleSteamAppState(steamApp.root, steamApp.appId).catch(() => {});
+      }
       const reason = bootstrapRestart ? "bootstrap-self-update" : (diagnosis?.code ?? "temporary-provider-failure");
       if (!recoveryStartedAt) recoveryStartedAt = Date.now();
       const delaySeconds = bootstrapRestart ? 8 : attempt * 5;
@@ -1082,9 +1097,9 @@ async function installSteam(server: Server, root: string, context: InstallContex
     await runSteamCmdLogged(context, "powershell.exe", [
       "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
       "-Command", command,
-    ], path.dirname(steamcmd));
+    ], path.dirname(steamcmd), { root, appId: game.steamAppId });
   } else {
-    await runSteamCmdLogged(context, steamcmd, steamArgs, path.dirname(steamcmd));
+    await runSteamCmdLogged(context, steamcmd, steamArgs, path.dirname(steamcmd), { root, appId: game.steamAppId });
   }
   await recordSuccessfulToolUse("steamcmd",`Installed or validated Steam app ${game.steamAppId}`);
   if(hostPlatform() === "win32") await recordSuccessfulToolUse("powershell","Launched SteamCMD for a successful managed installation");
